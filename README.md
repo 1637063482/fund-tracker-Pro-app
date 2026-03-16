@@ -79,7 +79,9 @@ npx capacitor-assets generate
 当你完成所有代码修改后，只需将代码推送到 GitHub 主分支，即可触发双端更新：
 
 git add .
+
 git commit -m "feat: update system features"
+
 git push origin main
 
 
