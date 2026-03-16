@@ -34,8 +34,7 @@ Fund Tracker Pro 是一款现代化的个人资产与基金收益追踪应用。
 
 如果你需要在本地重新初始化该项目，或将其打包为 Android 原生应用，请按以下步骤操作：
 
-### 第 0 步：网络代理设置 (必需)
-```bash
+第 0 步：网络代理设置 (必需)
 npm config set proxy [http://127.0.0.1:7890](http://127.0.0.1:7890)
 npm config set https-proxy [http://127.0.0.1:7890](http://127.0.0.1:7890)
 # 若无代理，可使用淘宝镜像：npm config set registry [https://registry.npmmirror.com](https://registry.npmmirror.com)
