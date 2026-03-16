@@ -1,0 +1,22 @@
+{
+  "short_name": "FundTracker",
+  "name": "Fund Tracker Pro 资产管理",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#1e293b",
+  "display": "standalone",
+  "scope": "/",
+  "theme_color": "#1e293b",
+  "description": "专业的个人资产与基金收益追踪中心"
+}
