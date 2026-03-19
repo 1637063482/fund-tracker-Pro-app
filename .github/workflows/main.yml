@@ -15,7 +15,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       # 第 1 步：安装前端项目依赖（下载 node_modules）
       - name: Install Dependencies
