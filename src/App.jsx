@@ -1344,7 +1344,11 @@ export default function App() {
 
     const totalCurrentValue = baseFunds.reduce((sum, f) => sum + f.currentValue, 0);
     if (totalCurrentValue > 0) {
-      globalPreCashFlows.push({ date: new Date().toISOString().split('T')[0], amount: totalCurrentValue });
+      globalPreCashFlows.push({ 
+        date: new Date().toISOString().split('T')[0], 
+        amount: totalCurrentValue,
+        isTerminal: true // [修改点] 增加显式标记，证明这是一笔虚拟的期末总资产，而不是历史卖出
+      });
     }
 
     const preXirrPayloads = baseFunds.map(f => ({ id: f.id, flows: f._flows }));
@@ -1430,18 +1434,15 @@ export default function App() {
     let daysToBreakEven = null;
     let baselineValue = 0;
     
-    const localDate = new Date();
-    const year = localDate.getFullYear();
-    const month = String(localDate.getMonth() + 1).padStart(2, '0');
-    const day = String(localDate.getDate()).padStart(2, '0');
-    const localTodayStr = `${year}-${month}-${day}`;
-
+    // [修改点] 删除了 localTodayStr 的相关时间字符串拼接逻辑，因为不再需要了
+    
     globalPreCashFlows.forEach(cf => {
        if (cf.amount < 0) {
            const days = (new Date() - new Date(cf.date)) / (1000 * 60 * 60 * 24);
            const years = Math.max(0, days / 365);
            baselineValue += Math.abs(cf.amount) * Math.pow(1 + (targetAnnualRate / 100), years); 
-       } else if (cf.amount > 0 && cf.date !== localTodayStr) {
+       } else if (cf.amount > 0 && !cf.isTerminal) { 
+           // [修改点] 彻底抛弃时区敏感的字符串比对，直接拦截 isTerminal 标记
            baselineValue -= cf.amount;
        }
     });
