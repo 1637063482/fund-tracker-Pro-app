@@ -7,7 +7,6 @@ import {
   Play, Pause, Archive, RefreshCcw, CheckCircle2
 } from 'lucide-react';
 
-// 替换为标准 npm 导入方式
 import { initializeApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged, signInWithCustomToken, signInAnonymously, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query } from 'firebase/firestore';
@@ -26,7 +25,6 @@ const firebaseConfig = (typeof __firebase_config !== 'undefined' && __firebase_c
   ? JSON.parse(__firebase_config) 
   : USER_FIREBASE_CONFIG;
 
-// 修复：将 appId 中的斜杠替换为连字符，防止 Firestore 将其误识别为多层嵌套路径（导致路径变为偶数段）
 const appId = typeof __app_id !== 'undefined' ? String(__app_id).replace(/\//g, '-') : 'my-fund-tracker';
 
 let app, auth, db;
@@ -148,7 +146,6 @@ const AnimatedNumber = ({ value, formatter = formatMoney, className = "" }) => {
     requestAnimationFrame(animate);
   }, [value]);
 
-  // 加入 tabular-nums 基础防抖动
   return <span className={`tabular-nums ${className}`}>{formatter(displayValue)}</span>;
 };
 
@@ -316,12 +313,10 @@ const MarketTimeIndicator = () => {
   const { status, isTrading, countdown, urgent } = getMarketStatus(timeObj);
 
   return (
-    // 【性能修复】将整个动态时间容器提升为独立的 GPU 渲染层，防止每秒更新引发外部的 Reflow 和毛玻璃重绘
     <div className="flex flex-col sm:flex-row sm:items-center text-sm font-medium transform-gpu" style={{ willChange: 'transform' }}>
       <div className="flex items-center space-x-3 mb-2 sm:mb-0 sm:mr-4">
          <div className="flex items-center text-slate-700 dark:text-slate-300">
            <Clock className="mr-1.5 text-slate-500 w-[18px] h-[18px] xl:w-[24px] xl:h-[24px]" />
-           {/* 【性能修复】使用 tabular-nums (等宽数字) 消除宽度抖动，移除多余的 transition-all */}
            <span className="font-mono tabular-nums tracking-wide text-base sm:text-lg xl:text-2xl">{timeObj.toLocaleDateString().replace(/\//g, '-')} {formatTime(timeObj)}</span>
          </div>
          <div className={`px-2.5 py-0.5 rounded-full text-xs xl:text-sm flex items-center border transition-colors duration-500 ${isTrading ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'}`}>
@@ -786,7 +781,6 @@ export default function App() {
     }
   }, [theme]);
 
-  // 原生 Splash Screen 处理与开屏动画平滑过渡
   useEffect(() => {
     if (!authLoading) {
       const MIN_SPLASH_TIME = 1500; 
@@ -804,13 +798,11 @@ export default function App() {
           }, 500); 
         }
         
-        // 【关键】使用 Capacitor 插件关闭原生白色遮罩
         const hideNativeSplash = async () => {
           try {
             const { SplashScreen } = await import('@capacitor/splash-screen');
             await SplashScreen.hide();
           } catch (e) {
-            // 非 Capacitor 环境会忽略
           }
         };
         hideNativeSplash();
@@ -852,7 +844,6 @@ export default function App() {
     };
   }, [user, resetLogoutTimer]);
 
-  // 重构 Firebase 认证逻辑，符合标准生命周期与安全规则
   useEffect(() => {
     if (!auth) {
       setAuthLoading(false);
@@ -864,7 +855,6 @@ export default function App() {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token);
         } else {
-          // 增加匿名登录 fallback，确保获得合法用户状态以访问 Firestore
           await signInAnonymously(auth);
         }
       } catch (e) {
@@ -880,7 +870,7 @@ export default function App() {
       setAuthLoading(false);
     });
     return () => unsubscribe();
-  }, []); // 移除 [user] 依赖
+  }, []); 
 
   useEffect(() => {
     if (!user || !db) return;
@@ -1293,7 +1283,8 @@ export default function App() {
     linkElement.click();
   };
 
-  const { baseFunds, preXirrPayloads, globalPreCashFlows } = useMemo(() => {
+  // 【核心修复一】：彻底剥离 xirrMap，防止修改 xirr 时触发此基础数据的重新计算
+  const { baseFundsData, preXirrPayloads, globalPreCashFlows } = useMemo(() => {
     const globalPreCashFlows = [];
     
     const baseFunds = funds.map(f => {
@@ -1305,7 +1296,6 @@ export default function App() {
         const rawAmt = evaluateExpression(t.amountRaw);
         const inferredType = t.type || (rawAmt < 0 ? 'buy' : 'sell');
         
-        // 【精度修复】在累加和填入现金流之前，严格四舍五入为小数后两位
         let amt = Math.round(Math.abs(rawAmt) * 100) / 100;
         
         if (inferredType === 'buy' || inferredType === 'fee') {
@@ -1317,7 +1307,6 @@ export default function App() {
             cashFlowsForXirr.push({ date: t.date, amount: amt }); 
             globalPreCashFlows.push({ date: t.date, amount: amt });
         } else if (inferredType === 'dividend_reinvest') {
-            
         }
       });
 
@@ -1336,7 +1325,6 @@ export default function App() {
           currentVal = evaluateExpression(f.currentValueRaw) || 0;
       }
 
-      // 【精度修复核心逻辑】将单支基金的值切平到两位小数(分)以消除累加误差
       currentVal = Math.round(currentVal * 100) / 100;
 
       if (currentVal > 0) {
@@ -1347,47 +1335,48 @@ export default function App() {
       const simpleReturn = totalInvested === 0 ? 0 : profit / totalInvested;
       const netInvested = Math.max(0, totalInvested - realizedReturns);
 
-      return { ...f, xirr: xirrMap[f.id] || 0, profit, simpleReturn, totalInvested, netInvested, currentValue: currentVal, _flows: cashFlowsForXirr };
+      return { ...f, profit, simpleReturn, totalInvested, netInvested, currentValue: currentVal, _flows: cashFlowsForXirr };
     });
 
     const totalCurrentValue = baseFunds.reduce((sum, f) => sum + f.currentValue, 0);
-    // 对总资产也执行一次精度截断作为兜底
     const finalTotalCurrentValue = Math.round(totalCurrentValue * 100) / 100;
     
     if (finalTotalCurrentValue > 0) {
       globalPreCashFlows.push({ 
         date: new Date().toISOString().split('T')[0], 
         amount: finalTotalCurrentValue,
-        isTerminal: true // [修改点] 增加显式标记，证明这是一笔虚拟的期末总资产，而不是历史卖出
+        isTerminal: true 
       });
     }
 
     const preXirrPayloads = baseFunds.map(f => ({ id: f.id, flows: f._flows }));
 
-    return { baseFunds, preXirrPayloads, globalPreCashFlows };
-  }, [funds, fundNavs, xirrMap]); 
+    return { baseFundsData: baseFunds, preXirrPayloads, globalPreCashFlows };
+  }, [funds, fundNavs]); 
 
+  // 【核心修复二】：使用函数式状态更新，避免相同的计算结果引发无限循环重绘
   useEffect(() => {
     let isCancelled = false;
     
     const computeAllXirrAsync = () => {
       setTimeout(() => {
         if (isCancelled) return;
-        const newMap = {};
-        let changed = false;
 
-        preXirrPayloads.forEach(p => {
-            const res = calculateXIRR(p.flows);
-            newMap[p.id] = res;
-            changed = true; 
+        setXirrMap(prev => {
+           let isChanged = false;
+           const updatedMap = { ...prev };
+           preXirrPayloads.forEach(p => {
+               const res = calculateXIRR(p.flows);
+               if (updatedMap[p.id] !== res) {
+                   updatedMap[p.id] = res;
+                   isChanged = true;
+               }
+           });
+           return isChanged ? updatedMap : prev; 
         });
-        
-        if (changed) {
-            setXirrMap(prev => ({ ...prev, ...newMap }));
-        }
 
         const gRes = calculateXIRR(globalPreCashFlows);
-        if (overallXirr !== gRes) setOverallXirr(gRes);
+        setOverallXirr(prev => (prev !== gRes ? gRes : prev));
       }, 0);
     };
     computeAllXirrAsync();
@@ -1396,7 +1385,9 @@ export default function App() {
   }, [preXirrPayloads, globalPreCashFlows]);
 
   const portfolioStats = useMemo(() => {
-    // 基础运算全部经由之前的四舍五入数据
+    // 【核心修复三】：在最终渲染层再把 XIRR 组合进去，避免破坏底层数据计算流
+    const baseFunds = baseFundsData.map(f => ({ ...f, xirr: xirrMap[f.id] || 0 }));
+
     const portfolioTotalCurrentValue = baseFunds.reduce((sum, f) => sum + f.currentValue, 0);
     const portfolioTotalInvested = baseFunds.reduce((sum, f) => sum + f.totalInvested, 0);
     const portfolioTotalProfit = baseFunds.reduce((sum, f) => sum + f.profit, 0); 
@@ -1446,15 +1437,12 @@ export default function App() {
     let daysToBreakEven = null;
     let baselineValue = 0;
     
-    // [修改点] 删除了 localTodayStr 的相关时间字符串拼接逻辑，因为不再需要了
-    
     globalPreCashFlows.forEach(cf => {
        if (cf.amount < 0) {
            const days = (new Date() - new Date(cf.date)) / (1000 * 60 * 60 * 24);
            const years = Math.max(0, days / 365);
            baselineValue += Math.abs(cf.amount) * Math.pow(1 + (targetAnnualRate / 100), years); 
        } else if (cf.amount > 0 && !cf.isTerminal) { 
-           // [修改点] 彻底抛弃时区敏感的字符串比对，直接拦截 isTerminal 标记
            baselineValue -= cf.amount;
        }
     });
@@ -1471,7 +1459,7 @@ export default function App() {
     
     return { 
       totalInvested: netTotalInvested, 
-      totalCurrentValue: Math.round(portfolioTotalCurrentValue * 100) / 100, // 最后一次精度切削 
+      totalCurrentValue: Math.round(portfolioTotalCurrentValue * 100) / 100,
       overallXirr, 
       totalProfit: Math.round(portfolioTotalProfit * 100) / 100, 
       overallSimpleReturn, 
@@ -1485,7 +1473,7 @@ export default function App() {
       projectedAssets, daysToBreakEven, expectedDailyProfit,
       baselineValue, deviationAmount
     };
-  }, [baseFunds, settings, overallXirr, globalPreCashFlows]);
+  }, [baseFundsData, settings, overallXirr, globalPreCashFlows, xirrMap]);
 
   const sortedFunds = useMemo(() => {
     let list = portfolioStats.computedFundsWithMetrics.filter(f => fundTab === 'active' ? !f.isArchived : f.isArchived);
@@ -1639,10 +1627,8 @@ export default function App() {
                     const isPositive = data.change > 0;
                     const textColor = isPositive ? 'text-red-500' : (data.change < 0 ? 'text-green-500' : 'text-slate-500');
                     return (
-                      // 【性能修复】将 5s 刷新一次的大盘卡片提升为独立图层，防止引发外部 Reflow
                       <div key={data.id} className="bg-slate-50 dark:bg-slate-900 p-4 sm:p-5 rounded-xl border border-slate-100 dark:border-slate-700 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 cursor-default transform-gpu" style={{ willChange: 'transform' }}>
                         <div className="text-sm sm:text-base text-slate-600 dark:text-slate-400 mb-1.5 font-bold tracking-wide">{data.name}</div>
-                        {/* 【性能修复】加上 tabular-nums，移除 transition-colors 防抖动 */}
                         <div className={`text-2xl sm:text-4xl font-bold font-mono tabular-nums ${textColor}`}>
                           <AnimatedNumber value={data.price} formatter={(v) => v.toFixed(3)} />
                         </div>
