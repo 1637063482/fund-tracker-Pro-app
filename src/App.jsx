@@ -320,14 +320,16 @@ const MarketTimeIndicator = () => {
            <span className="font-mono tabular-nums tracking-wide text-base sm:text-lg xl:text-2xl">{timeObj.toLocaleDateString().replace(/\//g, '-')} {formatTime(timeObj)}</span>
          </div>
          <div className={`px-2.5 py-0.5 rounded-full text-xs xl:text-sm flex items-center border transition-colors duration-500 ${isTrading ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'}`}>
-           {isTrading && <div className="w-1.5 h-1.5 xl:w-2 xl:h-2 rounded-full bg-green-500 mr-1.5 animate-pulse"></div>}
+           {/* 【核心修复】移除了会导致高频重绘的 animate-pulse，用静态的柔光阴影替代发光效果 */}
+           {isTrading && <div className="w-1.5 h-1.5 xl:w-2 xl:h-2 rounded-full bg-green-500 mr-1.5 shadow-[0_0_6px_rgba(34,197,94,0.6)]"></div>}
            {status}
          </div>
       </div>
       
       {countdown && (
-        <div className={`flex items-center px-3 py-1 rounded-md text-xs xl:text-sm font-bold transition-all duration-500 ${urgent ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 animate-pulse-fast shadow-sm' : 'text-amber-600 dark:text-amber-500'}`}>
-          <Bell className={`mr-1 w-[14px] h-[14px] xl:w-[18px] xl:h-[18px] ${urgent ? 'animate-bounce' : ''}`} />
+        <div className={`flex items-center px-3 py-1 rounded-md text-xs xl:text-sm font-bold transition-all duration-500 ${urgent ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 shadow-sm' : 'text-amber-600 dark:text-amber-500'}`}>
+          {/* 【核心修复】移除了铃铛的 animate-bounce，杜绝重绘 */}
+          <Bell className="mr-1 w-[14px] h-[14px] xl:w-[18px] xl:h-[18px] text-red-500" />
           {countdown}
         </div>
       )}
@@ -1555,12 +1557,14 @@ export default function App() {
                   <div className="flex items-center space-x-1.5 text-xs bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 px-3 py-1.5 rounded-full border border-green-200 dark:border-green-800 transition-all duration-500">
                     {isDbConnected ? (
                       <Fragment>
-                        <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                        <span className="hidden sm:inline font-medium">云端同步中</span>
+                        {/* 【彻底修复】：移除了 animate-pulse，用静态外发光阴影替代，保护 GPU */}
+                        <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
+                        <span className="hidden sm:inline font-medium">云端已同步</span>
                       </Fragment>
                     ) : (
                       <Fragment>
-                        <RefreshCw size={12} className="animate-spin" />
+                        {/* 【彻底修复】：断开连接时的旋转也移除，防止离线或卡此时永久消耗 GPU */}
+                        <RefreshCw size={12} />
                         <span className="hidden sm:inline font-medium">连接中</span>
                       </Fragment>
                     )}
