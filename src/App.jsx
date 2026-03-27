@@ -111,7 +111,7 @@ const PROXY_NODES = [
   { name: '节点 5 (AllOrigins-JSON)', fetcher: async (url) => { const r = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`); const d = await r.json(); return d.contents; } }
 ];
 
-const AnimatedNumber = ({ value, formatter = formatMoney, className }) => {
+const AnimatedNumber = ({ value, formatter = formatMoney, className = "" }) => {
   const [displayValue, setDisplayValue] = useState(value);
   const isInitialMount = useRef(true);
 
@@ -148,7 +148,8 @@ const AnimatedNumber = ({ value, formatter = formatMoney, className }) => {
     requestAnimationFrame(animate);
   }, [value]);
 
-  return <span className={className}>{formatter(displayValue)}</span>;
+  // 加入 tabular-nums 基础防抖动
+  return <span className={`tabular-nums ${className}`}>{formatter(displayValue)}</span>;
 };
 
 const SmartInput = ({ value, onChange, placeholder, className, isDate = false, type = "text", disabled = false }) => {
@@ -248,7 +249,7 @@ const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计"
                 <div className="w-2.5 h-2.5 rounded-sm mr-1.5 shrink-0 shadow-sm" style={{backgroundColor: COLORS[i % COLORS.length]}}></div>
                 <span className="truncate text-slate-600 dark:text-slate-400" title={slice.name}>{slice.name}</span>
               </div>
-              <span className="font-mono text-slate-800 dark:text-slate-200 font-medium pl-4">{formatPercent(slice.value/total)}</span>
+              <span className="font-mono text-slate-800 dark:text-slate-200 font-medium pl-4 tabular-nums">{formatPercent(slice.value/total)}</span>
             </div>
           );
         })}
@@ -315,11 +316,13 @@ const MarketTimeIndicator = () => {
   const { status, isTrading, countdown, urgent } = getMarketStatus(timeObj);
 
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center text-sm font-medium">
+    // 【性能修复】将整个动态时间容器提升为独立的 GPU 渲染层，防止每秒更新引发外部的 Reflow 和毛玻璃重绘
+    <div className="flex flex-col sm:flex-row sm:items-center text-sm font-medium transform-gpu" style={{ willChange: 'transform' }}>
       <div className="flex items-center space-x-3 mb-2 sm:mb-0 sm:mr-4">
          <div className="flex items-center text-slate-700 dark:text-slate-300">
            <Clock className="mr-1.5 text-slate-500 w-[18px] h-[18px] xl:w-[24px] xl:h-[24px]" />
-           <span className="font-mono tracking-wide text-base sm:text-lg xl:text-2xl transition-all">{timeObj.toLocaleDateString().replace(/\//g, '-')} {formatTime(timeObj)}</span>
+           {/* 【性能修复】使用 tabular-nums (等宽数字) 消除宽度抖动，移除多余的 transition-all */}
+           <span className="font-mono tabular-nums tracking-wide text-base sm:text-lg xl:text-2xl">{timeObj.toLocaleDateString().replace(/\//g, '-')} {formatTime(timeObj)}</span>
          </div>
          <div className={`px-2.5 py-0.5 rounded-full text-xs xl:text-sm flex items-center border transition-colors duration-500 ${isTrading ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'}`}>
            {isTrading && <div className="w-1.5 h-1.5 xl:w-2 xl:h-2 rounded-full bg-green-500 mr-1.5 animate-pulse"></div>}
@@ -604,7 +607,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
         {localFund.mode === 'manual' ? (
           <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800 animate-in zoom-in-95 duration-300">
             <label className="text-sm font-bold mb-1.5 block text-slate-700 dark:text-slate-300 pl-1">现持仓总市值 (元)</label>
-            <SmartInput value={localFund.currentValueRaw} onChange={(raw) => setLocalFund({...localFund, currentValueRaw: raw})} placeholder="请输入现在的账面总价值，支持简单公式如 =10000+500" className="w-full py-3 shadow-sm bg-white" />
+            <SmartInput value={localFund.currentValueRaw} onChange={(raw) => setLocalFund({...localFund, currentValueRaw: raw})} placeholder="请输入现在的账面总价值，支持简单公式如 =10000+500" className="w-full py-3 shadow-sm bg-white tabular-nums" />
           </div>
         ) : (
           <div className="bg-blue-50/50 dark:bg-slate-800/80 p-5 rounded-2xl border border-blue-100 dark:border-slate-700 animate-in zoom-in-95 duration-300 space-y-4 shadow-sm">
@@ -620,14 +623,14 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
                 </div>
                 <div>
                    <label className="text-sm font-bold mb-1.5 block text-slate-700 dark:text-slate-300 pl-1">当前持有总份额</label>
-                   <input type="number" value={localFund.shares} onChange={(e) => setLocalFund({...localFund, shares: e.target.value})} placeholder="例如: 10500.55" className="w-full px-4 py-3 border border-slate-200 rounded-xl dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all shadow-sm text-base font-mono bg-white" />
+                   <input type="number" value={localFund.shares} onChange={(e) => setLocalFund({...localFund, shares: e.target.value})} placeholder="例如: 10500.55" className="w-full px-4 py-3 border border-slate-200 rounded-xl dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all shadow-sm text-base font-mono bg-white tabular-nums" />
                 </div>
              </div>
              
              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col gap-3">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                     <span className="text-sm text-slate-500 font-medium">系统自动计算持仓市值：</span>
-                    <span className="text-2xl font-black font-mono text-blue-600 dark:text-blue-400 tracking-tight">
+                    <span className="text-2xl font-black font-mono tabular-nums text-blue-600 dark:text-blue-400 tracking-tight">
                        {formatMoney(currentEstimatedValue)}
                     </span>
                 </div>
@@ -639,11 +642,11 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
                         <span className="text-blue-500 flex items-center font-medium bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded"><RefreshCcw size={14} className="animate-spin mr-1.5"/> 拉取中...</span>
                       ) : (
                         <div className="flex items-center gap-2">
-                           <span className={`font-bold font-mono text-base ${fundNavs[localFund.fundCode] ? 'text-indigo-600 dark:text-indigo-400' : (localNavError ? 'text-red-500' : 'text-slate-400')}`}>
+                           <span className={`font-bold font-mono tabular-nums text-base ${fundNavs[localFund.fundCode] ? 'text-indigo-600 dark:text-indigo-400' : (localNavError ? 'text-red-500' : 'text-slate-400')}`}>
                               {fundNavs[localFund.fundCode]?.nav || localFund.lastNav || localNavError || '等待拉取'}
                            </span>
                            {(fundNavs[localFund.fundCode]?.date || localFund.lastNavDate) && !localNavError && (
-                             <span className="text-xs text-slate-400 font-mono">({fundNavs[localFund.fundCode]?.date || localFund.lastNavDate})</span>
+                             <span className="text-xs text-slate-400 font-mono tabular-nums">({fundNavs[localFund.fundCode]?.date || localFund.lastNavDate})</span>
                            )}
                            {fundNavs[localFund.fundCode] && (
                               <span className="flex items-center text-[10px] bg-indigo-50 text-indigo-600 border border-indigo-100 dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-300 px-1.5 py-0.5 rounded-md font-medium">
@@ -686,7 +689,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
               </div>
 
               <div className="flex-1 flex flex-col lg:flex-row gap-2 lg:gap-4">
-                 <SmartInput isDate={true} value={tx.date} onChange={(val) => handleUpdateTx(index, 'date', val)} className="w-full lg:w-36 py-2 text-sm bg-slate-50 dark:bg-slate-800/50 border-transparent hover:border-slate-300 focus:bg-white dark:focus:bg-slate-900" />
+                 <SmartInput isDate={true} value={tx.date} onChange={(val) => handleUpdateTx(index, 'date', val)} className="w-full lg:w-36 py-2 text-sm tabular-nums bg-slate-50 dark:bg-slate-800/50 border-transparent hover:border-slate-300 focus:bg-white dark:focus:bg-slate-900" />
                  
                  <div className="flex flex-1 gap-2">
                    <select 
@@ -707,7 +710,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
                        value={tx.amountRaw} 
                        onChange={(raw) => handleUpdateTx(index, 'amountRaw', raw)} 
                        placeholder="输入金额 (绝对值即可)" 
-                       className={`w-full py-2 pl-9 font-mono font-medium text-base sm:text-lg bg-slate-50 dark:bg-slate-800/50 border-transparent hover:border-slate-300 focus:bg-white dark:focus:bg-slate-900 ${meta.color}`} 
+                       className={`w-full py-2 pl-9 font-mono tabular-nums font-medium text-base sm:text-lg bg-slate-50 dark:bg-slate-800/50 border-transparent hover:border-slate-300 focus:bg-white dark:focus:bg-slate-900 ${meta.color}`} 
                      />
                    </div>
                  </div>
@@ -1301,7 +1304,9 @@ export default function App() {
       f.transactions.forEach(t => {
         const rawAmt = evaluateExpression(t.amountRaw);
         const inferredType = t.type || (rawAmt < 0 ? 'buy' : 'sell');
-        let amt = Math.abs(rawAmt);
+        
+        // 【精度修复】在累加和填入现金流之前，严格四舍五入为小数后两位
+        let amt = Math.round(Math.abs(rawAmt) * 100) / 100;
         
         if (inferredType === 'buy' || inferredType === 'fee') {
             totalInvested += amt;
@@ -1331,6 +1336,9 @@ export default function App() {
           currentVal = evaluateExpression(f.currentValueRaw) || 0;
       }
 
+      // 【精度修复核心逻辑】将单支基金的值切平到两位小数(分)以消除累加误差
+      currentVal = Math.round(currentVal * 100) / 100;
+
       if (currentVal > 0) {
         cashFlowsForXirr.push({ date: new Date().toISOString().split('T')[0], amount: currentVal });
       }
@@ -1343,10 +1351,13 @@ export default function App() {
     });
 
     const totalCurrentValue = baseFunds.reduce((sum, f) => sum + f.currentValue, 0);
-    if (totalCurrentValue > 0) {
+    // 对总资产也执行一次精度截断作为兜底
+    const finalTotalCurrentValue = Math.round(totalCurrentValue * 100) / 100;
+    
+    if (finalTotalCurrentValue > 0) {
       globalPreCashFlows.push({ 
         date: new Date().toISOString().split('T')[0], 
-        amount: totalCurrentValue,
+        amount: finalTotalCurrentValue,
         isTerminal: true // [修改点] 增加显式标记，证明这是一笔虚拟的期末总资产，而不是历史卖出
       });
     }
@@ -1385,6 +1396,7 @@ export default function App() {
   }, [preXirrPayloads, globalPreCashFlows]);
 
   const portfolioStats = useMemo(() => {
+    // 基础运算全部经由之前的四舍五入数据
     const portfolioTotalCurrentValue = baseFunds.reduce((sum, f) => sum + f.currentValue, 0);
     const portfolioTotalInvested = baseFunds.reduce((sum, f) => sum + f.totalInvested, 0);
     const portfolioTotalProfit = baseFunds.reduce((sum, f) => sum + f.profit, 0); 
@@ -1459,9 +1471,9 @@ export default function App() {
     
     return { 
       totalInvested: netTotalInvested, 
-      totalCurrentValue: portfolioTotalCurrentValue, 
+      totalCurrentValue: Math.round(portfolioTotalCurrentValue * 100) / 100, // 最后一次精度切削 
       overallXirr, 
-      totalProfit: portfolioTotalProfit, 
+      totalProfit: Math.round(portfolioTotalProfit * 100) / 100, 
       overallSimpleReturn, 
       pieData,
       contributionPieData,
@@ -1627,12 +1639,14 @@ export default function App() {
                     const isPositive = data.change > 0;
                     const textColor = isPositive ? 'text-red-500' : (data.change < 0 ? 'text-green-500' : 'text-slate-500');
                     return (
-                      <div key={data.id} className="bg-slate-50 dark:bg-slate-900 p-4 sm:p-5 rounded-xl border border-slate-100 dark:border-slate-700 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 cursor-default">
+                      // 【性能修复】将 5s 刷新一次的大盘卡片提升为独立图层，防止引发外部 Reflow
+                      <div key={data.id} className="bg-slate-50 dark:bg-slate-900 p-4 sm:p-5 rounded-xl border border-slate-100 dark:border-slate-700 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 cursor-default transform-gpu" style={{ willChange: 'transform' }}>
                         <div className="text-sm sm:text-base text-slate-600 dark:text-slate-400 mb-1.5 font-bold tracking-wide">{data.name}</div>
-                        <div className={`text-2xl sm:text-4xl font-bold font-mono ${textColor} transition-colors duration-300`}>
+                        {/* 【性能修复】加上 tabular-nums，移除 transition-colors 防抖动 */}
+                        <div className={`text-2xl sm:text-4xl font-bold font-mono tabular-nums ${textColor}`}>
                           <AnimatedNumber value={data.price} formatter={(v) => v.toFixed(3)} />
                         </div>
-                        <div className={`text-sm sm:text-base flex items-center mt-1.5 font-mono font-medium ${textColor} transition-colors duration-300`}>
+                        <div className={`text-sm sm:text-base flex items-center mt-1.5 font-mono tabular-nums font-medium ${textColor}`}>
                           {isPositive ? <TrendingUp size={16} className="mr-1"/> : (data.change < 0 ? <TrendingDown size={16} className="mr-1"/> : null)}
                           {isPositive ? '+' : ''}{(data.percent * 100).toFixed(2)}%
                         </div>
@@ -1707,32 +1721,32 @@ export default function App() {
                                     <span className="text-indigo-600 dark:text-indigo-400 font-mono font-medium tracking-wide">{fund.fundCode}</span>
                                     <span className="text-slate-300 dark:text-slate-600">|</span>
                                     <span className="text-slate-600 dark:text-slate-400 flex items-center">
-                                        净值: <span className="font-bold text-indigo-600 dark:text-indigo-400 font-mono ml-1">{fundNavs[fund.fundCode]?.nav || fund.lastNav || '--'}</span>
-                                        <span className="text-[10px] text-slate-400 ml-1.5 opacity-80">({fundNavs[fund.fundCode]?.date || fund.lastNavDate || '未知'})</span>
+                                        净值: <span className="font-bold text-indigo-600 dark:text-indigo-400 font-mono tabular-nums ml-1">{fundNavs[fund.fundCode]?.nav || fund.lastNav || '--'}</span>
+                                        <span className="text-[10px] text-slate-400 ml-1.5 opacity-80 tabular-nums">({fundNavs[fund.fundCode]?.date || fund.lastNavDate || '未知'})</span>
                                     </span>
                                     <span className="text-slate-300 dark:text-slate-600">|</span>
-                                    <span className="text-slate-600 dark:text-slate-400">份额: <span className="font-mono">{fund.shares || 0}</span></span>
+                                    <span className="text-slate-600 dark:text-slate-400">份额: <span className="font-mono tabular-nums">{fund.shares || 0}</span></span>
                                   </div>
                                 )}
                               </div>
                             </td>
-                            <td className="p-4 sm:p-5 text-center font-mono font-medium text-blue-600 dark:text-blue-400">
+                            <td className="p-4 sm:p-5 text-center font-mono font-medium text-blue-600 dark:text-blue-400 tabular-nums">
                               <div className="text-base sm:text-lg xl:text-xl">{fundTab==='archived' ? '-' : <AnimatedNumber value={fund.currentValue} />}</div>
-                              <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100">净本金: {formatMoney(fund.netInvested)}</div>
+                              <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100 tabular-nums">净本金: {formatMoney(fund.netInvested)}</div>
                             </td>
                             {fundTab === 'active' && (
                               <td className="p-4 sm:p-5 text-center">
-                                <div className="font-mono text-slate-700 dark:text-slate-300 text-base sm:text-lg xl:text-xl"><AnimatedNumber value={fund.holdingWeight} formatter={formatPercent} /></div>
-                                <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full mt-2 overflow-hidden mx-auto max-w-[120px] flex justify-start shadow-inner">
+                                <div className="font-mono tabular-nums text-slate-700 dark:text-slate-300 text-base sm:text-lg xl:text-xl"><AnimatedNumber value={fund.holdingWeight} formatter={formatPercent} /></div>
+                                <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full mt-2 overflow-hidden mx-auto max-w-[120px] flex justify-start shadow-inner transform-gpu">
                                   <div className="bg-gradient-to-r from-blue-400 to-indigo-500 h-full rounded-full transition-all duration-1000 ease-out" style={{width: `${Math.min(100, fund.holdingWeight * 100)}%`}}></div>
                                 </div>
                               </td>
                             )}
-                            <td className="p-4 sm:p-5 text-center">
+                            <td className="p-4 sm:p-5 text-center tabular-nums">
                               <div className={`font-mono font-medium text-base sm:text-lg xl:text-xl transition-colors duration-500 ${fund.profit >= 0 ? 'text-red-500' : 'text-green-500'}`}><AnimatedNumber value={fund.profit} /></div>
                               <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100">占比: {formatPercent(fund.profitWeight)}</div>
                             </td>
-                            <td className={`p-4 sm:p-5 text-center font-mono font-bold text-base sm:text-lg xl:text-xl transition-colors duration-500 ${fund.xirr >= 0 ? 'text-red-500' : 'text-green-500'}`}>
+                            <td className={`p-4 sm:p-5 text-center font-mono font-bold tabular-nums text-base sm:text-lg xl:text-xl transition-colors duration-500 ${fund.xirr >= 0 ? 'text-red-500' : 'text-green-500'}`}>
                               <AnimatedNumber value={fund.xirr} formatter={formatPercent} />
                             </td>
                             <td className="p-4 sm:p-5 text-center whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200">
@@ -1761,10 +1775,10 @@ export default function App() {
                   ].map((item, idx) => (
                     <div key={idx} className="bg-white dark:bg-slate-800 p-4 sm:p-6 xl:p-8 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm relative overflow-hidden z-10 transition-colors duration-500 hover:shadow-md hover:-translate-y-0.5">
                       <div className="text-xs sm:text-sm xl:text-base font-bold text-slate-500 mb-1.5 sm:mb-2 relative z-10">{item.label}</div>
-                      <div className={`text-lg sm:text-xl xl:text-3xl font-bold font-mono relative z-10 ${item.color} truncate transition-colors duration-500`} title={item.val}>
+                      <div className={`text-lg sm:text-xl xl:text-3xl font-bold font-mono tabular-nums relative z-10 ${item.color} truncate transition-colors duration-500`} title={item.val}>
                           <AnimatedNumber value={item.val} formatter={item.isPercent ? formatPercent : formatMoney} />
                       </div>
-                      {idx === 3 && <div className="absolute -right-2 -bottom-2 text-slate-100 dark:text-slate-700/50"><Award size={90} className="w-[60px] h-[60px] sm:w-[80px] sm:h-[80px] xl:w-[100px] xl:h-[100px] transform rotate-12"/></div>}
+                      {idx === 3 && <div className="absolute -right-2 -bottom-2 text-slate-100 dark:text-slate-700/50 transform-gpu"><Award size={90} className="w-[60px] h-[60px] sm:w-[80px] sm:h-[80px] xl:w-[100px] xl:h-[100px] transform rotate-12"/></div>}
                     </div>
                   ))}
                 </div>
@@ -1783,7 +1797,7 @@ export default function App() {
                             <span className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full text-white text-xs sm:text-sm flex items-center justify-center mr-3 sm:mr-4 transition-transform hover:scale-110 ${i===0?'bg-gradient-to-br from-yellow-400 to-yellow-600 shadow-md':i===1?'bg-gradient-to-br from-slate-300 to-slate-500 shadow-sm':i===2?'bg-gradient-to-br from-amber-600 to-amber-800 shadow-sm':'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>{i+1}</span>
                             <span className="truncate" title={f.name}>{f.name}</span>
                           </span>
-                          <span className={`font-mono font-bold shrink-0 text-base sm:text-lg ${f.xirr>=0?'text-red-500':'text-green-500'}`}>{formatPercent(f.xirr)}</span>
+                          <span className={`font-mono font-bold shrink-0 text-base sm:text-lg tabular-nums ${f.xirr>=0?'text-red-500':'text-green-500'}`}>{formatPercent(f.xirr)}</span>
                         </div>
                       ))}
                     </div>
@@ -1801,7 +1815,7 @@ export default function App() {
                             <span className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full text-white text-xs sm:text-sm flex items-center justify-center mr-3 sm:mr-4 transition-transform hover:scale-110 ${i===0?'bg-gradient-to-br from-yellow-400 to-yellow-600 shadow-md':i===1?'bg-gradient-to-br from-slate-300 to-slate-500 shadow-sm':i===2?'bg-gradient-to-br from-amber-600 to-amber-800 shadow-sm':'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>{i+1}</span>
                             <span className="truncate" title={f.name}>{f.name}</span>
                           </span>
-                          <span className={`font-mono font-bold shrink-0 text-base sm:text-lg ${f.profit>=0?'text-red-500':'text-green-500'}`}>{formatMoney(f.profit)}</span>
+                          <span className={`font-mono font-bold shrink-0 text-base sm:text-lg tabular-nums ${f.profit>=0?'text-red-500':'text-green-500'}`}>{formatMoney(f.profit)}</span>
                         </div>
                       ))}
                     </div>
@@ -1826,7 +1840,7 @@ export default function App() {
                 </div>
 
                 <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-5 sm:p-6 relative overflow-hidden transition-colors duration-500">
-                  <div className="absolute -right-10 -top-10 text-blue-50 dark:text-blue-900/10 transition-transform duration-1000 hover:scale-110 hover:rotate-12"><Target size={160}/></div>
+                  <div className="absolute -right-10 -top-10 text-blue-50 dark:text-blue-900/10 transition-transform duration-1000 hover:scale-110 hover:rotate-12 transform-gpu"><Target size={160}/></div>
                   
                   <h3 className="text-base sm:text-lg font-bold mb-4 sm:mb-5 flex items-center relative z-10"><Target className="mr-2 text-blue-500"/> 财富目标与年化复盘</h3>
                   <div className="space-y-4 relative z-10">
@@ -1866,30 +1880,30 @@ export default function App() {
                     <div className="pt-5 sm:pt-6 border-t border-slate-100 dark:border-slate-700 space-y-3">
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-slate-600 dark:text-slate-400">当前资产偏离基准:</span>
-                        <span className={`font-mono font-bold ${portfolioStats.deviationAmount >= 0 ? 'text-red-500' : 'text-green-500'}`}>
+                        <span className={`font-mono font-bold tabular-nums ${portfolioStats.deviationAmount >= 0 ? 'text-red-500' : 'text-green-500'}`}>
                           {portfolioStats.deviationAmount >= 0 ? '+' : ''}{formatMoney(portfolioStats.deviationAmount)}
                         </span>
                       </div>
                       
                       <div className="w-full h-px bg-slate-100 dark:bg-slate-700 my-2"></div>
                       
-                      <div className="flex justify-between text-sm"><span className="text-slate-500">距总收益目标还差</span><span className="font-bold font-mono text-base"><AnimatedNumber value={portfolioStats.gap} /></span></div>
-                      <div className="flex justify-between text-sm"><span className="text-slate-500">剩余倒数时间</span><span className="font-bold text-base">{portfolioStats.monthsLeft} 个月</span></div>
+                      <div className="flex justify-between text-sm"><span className="text-slate-500">距总收益目标还差</span><span className="font-bold font-mono text-base tabular-nums"><AnimatedNumber value={portfolioStats.gap} /></span></div>
+                      <div className="flex justify-between text-sm"><span className="text-slate-500">剩余倒数时间</span><span className="font-bold text-base tabular-nums">{portfolioStats.monthsLeft} 个月</span></div>
                       
-                      <div className="w-full bg-slate-100 dark:bg-slate-700 h-2.5 rounded-full overflow-hidden mt-3 mb-1 shadow-inner">
+                      <div className="w-full bg-slate-100 dark:bg-slate-700 h-2.5 rounded-full overflow-hidden mt-3 mb-1 shadow-inner transform-gpu">
                         <div className="bg-gradient-to-r from-blue-500 to-indigo-500 h-full rounded-full transition-all duration-1000 ease-out" style={{width: `${Math.max(0, Math.min(100, (portfolioStats.totalProfit / (portfolioStats.safeTargetAmount || 1)) * 100))}%`}}></div>
                       </div>
 
                       <div className="flex flex-col text-sm bg-blue-50 dark:bg-blue-900/20 p-4 sm:p-5 rounded-xl mt-4 border border-blue-100 dark:border-blue-800/50 shadow-sm transition-colors duration-500">
                         <span className="text-blue-700 dark:text-blue-300 font-medium mb-1">为达成目标金额，每月需新增收益：</span>
-                        <span className="text-xl sm:text-2xl font-bold font-mono text-blue-600 dark:text-blue-400 break-all"><AnimatedNumber value={portfolioStats.requiredMonthly} /></span>
+                        <span className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-blue-600 dark:text-blue-400 break-all"><AnimatedNumber value={portfolioStats.requiredMonthly} /></span>
                       </div>
                       
                       {portfolioStats.totalProfit < 0 && portfolioStats.daysToBreakEven !== null && (
                          <div className="bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-100 dark:border-amber-800/50 mt-2 text-sm flex items-start animate-in fade-in zoom-in">
                             <AlertCircle size={16} className="text-amber-500 mr-2 shrink-0 mt-0.5" />
                             <div>
-                              按照 <span className="font-bold">{settings.targetAnnualRate}%</span> 的设定基准年化复利推演，要填平当前的亏损缺口，预计还需要 <span className="font-bold text-amber-600 dark:text-amber-400 text-base">{portfolioStats.daysToBreakEven}</span> 天。
+                              按照 <span className="font-bold">{settings.targetAnnualRate}%</span> 的设定基准年化复利推演，要填平当前的亏损缺口，预计还需要 <span className="font-bold tabular-nums text-amber-600 dark:text-amber-400 text-base">{portfolioStats.daysToBreakEven}</span> 天。
                             </div>
                          </div>
                       )}
@@ -1904,17 +1918,17 @@ export default function App() {
                 </div>
 
                 <div className="bg-gradient-to-br from-slate-800 to-slate-900 dark:from-slate-900 dark:to-black rounded-xl shadow-lg border border-slate-700 p-6 sm:p-8 relative overflow-hidden text-white transition-all hover:shadow-xl hover:-translate-y-1 duration-300">
-                  <div className="absolute -right-6 -bottom-6 text-white/5 pointer-events-none"><TrendingUp size={140}/></div>
+                  <div className="absolute -right-6 -bottom-6 text-white/5 pointer-events-none transform-gpu"><TrendingUp size={140}/></div>
                   <h3 className="text-lg sm:text-xl font-bold mb-4 flex items-center relative z-10 text-blue-400">
                     <TrendingUp className="mr-2" size={24}/> 静态复利推演
                   </h3>
                   <div className="space-y-4 relative z-10">
                     <div className="text-slate-300 text-sm sm:text-base leading-relaxed">
-                      基于当前 <span className="font-bold text-white text-base sm:text-lg bg-white/10 px-2 py-0.5 rounded-md ml-1 mr-1 shadow-inner">{formatPercent(portfolioStats.overallXirr)}</span> 综合年化收益率推演：
+                      基于当前 <span className="font-bold text-white tabular-nums text-base sm:text-lg bg-white/10 px-2 py-0.5 rounded-md ml-1 mr-1 shadow-inner">{formatPercent(portfolioStats.overallXirr)}</span> 综合年化收益率推演：
                     </div>
                     <div className="pt-2 border-t border-white/10 mt-2">
                       <div className="text-slate-400 text-sm sm:text-base mb-1">至目标日期预计总持仓将达到:</div>
-                      <div className="text-3xl sm:text-4xl font-bold font-mono text-red-500 tracking-tight break-all drop-shadow-md">
+                      <div className="text-3xl sm:text-4xl font-bold font-mono tabular-nums text-red-500 tracking-tight break-all drop-shadow-md">
                         <AnimatedNumber value={portfolioStats.projectedAssets} />
                       </div>
                     </div>
