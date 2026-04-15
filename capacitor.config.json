@@ -5,8 +5,8 @@
   "bundledWebRuntime": false,
   "plugins": {
     "SplashScreen": {
-      "launchShowDuration": 0,
-      "launchAutoHide": false,
+      "launchShowDuration": 2500,
+      "launchAutoHide": true,
       "backgroundColor": "#f8fafc",
       "androidSplashResourceName": "splash",
       "androidScaleType": "CENTER_CROP",
