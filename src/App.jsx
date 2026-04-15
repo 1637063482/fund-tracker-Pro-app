@@ -683,12 +683,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
               </div>
 
               <div className="flex-1 flex flex-col lg:flex-row gap-2 lg:gap-4">
-<<<<<<< HEAD
-                 <SmartInput isDate={true} value={tx.date} onChange={(val) => handleUpdateTx(index, 'date', val)} className="w-full lg:w-36 py-2 text-sm tabular-nums bg-slate-50 dark:bg-slate-800/50 border-transparent hover:border-slate-300 focus:bg-white dark:focus:bg-slate-900" />
-                 
-=======
                  <SmartInput isDate={true} value={tx.date} onChange={(val) => handleUpdateTx(index, 'date', val)} className="w-full lg:w-36 py-2 text-sm bg-slate-50 dark:bg-slate-800/50 border-transparent hover:border-slate-300 focus:bg-white dark:focus:bg-slate-900" />
->>>>>>> 6acb52c (更新多终端显示效果)
                  <div className="flex flex-1 gap-2">
                    <select 
                      value={tx.type || (evaluateExpression(tx.amountRaw) < 0 ? 'buy' : 'sell')} 
@@ -708,13 +703,8 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
                         value={tx.amountRaw} 
                        onChange={(raw) => handleUpdateTx(index, 'amountRaw', raw)} 
                        placeholder="输入金额 (绝对值即可)" 
-<<<<<<< HEAD
-                       className={`w-full py-2 pl-9 font-mono tabular-nums font-medium text-base sm:text-lg bg-slate-50 dark:bg-slate-800/50 border-transparent hover:border-slate-300 focus:bg-white dark:focus:bg-slate-900 ${meta.color}`} 
-                     />
-=======
                        className={`w-full py-2 pl-9 font-mono font-medium text-base sm:text-lg bg-slate-50 dark:bg-slate-800/50 border-transparent hover:border-slate-300 focus:bg-white dark:focus:bg-slate-900 ${meta.color}`} 
                       />
->>>>>>> 6acb52c (更新多终端显示效果)
                    </div>
                  </div>
               </div>
@@ -1334,12 +1324,7 @@ export default function App() {
       const profit = currentVal + realizedReturns - totalInvested;
       const simpleReturn = totalInvested === 0 ? 0 : profit / totalInvested;
       const netInvested = Math.max(0, totalInvested - realizedReturns);
-<<<<<<< HEAD
-
-      return { ...f, profit, simpleReturn, totalInvested, netInvested, currentValue: currentVal, _flows: cashFlowsForXirr };
-=======
       return { ...f, xirr: xirrMap[f.id] || 0, profit, simpleReturn, totalInvested, netInvested, currentValue: currentVal, _flows: cashFlowsForXirr };
->>>>>>> 6acb52c (更新多终端显示效果)
     });
 
     const totalCurrentValue = baseFunds.reduce((sum, f) => sum + f.currentValue, 0);
@@ -1354,14 +1339,8 @@ export default function App() {
     }
 
     const preXirrPayloads = baseFunds.map(f => ({ id: f.id, flows: f._flows }));
-<<<<<<< HEAD
-
-    return { baseFundsData: baseFunds, preXirrPayloads, globalPreCashFlows };
-  }, [funds, fundNavs]); 
-=======
     return { baseFunds, preXirrPayloads, globalPreCashFlows };
   }, [funds, fundNavs, xirrMap]);
->>>>>>> 6acb52c (更新多终端显示效果)
 
   // 【核心修复二】：使用函数式状态更新，避免相同的计算结果引发无限循环重绘
   useEffect(() => {
@@ -1636,15 +1615,6 @@ export default function App() {
                     const isPositive = data.change > 0;
                     const textColor = isPositive ? 'text-red-500' : (data.change < 0 ? 'text-green-500' : 'text-slate-500');
                     return (
-<<<<<<< HEAD
-                      <div key={data.id} className="bg-slate-50 dark:bg-slate-900 p-4 sm:p-5 rounded-xl border border-slate-100 dark:border-slate-700 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 cursor-default transform-gpu" style={{ willChange: 'transform' }}>
-                        <div className="text-sm sm:text-base text-slate-600 dark:text-slate-400 mb-1.5 font-bold tracking-wide">{data.name}</div>
-                        <div className={`text-2xl sm:text-4xl font-bold font-mono tabular-nums ${textColor}`}>
-                          <AnimatedNumber value={data.price} formatter={(v) => v.toFixed(3)} />
-                        </div>
-                        <div className={`text-sm sm:text-base flex items-center mt-1.5 font-mono tabular-nums font-medium ${textColor}`}>
-                          {isPositive ? <TrendingUp size={16} className="mr-1"/> : (data.change < 0 ? <TrendingDown size={16} className="mr-1"/> : null)}
-=======
                       <div key={data.id} className="bg-slate-50 dark:bg-slate-900 p-4 sm:p-5 rounded-xl border border-slate-100 dark:border-slate-700 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 cursor-default">
                         <div className="text-sm sm:text-base text-slate-600 dark:text-slate-400 mb-1.5 font-bold tracking-wide truncate">{data.name}</div>
                         <div className={`text-xl sm:text-2xl lg:text-3xl font-bold font-mono ${textColor} transition-colors duration-300 truncate w-full block`}>
@@ -1652,7 +1622,6 @@ export default function App() {
                         </div>
                         <div className={`text-sm sm:text-base flex items-center mt-1.5 font-mono font-medium ${textColor} transition-colors duration-300 truncate`}>
                           {isPositive ? <TrendingUp size={16} className="mr-1 shrink-0"/> : (data.change < 0 ? <TrendingDown size={16} className="mr-1 shrink-0"/> : null)}
->>>>>>> 6acb52c (更新多终端显示效果)
                           {isPositive ? '+' : ''}{(data.percent * 100).toFixed(2)}%
                         </div>
                       </div>
@@ -1725,35 +1694,16 @@ export default function App() {
                                     </button>
                                     <span className="text-indigo-600 dark:text-indigo-400 font-mono font-medium tracking-wide whitespace-nowrap">{fund.fundCode}</span>
                                     <span className="text-slate-300 dark:text-slate-600">|</span>
-<<<<<<< HEAD
-                                    <span className="text-slate-600 dark:text-slate-400 flex items-center">
-                                        净值: <span className="font-bold text-indigo-600 dark:text-indigo-400 font-mono tabular-nums ml-1">{fundNavs[fund.fundCode]?.nav || fund.lastNav || '--'}</span>
-                                        <span className="text-[10px] text-slate-400 ml-1.5 opacity-80 tabular-nums">({fundNavs[fund.fundCode]?.date || fund.lastNavDate || '未知'})</span>
-                                    </span>
-                                    <span className="text-slate-300 dark:text-slate-600">|</span>
-                                    <span className="text-slate-600 dark:text-slate-400">份额: <span className="font-mono tabular-nums">{fund.shares || 0}</span></span>
-=======
                                     <span className="text-slate-600 dark:text-slate-400 flex items-center whitespace-nowrap">
                                       净值: <span className="font-bold text-indigo-600 dark:text-indigo-400 font-mono ml-1 whitespace-nowrap">{fundNavs[fund.fundCode]?.nav || fund.lastNav || '--'}</span>
                                         <span className="text-[10px] text-slate-400 ml-1.5 opacity-80 whitespace-nowrap">({fundNavs[fund.fundCode]?.date || fund.lastNavDate || '未知'})</span>
                                     </span>
                                     <span className="text-slate-300 dark:text-slate-600">|</span>
                                     <span className="text-slate-600 dark:text-slate-400 whitespace-nowrap">份额: <span className="font-mono whitespace-nowrap">{fund.shares || 0}</span></span>
->>>>>>> 6acb52c (更新多终端显示效果)
                                   </div>
                                 )}
                               </div>
                             </td>
-<<<<<<< HEAD
-                            <td className="p-4 sm:p-5 text-center font-mono font-medium text-blue-600 dark:text-blue-400 tabular-nums">
-                              <div className="text-base sm:text-lg xl:text-xl">{fundTab==='archived' ? '-' : <AnimatedNumber value={fund.currentValue} />}</div>
-                              <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100 tabular-nums">净本金: {formatMoney(fund.netInvested)}</div>
-                            </td>
-                            {fundTab === 'active' && (
-                              <td className="p-4 sm:p-5 text-center">
-                                <div className="font-mono tabular-nums text-slate-700 dark:text-slate-300 text-base sm:text-lg xl:text-xl"><AnimatedNumber value={fund.holdingWeight} formatter={formatPercent} /></div>
-                                <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full mt-2 overflow-hidden mx-auto max-w-[120px] flex justify-start shadow-inner transform-gpu">
-=======
                             <td className="p-4 sm:p-5 text-center font-mono font-medium text-blue-600 dark:text-blue-400 whitespace-nowrap">
                               <div className="text-base sm:text-lg xl:text-xl whitespace-nowrap">{fundTab==='archived' ? '-' : <AnimatedNumber value={fund.currentValue} />}</div>
                               <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100 whitespace-nowrap">净本金: {formatMoney(fund.netInvested)}</div>
@@ -1762,24 +1712,15 @@ export default function App() {
                               <td className="p-4 sm:p-5 text-center whitespace-nowrap">
                                 <div className="font-mono text-slate-700 dark:text-slate-300 text-base sm:text-lg xl:text-xl whitespace-nowrap"><AnimatedNumber value={fund.holdingWeight} formatter={formatPercent} /></div>
                                 <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full mt-2 overflow-hidden mx-auto max-w-[120px] flex justify-start shadow-inner">
->>>>>>> 6acb52c (更新多终端显示效果)
                                   <div className="bg-gradient-to-r from-blue-400 to-indigo-500 h-full rounded-full transition-all duration-1000 ease-out" style={{width: `${Math.min(100, fund.holdingWeight * 100)}%`}}></div>
                                 </div>
                               </td>
                             )}
-<<<<<<< HEAD
-                            <td className="p-4 sm:p-5 text-center tabular-nums">
-                              <div className={`font-mono font-medium text-base sm:text-lg xl:text-xl transition-colors duration-500 ${fund.profit >= 0 ? 'text-red-500' : 'text-green-500'}`}><AnimatedNumber value={fund.profit} /></div>
-                              <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100">占比: {formatPercent(fund.profitWeight)}</div>
-                            </td>
-                            <td className={`p-4 sm:p-5 text-center font-mono font-bold tabular-nums text-base sm:text-lg xl:text-xl transition-colors duration-500 ${fund.xirr >= 0 ? 'text-red-500' : 'text-green-500'}`}>
-=======
                             <td className="p-4 sm:p-5 text-center whitespace-nowrap">
                                <div className={`font-mono font-medium text-base sm:text-lg xl:text-xl transition-colors duration-500 whitespace-nowrap ${fund.profit >= 0 ? 'text-red-500' : 'text-green-500'}`}><AnimatedNumber value={fund.profit} /></div>
                               <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100 whitespace-nowrap">占比: {formatPercent(fund.profitWeight)}</div>
                             </td>
                             <td className={`p-4 sm:p-5 text-center font-mono font-bold text-base sm:text-lg xl:text-xl transition-colors duration-500 whitespace-nowrap ${fund.xirr >= 0 ? 'text-red-500' : 'text-green-500'}`}>
->>>>>>> 6acb52c (更新多终端显示效果)
                               <AnimatedNumber value={fund.xirr} formatter={formatPercent} />
                             </td>
                             <td className="p-4 sm:p-5 text-center whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200">
@@ -1919,17 +1860,9 @@ export default function App() {
                       </div>
                       
                       <div className="w-full h-px bg-slate-100 dark:bg-slate-700 my-2"></div>
-<<<<<<< HEAD
-                      
-                      <div className="flex justify-between text-sm"><span className="text-slate-500">距总收益目标还差</span><span className="font-bold font-mono text-base tabular-nums"><AnimatedNumber value={portfolioStats.gap} /></span></div>
-                      <div className="flex justify-between text-sm"><span className="text-slate-500">剩余倒数时间</span><span className="font-bold text-base tabular-nums">{portfolioStats.monthsLeft} 个月</span></div>
-                      
-                      <div className="w-full bg-slate-100 dark:bg-slate-700 h-2.5 rounded-full overflow-hidden mt-3 mb-1 shadow-inner transform-gpu">
-=======
                       <div className="flex justify-between text-sm"><span className="text-slate-500">距总收益目标还差</span><span className="font-bold font-mono text-base"><AnimatedNumber value={portfolioStats.gap} /></span></div>
                       <div className="flex justify-between text-sm"><span className="text-slate-500">剩余倒数时间</span><span className="font-bold text-base">{portfolioStats.monthsLeft} 个月</span></div>
                       <div className="w-full bg-slate-100 dark:bg-slate-700 h-2.5 rounded-full overflow-hidden mt-3 mb-1 shadow-inner">
->>>>>>> 6acb52c (更新多终端显示效果)
                         <div className="bg-gradient-to-r from-blue-500 to-indigo-500 h-full rounded-full transition-all duration-1000 ease-out" style={{width: `${Math.max(0, Math.min(100, (portfolioStats.totalProfit / (portfolioStats.safeTargetAmount || 1)) * 100))}%`}}></div>
                       </div>
 
