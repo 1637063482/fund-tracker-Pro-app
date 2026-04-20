@@ -848,6 +848,13 @@ export default function App() {
       return;
     }
     
+    // 【核心修复】：增加 3 秒安全超时熔断
+    // 避免因 WebView 代理失效、网络拦截等导致 Firebase 回调死锁
+    const fallbackTimer = setTimeout(() => {
+      console.warn("Firebase 认证状态检测超时，强制解除开屏状态");
+      setAuthLoading(false); 
+    }, 3000);
+
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -863,12 +870,17 @@ export default function App() {
     initAuth();
     
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      clearTimeout(fallbackTimer); // 如果 Firebase 正常响应，则清除熔断定时器
       setUser(currentUser);
       if (!currentUser) setDbError('');
       setAuthLoading(false);
     });
-    return () => unsubscribe();
-  }, []); 
+    
+    return () => {
+      clearTimeout(fallbackTimer);
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     if (!user || !db) return;
