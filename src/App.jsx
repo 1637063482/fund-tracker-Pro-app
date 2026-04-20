@@ -6,6 +6,7 @@ import {
   ArrowUp, ArrowDown, Download, Settings, Database, Clock, Bell,
   Play, Pause, Archive, RefreshCcw, CheckCircle2
 } from 'lucide-react';
+import { SplashScreen } from '@capacitor/splash-screen';
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged, signInWithCustomToken, signInAnonymously, signInWithEmailAndPassword, signOut } from 'firebase/auth';
@@ -28,7 +29,6 @@ const firebaseConfig = (typeof __firebase_config !== 'undefined' && __firebase_c
 const appId = typeof __app_id !== 'undefined' ? String(__app_id).replace(/\//g, '-') : 'my-fund-tracker';
 
 let app, auth, db;
-// 【核心修复】：增加 try-catch 容错，防止 Android WebView 限制 IndexedDB 导致整个 JS 线程崩溃白屏
 try {
   if (firebaseConfig.apiKey) {
     app = initializeApp(firebaseConfig);
@@ -796,15 +796,11 @@ export default function App() {
           }, 500); 
         }
         
-        const hideNativeSplash = async () => {
-           try {
-            const { SplashScreen } = await import('@capacitor/splash-screen');
-            await SplashScreen.hide();
-          } catch (e) {
-          }
-        };
-        hideNativeSplash();
-
+        try {
+          SplashScreen.hide();
+        } catch (e) {
+          console.warn("SplashScreen.hide() call failed:", e);
+        }
       }, remaining);
     }
   }, [authLoading]);
@@ -847,14 +843,12 @@ export default function App() {
       setAuthLoading(false);
       return;
     }
-    
-    // 【核心修复】：增加 3 秒安全超时熔断
-    // 避免因 WebView 代理失效、网络拦截等导致 Firebase 回调死锁
+
     const fallbackTimer = setTimeout(() => {
       console.warn("Firebase 认证状态检测超时，强制解除开屏状态");
       setAuthLoading(false); 
     }, 3000);
-
+    
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -870,7 +864,7 @@ export default function App() {
     initAuth();
     
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      clearTimeout(fallbackTimer); // 如果 Firebase 正常响应，则清除熔断定时器
+      clearTimeout(fallbackTimer);
       setUser(currentUser);
       if (!currentUser) setDbError('');
       setAuthLoading(false);
@@ -880,7 +874,7 @@ export default function App() {
       clearTimeout(fallbackTimer);
       unsubscribe();
     };
-  }, []);
+  }, []); 
 
   useEffect(() => {
     if (!user || !db) return;
