@@ -154,10 +154,10 @@ const AnimatedNumber = ({ value, formatter = formatMoney, className = "" }) => {
 };
 
 const SmartInput = ({ value, onChange, placeholder, className, isDate = false, type = "text", disabled = false }) => {
-  const [isEditing, setIsEditing] = useState(false);
+  const[isEditing, setIsEditing] = useState(false);
   const [localValue, setLocalValue] = useState(value || '');
 
-  useEffect(() => { if (!isEditing) setLocalValue(value || ''); }, [value, isEditing]);
+  useEffect(() => { if (!isEditing) setLocalValue(value || ''); },[value, isEditing]);
 
   const handleBlur = () => {
     setIsEditing(false);
@@ -260,7 +260,7 @@ const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计"
 };
 
 const MarketTimeIndicator = () => {
-  const [timeObj, setTimeObj] = useState(new Date());
+  const[timeObj, setTimeObj] = useState(new Date());
 
   useEffect(() => {
     const timer = setInterval(() => setTimeObj(new Date()), 1000);
@@ -526,7 +526,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
   const [localNavError, setLocalNavError] = useState('');
 
   const handleUpdateTx = (index, field, val) => {
-    const updated = [...localFund.transactions];
+    const updated =[...localFund.transactions];
     updated[index] = { ...updated[index], [field]: val };
     setLocalFund({ ...localFund, transactions: updated });
   };
@@ -745,25 +745,25 @@ export default function App() {
   });
   const [theme, setTheme] = useState('light'); 
   
-  const [marketData, setMarketData] = useState([]); 
+  const[marketData, setMarketData] = useState([]); 
   const [isFetchingMarket, setIsFetchingMarket] = useState(false);
   const[marketError, setMarketError] = useState('');
-  const [activeProxyIndex, setActiveProxyIndex] = useState(0); 
+  const[activeProxyIndex, setActiveProxyIndex] = useState(0); 
   const isFetchingRef = useRef(false); 
   const [isAutoRefresh, setIsAutoRefresh] = useState(checkIsTradingTime()); 
 
-  const [editingFundId, setEditingFundId] = useState(null);
-  const [isProxyModalOpen, setProxyModalOpen] = useState(false); 
+  const[editingFundId, setEditingFundId] = useState(null);
+  const[isProxyModalOpen, setProxyModalOpen] = useState(false); 
   const [dbError, setDbError] = useState(''); 
   const [isDbConnected, setIsDbConnected] = useState(false);
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' }); 
-  const [fundTab, setFundTab] = useState('active'); 
+  const[sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' }); 
+  const[fundTab, setFundTab] = useState('active'); 
   
-  const [fundNavs, setFundNavs] = useState({});
+  const[fundNavs, setFundNavs] = useState({});
   const[fetchingNavCodes, setFetchingNavCodes] = useState({}); 
   const [isClosingEditor, setIsClosingEditor] = useState(false); 
   
-  const [xirrMap, setXirrMap] = useState({});
+  const[xirrMap, setXirrMap] = useState({});
   const [overallXirr, setOverallXirr] = useState(0);
   const INACTIVITY_LIMIT = 10 * 60 * 1000; 
   const logoutTimerRef = useRef(null);
@@ -779,9 +779,8 @@ export default function App() {
     }
   }, [theme]);
 
-  // 修改点1：加入终极兜底定时器，解决极端情况下的卡开屏死锁问题
+  // 修复 1：安全的 Capacitor 开屏销毁 + Web 端强行清理 DOM 的兜底机制
   useEffect(() => {
-    // 无论如何，设置一个终极兜底定时器，防止任何异常导致卡开屏
     const ultimateFallbackTimer = setTimeout(() => {
       try {
         const splash = document.getElementById('global-splash');
@@ -802,7 +801,6 @@ export default function App() {
       const remaining = Math.max(0, MIN_SPLASH_TIME - elapsed);
 
       setTimeout(async () => {
-        // 1. 优先清理 DOM (Web端兜底)
         const splash = document.getElementById('global-splash');
         if (splash) {
           splash.style.opacity = '0';
@@ -812,7 +810,6 @@ export default function App() {
           }, 500); 
         }
         
-        // 2. 安全调用 Capacitor 插件 (APK端)
         try {
           if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
             await SplashScreen.hide();
@@ -821,7 +818,7 @@ export default function App() {
           console.warn("Capacitor SplashScreen 隐藏失败(可能在纯Web环境):", e);
         }
         
-        clearTimeout(ultimateFallbackTimer); // 如果正常执行，清除终极兜底
+        clearTimeout(ultimateFallbackTimer); 
       }, remaining);
     }
 
@@ -861,9 +858,8 @@ export default function App() {
     };
   }, [user, resetLogoutTimer]);
 
-  // 修改点2：增加强制释放锁，并捕获 Auth 的内部异常，确保 authLoading 状态一定能变为 false
+  // 修复 2：Firebase 认证的强制异常捕获和解锁，防止卡死
   useEffect(() => {
-    // 设置一个 5 秒的强制释放锁，如果 Firebase 5秒内没响应，强制进入 UI（哪怕是未登录状态）
     const fallbackTimer = setTimeout(() => {
       console.warn("Firebase 认证状态检测超时，强制解除开屏状态");
       setAuthLoading(false); 
@@ -884,7 +880,6 @@ export default function App() {
         }
       } catch (e) {
         console.error("Auth Init Error:", e);
-        // 即使出错也要释放 loading 状态
         setAuthLoading(false);
       }
     };
@@ -895,9 +890,8 @@ export default function App() {
       clearTimeout(fallbackTimer);
       setUser(currentUser);
       if (!currentUser) setDbError('');
-      setAuthLoading(false); // 正常获取到状态后释放
+      setAuthLoading(false); 
     }, (error) => {
-      // 捕获 onAuthStateChanged 的内部错误
       console.error("Auth State 监听错误:", error);
       clearTimeout(fallbackTimer);
       setAuthLoading(false);
@@ -941,7 +935,7 @@ export default function App() {
      let codesToQuery =[];
      if (codeToFetch) {
          codesToQuery.push(codeToFetch);
-         setFetchingNavCodes(prev => ({...prev, [codeToFetch]: true}));
+         setFetchingNavCodes(prev => ({...prev,[codeToFetch]: true}));
      } else {
          codesToQuery = funds.filter(f => f.mode === 'auto' && !f.isArchived && f.fundCode).map(f => f.fundCode);
      }
@@ -1315,15 +1309,16 @@ export default function App() {
     linkElement.click();
   };
 
+  // 修复 3：修正变量解构 `baseFundsData` 造成的致命 React 渲染崩溃
   const { baseFundsData, preXirrPayloads, globalPreCashFlows } = useMemo(() => {
     const globalPreCashFlows =[];
     
-    const baseFunds = funds.map(f => {
+    const baseFundsData = funds.map(f => {
       let totalInvested = 0; 
       let realizedReturns = 0; 
       let cashFlowsForXirr =[]; 
       
-      f.transactions.forEach(t => {
+      (f.transactions ||[]).forEach(t => {
         const rawAmt = evaluateExpression(t.amountRaw);
         const inferredType = t.type || (rawAmt < 0 ? 'buy' : 'sell');
         
@@ -1368,7 +1363,7 @@ export default function App() {
       return { ...f, xirr: xirrMap[f.id] || 0, profit, simpleReturn, totalInvested, netInvested, currentValue: currentVal, _flows: cashFlowsForXirr };
     });
 
-    const totalCurrentValue = baseFunds.reduce((sum, f) => sum + f.currentValue, 0);
+    const totalCurrentValue = baseFundsData.reduce((sum, f) => sum + f.currentValue, 0);
     const finalTotalCurrentValue = Math.round(totalCurrentValue * 100) / 100;
     
     if (finalTotalCurrentValue > 0) {
@@ -1379,8 +1374,8 @@ export default function App() {
       });
     }
 
-    const preXirrPayloads = baseFunds.map(f => ({ id: f.id, flows: f._flows }));
-    return { baseFunds, preXirrPayloads, globalPreCashFlows };
+    const preXirrPayloads = baseFundsData.map(f => ({ id: f.id, flows: f._flows }));
+    return { baseFundsData, preXirrPayloads, globalPreCashFlows };
   }, [funds, fundNavs, xirrMap]);
 
   useEffect(() => {
@@ -1410,9 +1405,11 @@ export default function App() {
     computeAllXirrAsync();
 
     return () => { isCancelled = true; };
-  }, [preXirrPayloads, globalPreCashFlows]);
+  },[preXirrPayloads, globalPreCashFlows]);
 
   const portfolioStats = useMemo(() => {
+    if (!baseFundsData) return { pieData: [], contributionPieData: [], rankedByXirr:[], rankedByProfit: [], computedFundsWithMetrics:[] };
+
     const baseFunds = baseFundsData.map(f => ({ ...f, xirr: xirrMap[f.id] || 0 }));
 
     const portfolioTotalCurrentValue = baseFunds.reduce((sum, f) => sum + f.currentValue, 0);
@@ -1502,6 +1499,7 @@ export default function App() {
   },[baseFundsData, settings, overallXirr, globalPreCashFlows, xirrMap]);
 
   const sortedFunds = useMemo(() => {
+    if (!portfolioStats.computedFundsWithMetrics) return[];
     let list = portfolioStats.computedFundsWithMetrics.filter(f => fundTab === 'active' ? !f.isArchived : f.isArchived);
     
     if (sortConfig.key !== null) {
