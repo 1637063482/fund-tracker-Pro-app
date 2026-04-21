@@ -36,7 +36,7 @@ try {
     db = getFirestore(app);
   }
 } catch (error) {
-  console.error("Firebase 初始化失败 (当前 WebView 环境可能限制了 IndexedDB 等存储权限):", error);
+  console.error("Firebase 初始化失败:", error);
 }
 
 const evaluateExpression = (expr) => {
@@ -123,30 +123,20 @@ const AnimatedNumber = ({ value, formatter = formatMoney, className = "" }) => {
       isInitialMount.current = false;
       return;
     }
-
     let start = displayValue;
     let end = value;
     if (start === end) return;
-
     const duration = 500;
     const startTime = performance.now();
-
     const animate = (currentTime) => {
       const elapsed = currentTime - startTime;
       const progress = Math.min(elapsed / duration, 1);
-      
       const easeProgress = 1 - Math.pow(1 - progress, 3);
       const current = start + (end - start) * easeProgress;
-      
       setDisplayValue(current);
-
-      if (progress < 1) {
-        requestAnimationFrame(animate);
-      } else {
-        setDisplayValue(end);
-      }
+      if (progress < 1) requestAnimationFrame(animate);
+      else setDisplayValue(end);
     };
-
     requestAnimationFrame(animate);
   },[value]);
 
@@ -155,7 +145,7 @@ const AnimatedNumber = ({ value, formatter = formatMoney, className = "" }) => {
 
 const SmartInput = ({ value, onChange, placeholder, className, isDate = false, type = "text", disabled = false }) => {
   const [isEditing, setIsEditing] = useState(false);
-  const [localValue, setLocalValue] = useState(value || '');
+  const[localValue, setLocalValue] = useState(value || '');
 
   useEffect(() => { if (!isEditing) setLocalValue(value || ''); },[value, isEditing]);
 
@@ -185,7 +175,6 @@ const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计"
   if (total === 0 || data.length === 0) {
     return <div className="flex items-center justify-center h-48 text-slate-400 text-sm animate-in fade-in duration-500">暂无数据</div>;
   }
-
   let cumulativePercent = 0;
   const getCoordinatesForPercent = (percent) => {
     const x = Math.cos(2 * Math.PI * percent);
@@ -200,34 +189,16 @@ const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计"
           {data.map((slice, i) => {
             const value = Math.max(0, slice.value);
             if (value === 0) return null; 
-            
             const percent = value / total;
-            if (percent === 1) {
-              return (
-                <circle key={i} r="0.8" cx="0" cy="0" fill="transparent" stroke={COLORS[i % COLORS.length]} strokeWidth="0.4" />
-              );
-            }
-
+            if (percent === 1) return <circle key={i} r="0.8" cx="0" cy="0" fill="transparent" stroke={COLORS[i % COLORS.length]} strokeWidth="0.4" />;
             const[startX, startY] = getCoordinatesForPercent(cumulativePercent);
             cumulativePercent += percent;
             const[endX, endY] = getCoordinatesForPercent(cumulativePercent);
             const largeArcFlag = percent > 0.5 ? 1 : 0;
-            
-            const pathData =[
-              `M ${startX * 0.8} ${startY * 0.8}`,
-              `A 0.8 0.8 0 ${largeArcFlag} 1 ${endX * 0.8} ${endY * 0.8}`
-            ].join(' ');
+            const pathData =[`M ${startX * 0.8} ${startY * 0.8}`, `A 0.8 0.8 0 ${largeArcFlag} 1 ${endX * 0.8} ${endY * 0.8}`].join(' ');
 
             return (
-              <path 
-                key={i} 
-                d={pathData} 
-                fill="transparent" 
-                stroke={COLORS[i % COLORS.length]} 
-                strokeWidth="0.4" 
-                className="transition-all duration-300 hover:stroke-[0.45] hover:opacity-80 cursor-pointer origin-center"
-                style={{ transformOrigin: '0 0' }}
-              >
+              <path key={i} d={pathData} fill="transparent" stroke={COLORS[i % COLORS.length]} strokeWidth="0.4" className="transition-all duration-300 hover:stroke-[0.45] hover:opacity-80 cursor-pointer origin-center" style={{ transformOrigin: '0 0' }}>
                 <title>{slice.name}: {valueFormatter(slice.value)} ({formatPercent(percent)})</title>
               </path>
             );
@@ -260,7 +231,7 @@ const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计"
 };
 
 const MarketTimeIndicator = () => {
-  const [timeObj, setTimeObj] = useState(new Date());
+  const[timeObj, setTimeObj] = useState(new Date());
 
   useEffect(() => {
     const timer = setInterval(() => setTimeObj(new Date()), 1000);
@@ -281,36 +252,21 @@ const MarketTimeIndicator = () => {
     const currentTimeInMinutes = hours * 60 + mins;
 
     if (day === 0 || day === 6) return { status: '休市中', isTrading: false, countdown: null };
-
-    if (currentTimeInMinutes < 540) {
-       return { status: '未开盘', isTrading: false, countdown: null };
-    }
-
+    if (currentTimeInMinutes < 540) return { status: '未开盘', isTrading: false, countdown: null };
     if (currentTimeInMinutes >= 540 && currentTimeInMinutes < 570) {
-       const minsLeft = 570 - currentTimeInMinutes;
-       return { status: '盘前准备', isTrading: false, countdown: `距开盘仅剩 ${minsLeft} 分钟`, urgent: true };
+       return { status: '盘前准备', isTrading: false, countdown: `距开盘仅剩 ${570 - currentTimeInMinutes} 分钟`, urgent: true };
     }
-
-    if (currentTimeInMinutes >= 570 && currentTimeInMinutes < 690) {
-       return { status: '交易中 (早盘)', isTrading: true, countdown: null };
-    }
-    
+    if (currentTimeInMinutes >= 570 && currentTimeInMinutes < 690) return { status: '交易中 (早盘)', isTrading: true, countdown: null };
     if (currentTimeInMinutes >= 690 && currentTimeInMinutes < 780) {
        const minsLeft = 780 - currentTimeInMinutes;
-       if (minsLeft <= 30) {
-         return { status: '午间休市', isTrading: false, countdown: `距午盘开盘仅剩 ${minsLeft} 分钟`, urgent: true };
-       }
+       if (minsLeft <= 30) return { status: '午间休市', isTrading: false, countdown: `距午盘开盘仅剩 ${minsLeft} 分钟`, urgent: true };
        return { status: '午间休市', isTrading: false, countdown: null };
     }
-
     if (currentTimeInMinutes >= 780 && currentTimeInMinutes < 900) {
        const minsLeft = 900 - currentTimeInMinutes;
-       if (minsLeft <= 30) {
-          return { status: '交易中 (即将收盘)', isTrading: true, countdown: `距收盘仅剩 ${minsLeft} 分钟`, urgent: true };
-       }
+       if (minsLeft <= 30) return { status: '交易中(即将收盘)', isTrading: true, countdown: `距收盘仅剩 ${minsLeft} 分钟`, urgent: true };
        return { status: '交易中 (午盘)', isTrading: true, countdown: null };
     }
-
     return { status: '已收盘', isTrading: false, countdown: null };
   };
 
@@ -323,15 +279,14 @@ const MarketTimeIndicator = () => {
            <Clock className="mr-1.5 text-slate-500 w-[18px] h-[18px] xl:w-[24px] xl:h-[24px]" />
            <span className="font-mono tabular-nums tracking-wide text-base sm:text-lg xl:text-2xl">{timeObj.toLocaleDateString().replace(/\//g, '-')} {formatTime(timeObj)}</span>
          </div>
-         
-         <div className={`px-2.5 py-0.5 rounded-full text-xs xl:text-sm flex items-center border transition-colors duration-500 ${isTrading ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'}`}>
+         {/* 修复 2：加入 whitespace-nowrap 防止状态标签文字被挤成两行 */}
+         <div className={`px-2.5 py-0.5 rounded-full text-xs xl:text-sm flex items-center border transition-colors duration-500 whitespace-nowrap ${isTrading ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'}`}>
            {isTrading && <div className="w-1.5 h-1.5 xl:w-2 xl:h-2 rounded-full bg-green-500 mr-1.5 shadow-[0_0_6px_rgba(34,197,94,0.6)]"></div>}
            {status}
          </div>
       </div>
-      
       {countdown && (
-        <div className={`flex items-center px-3 py-1 rounded-md text-xs xl:text-sm font-bold transition-all duration-500 ${urgent ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 shadow-sm' : 'text-amber-600 dark:text-amber-500'}`}>
+        <div className={`flex items-center px-3 py-1 rounded-md text-xs xl:text-sm font-bold transition-all duration-500 whitespace-nowrap ${urgent ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 shadow-sm' : 'text-amber-600 dark:text-amber-500'}`}>
           <Bell className="mr-1 w-[14px] h-[14px] xl:w-[18px] xl:h-[18px] text-red-500" />
           {countdown}
         </div>
@@ -341,9 +296,9 @@ const MarketTimeIndicator = () => {
 };
 
 const LoginScreen = ({ theme, setTheme, dbError }) => {
-  const [email, setEmail] = useState('');
+  const[email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const[error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -366,7 +321,7 @@ const LoginScreen = ({ theme, setTheme, dbError }) => {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-slate-900 dark:to-slate-800 py-12 px-4 sm:px-6 lg:px-8 transition-colors duration-500">
       <div className="absolute top-4 right-4">
-        <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2.5 rounded-full bg-white/50 hover:bg-white/80 dark:bg-slate-800/50 dark:hover:bg-slate-700/80 backdrop-blur-sm text-slate-500 dark:text-slate-400 transition-all hover:scale-110 active:scale-95 shadow-sm">
+        <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2.5 rounded-full bg-white/50 hover:bg-white/80 dark:bg-slate-800/50 dark:hover:bg-slate-700/80 backdrop-blur-sm text-slate-500 dark:text-slate-400 transition-all hover:scale-110 active:scale-95 shadow-sm z-50">
           {theme === 'dark' ? <Sun size={20} className="text-yellow-400"/> : <Moon size={20}/>}
         </button>
       </div>
@@ -510,7 +465,7 @@ const ProxySettingsModal = ({ settings, onSave, onClose }) => {
 };
 
 const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
-  const [localFund, setLocalFund] = useState({
+  const[localFund, setLocalFund] = useState({
     id: fund.id, 
     name: fund.name || '',
     transactions: fund.transactions?.length > 0 ? [...fund.transactions] :[{ id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }],
@@ -522,7 +477,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
     lastNav: fund.lastNav || 0
   });
 
-  const [isFetchingLocalNav, setIsFetchingLocalNav] = useState(false);
+  const[isFetchingLocalNav, setIsFetchingLocalNav] = useState(false);
   const[localNavError, setLocalNavError] = useState('');
 
   const handleUpdateTx = (index, field, val) => {
@@ -732,9 +687,9 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
 
 export default function App() {
   const [user, setUser] = useState(null); 
-  const [authLoading, setAuthLoading] = useState(true);
+  const[authLoading, setAuthLoading] = useState(true);
   const[funds, setFunds] = useState([]); 
-  const [settings, setSettings] = useState({ 
+  const[settings, setSettings] = useState({ 
     targetAmount: 100000, 
     targetDate: '2030-12-31', 
     targetAnnualRate: 5,
@@ -743,7 +698,14 @@ export default function App() {
     dataSource: 'tencent',
     navDataSource: 'tiantian' 
   });
-  const [theme, setTheme] = useState('light'); 
+
+  // 修复 1：主题切换状态初始化和监听
+  const [theme, setTheme] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    }
+    return 'light';
+  }); 
   
   const[marketData, setMarketData] = useState([]); 
   const [isFetchingMarket, setIsFetchingMarket] = useState(false);
@@ -754,16 +716,16 @@ export default function App() {
 
   const [editingFundId, setEditingFundId] = useState(null);
   const [isProxyModalOpen, setProxyModalOpen] = useState(false); 
-  const [dbError, setDbError] = useState(''); 
+  const[dbError, setDbError] = useState(''); 
   const[isDbConnected, setIsDbConnected] = useState(false);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' }); 
   const [fundTab, setFundTab] = useState('active'); 
   
-  const [fundNavs, setFundNavs] = useState({});
+  const[fundNavs, setFundNavs] = useState({});
   const [fetchingNavCodes, setFetchingNavCodes] = useState({}); 
   const[isClosingEditor, setIsClosingEditor] = useState(false); 
   
-  const [xirrMap, setXirrMap] = useState({});
+  const[xirrMap, setXirrMap] = useState({});
   const[overallXirr, setOverallXirr] = useState(0);
   const INACTIVITY_LIMIT = 10 * 60 * 1000; 
   const logoutTimerRef = useRef(null);
@@ -771,16 +733,30 @@ export default function App() {
   const targetDateTimeoutRef = useRef(null);
   const targetRateTimeoutRef = useRef(null);
 
+  // 修复 1：更稳健的深色/浅色模式控制
   useEffect(() => {
     if (theme === 'dark') {
       document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
     } else {
       document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
     }
   }, [theme]);
 
-  // 【优化点 2】：丝滑交接原生 Splash Screen 与 Web DOM Splash 动画
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+  };
+
   useEffect(() => {
+    try {
+      if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
+        SplashScreen.hide().catch(() => {});
+      }
+    } catch (e) {
+      console.warn("隐藏原生开屏异常", e);
+    }
+
     const ultimateFallbackTimer = setTimeout(() => {
       try {
         const splash = document.getElementById('global-splash');
@@ -788,35 +764,23 @@ export default function App() {
           splash.style.opacity = '0';
           setTimeout(() => splash.remove(), 500);
         }
-        if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
-          SplashScreen.hide().catch(() => {});
-        }
       } catch (e) {}
-    }, 5000); 
+    }, 8000); 
 
     if (!authLoading) {
-      // 1. React 渲染完成，先立刻干掉原生的那张静态图片
-      try {
-        if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
-          SplashScreen.hide().catch(() => {});
-        }
-      } catch (e) {}
-
-      // 2. 原生静态图消失后，暴露出底下我们写的 HTML 呼吸灯动画
-      // 让 DOM 开屏动画缓冲一小会儿再渐隐，实现无缝过渡
-      const MIN_SPLASH_TIME = window.__splashStartTime ? Math.max(0, 1000 - (Date.now() - window.__splashStartTime)) : 600;
+      const HTML_SPLASH_MIN_TIME = window.__splashStartTime ? Math.max(0, 1000 - (Date.now() - window.__splashStartTime)) : 1000;
       
       setTimeout(() => {
         const splash = document.getElementById('global-splash');
         if (splash) {
-          splash.style.opacity = '0'; // 渐隐消失
+          splash.style.opacity = '0'; 
            setTimeout(() => {
             splash.style.display = 'none';
             splash.remove(); 
           }, 500); 
         }
         clearTimeout(ultimateFallbackTimer); 
-      }, MIN_SPLASH_TIME);
+      }, HTML_SPLASH_MIN_TIME);
     }
 
     return () => clearTimeout(ultimateFallbackTimer);
@@ -841,7 +805,7 @@ export default function App() {
   }, [user, handleSignOut]);
 
   useEffect(() => {
-    const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
+    const events =['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
     const handleActivity = () => resetLogoutTimer();
     
     if (user) {
@@ -855,12 +819,11 @@ export default function App() {
     };
   }, [user, resetLogoutTimer]);
 
-  // 【优化点 1】：精简 Firebase 检测逻辑，直接删除了匿名登录的尝试逻辑
   useEffect(() => {
     const fallbackTimer = setTimeout(() => {
-      console.warn("Firebase 认证状态检测超时，强制解除开屏状态");
+      console.warn("Firebase 认证状态检测超时，触发熔断，解除加载状态");
       setAuthLoading(false); 
-    }, 5000);
+    }, 8000);
 
     if (!auth) {
       clearTimeout(fallbackTimer);
@@ -1180,7 +1143,7 @@ export default function App() {
     if (!isAutoRefresh) return; 
     const intervalId = setInterval(manualFetch, 5000); 
     return () => clearInterval(intervalId); 
-  }, [isAutoRefresh, manualFetch, user]);
+  },[isAutoRefresh, manualFetch, user]);
 
   const handleCloseEditor = () => {
      setIsClosingEditor(true);
@@ -1357,7 +1320,7 @@ export default function App() {
 
     const preXirrPayloads = baseFundsData.map(f => ({ id: f.id, flows: f._flows }));
     return { baseFundsData, preXirrPayloads, globalPreCashFlows };
-  }, [funds, fundNavs, xirrMap]);
+  },[funds, fundNavs, xirrMap]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -1389,7 +1352,7 @@ export default function App() {
   }, [preXirrPayloads, globalPreCashFlows]);
 
   const portfolioStats = useMemo(() => {
-    if (!baseFundsData) return { pieData:[], contributionPieData: [], rankedByXirr: [], rankedByProfit: [], computedFundsWithMetrics:[] };
+    if (!baseFundsData) return { pieData:[], contributionPieData: [], rankedByXirr:[], rankedByProfit: [], computedFundsWithMetrics:[] };
 
     const baseFunds = baseFundsData.map(f => ({ ...f, xirr: xirrMap[f.id] || 0 }));
 
@@ -1528,14 +1491,15 @@ export default function App() {
     return null;
   }, [editingFundId, funds]);
 
+  // 修复 1：最外层包裹 div 必须强制应用背景色和主题控制，以确保 dark 模式能正常切换
   return (
-    <>
+    <div className="min-h-screen text-slate-800 dark:text-slate-200 bg-slate-50 dark:bg-slate-900 transition-colors duration-500">
       {!authLoading && !user && (
-         <LoginScreen theme={theme} setTheme={setTheme} dbError={dbError} />
+         <LoginScreen theme={theme} setTheme={toggleTheme} dbError={dbError} />
       )}
 
       {!authLoading && user && (
-        <div className="min-h-screen text-slate-800 dark:text-slate-200 pb-10 relative animate-in fade-in duration-700 bg-slate-50 dark:bg-slate-900">
+        <div className="pb-10 relative animate-in fade-in duration-700">
           
           <header className="bg-white/90 dark:bg-slate-800/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-700 sticky top-0 z-30 shadow-sm transition-colors duration-500">
             <div className="max-w-[1600px] mx-auto px-4 h-16 flex items-center justify-between">
@@ -1572,7 +1536,8 @@ export default function App() {
                   </div>
                 )}
 
-                <button type="button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors active:scale-90">
+                {/* 修复 1：传递正确的 toggleTheme 供按钮切换 */}
+                <button type="button" onClick={toggleTheme} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors active:scale-90 z-50">
                   {theme === 'dark' ? <Sun size={20} className="text-yellow-400"/> : <Moon size={20}/>}
                 </button>
                 <div className="flex items-center bg-slate-100 dark:bg-slate-700 rounded-full pr-1 pl-3 py-1 transition-colors shadow-sm">
@@ -1653,23 +1618,24 @@ export default function App() {
                 
                 <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden flex flex-col transition-colors duration-500">
                   
-                  {/* 【优化点 3】：移动端无换行且自适应的紧凑型菜单栏 */}
-                  <div className="flex justify-between items-end border-b dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/20 px-3 sm:px-5 pt-4 sm:pt-5 relative overflow-x-auto no-scrollbar">
+                  {/* 修复 3、4：完美对齐的 Tabs 栏与响应式排版 */}
+                  <div className="flex flex-wrap sm:flex-nowrap justify-between items-end border-b dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/20 px-3 sm:px-5 pt-3 sm:pt-5 gap-y-3 relative overflow-x-auto no-scrollbar">
                     
-                    <div className="flex space-x-0 sm:space-x-4 h-full relative shrink-0">
-                      <button type="button" onClick={() => setFundTab('active')} className={`pb-3 px-3 sm:px-4 text-sm sm:text-lg font-bold flex items-center whitespace-nowrap transition-all duration-300 ${fundTab === 'active' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
-                          <PieChart className="mr-1 sm:mr-1.5 w-4 h-4 sm:w-5 sm:h-5" /> 投资组合
+                    <div className="flex space-x-2 sm:space-x-6 h-full shrink-0 min-w-max">
+                      <button type="button" onClick={() => setFundTab('active')} className={`relative pb-3 px-2 sm:px-4 text-sm sm:text-lg font-bold flex items-center transition-all duration-300 ${fundTab === 'active' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
+                          <PieChart className="mr-1.5 w-4 h-4 sm:w-5 sm:h-5" /> 投资组合持仓
+                          {/* 下划线作为伪元素相对按钮居中 */}
+                          {fundTab === 'active' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 dark:bg-blue-400 rounded-t-full transition-all duration-300"></div>}
                       </button>
-                      <button type="button" onClick={() => setFundTab('archived')} className={`pb-3 px-3 sm:px-4 text-sm sm:text-lg font-bold flex items-center whitespace-nowrap transition-all duration-300 ${fundTab === 'archived' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
-                          <Archive className="mr-1 sm:mr-1.5 w-4 h-4 sm:w-5 sm:h-5" /> 清仓历史
+                      <button type="button" onClick={() => setFundTab('archived')} className={`relative pb-3 px-2 sm:px-4 text-sm sm:text-lg font-bold flex items-center transition-all duration-300 ${fundTab === 'archived' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
+                          <Archive className="mr-1.5 w-4 h-4 sm:w-5 sm:h-5" /> 已清仓历史
+                          {fundTab === 'archived' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-500 dark:bg-amber-400 rounded-t-full transition-all duration-300"></div>}
                       </button>
-                      
-                      <div className={`absolute bottom-0 h-0.5 transition-all duration-300 ease-out rounded-t-full ${fundTab === 'active' ? 'bg-blue-600 dark:bg-blue-400 w-[5.5rem] sm:w-[8rem] left-0 ml-1.5 sm:ml-2' : 'bg-amber-500 dark:bg-amber-400 w-[5.5rem] sm:w-[8rem] translate-x-[5.5rem] sm:translate-x-[8.5rem]'}`}></div>
                     </div>
                     
-                    <button type="button" onClick={() => setEditingFundId('new')} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg text-sm font-medium flex items-center shrink-0 transition-all shadow-sm hover:shadow-md active:scale-95 mb-2 group">
+                    <button type="button" onClick={() => setEditingFundId('new')} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg text-sm font-medium flex items-center shrink-0 min-w-max transition-all shadow-sm hover:shadow-md active:scale-95 mb-2 group">
                       <Plus className="w-4 h-4 sm:w-5 sm:h-5 sm:mr-1 transition-transform group-hover:rotate-90 duration-300" /> 
-                      <span className="hidden sm:inline">新增资产</span><span className="sm:hidden ml-1">新增</span>
+                      <span>新增资产记录</span>
                     </button>
                   </div>
 
@@ -1958,6 +1924,6 @@ export default function App() {
           )}
         </div>
       )}
-    </>
+    </div>
   );
 }
