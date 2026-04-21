@@ -9,7 +9,7 @@ import {
 import { SplashScreen } from '@capacitor/splash-screen';
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, onAuthStateChanged, signInWithCustomToken, signInAnonymously, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query } from 'firebase/firestore';
 
 const USER_FIREBASE_CONFIG = {
@@ -114,7 +114,7 @@ const PROXY_NODES =[
 ];
 
 const AnimatedNumber = ({ value, formatter = formatMoney, className = "" }) => {
-  const [displayValue, setDisplayValue] = useState(value);
+  const[displayValue, setDisplayValue] = useState(value);
   const isInitialMount = useRef(true);
 
   useEffect(() => {
@@ -154,7 +154,7 @@ const AnimatedNumber = ({ value, formatter = formatMoney, className = "" }) => {
 };
 
 const SmartInput = ({ value, onChange, placeholder, className, isDate = false, type = "text", disabled = false }) => {
-  const[isEditing, setIsEditing] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [localValue, setLocalValue] = useState(value || '');
 
   useEffect(() => { if (!isEditing) setLocalValue(value || ''); },[value, isEditing]);
@@ -208,7 +208,7 @@ const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计"
               );
             }
 
-            const [startX, startY] = getCoordinatesForPercent(cumulativePercent);
+            const[startX, startY] = getCoordinatesForPercent(cumulativePercent);
             cumulativePercent += percent;
             const[endX, endY] = getCoordinatesForPercent(cumulativePercent);
             const largeArcFlag = percent > 0.5 ? 1 : 0;
@@ -260,7 +260,7 @@ const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计"
 };
 
 const MarketTimeIndicator = () => {
-  const[timeObj, setTimeObj] = useState(new Date());
+  const [timeObj, setTimeObj] = useState(new Date());
 
   useEffect(() => {
     const timer = setInterval(() => setTimeObj(new Date()), 1000);
@@ -420,9 +420,9 @@ const LoginScreen = ({ theme, setTheme, dbError }) => {
 };
 
 const ProxySettingsModal = ({ settings, onSave, onClose }) => {
-  const [mode, setMode] = useState(settings.proxyMode || 'builtin');
-  const[customUrl, setCustomUrl] = useState(settings.customProxyUrl || '');
-  const[dataSource, setDataSource] = useState(settings.dataSource || 'tencent');
+  const[mode, setMode] = useState(settings.proxyMode || 'builtin');
+  const [customUrl, setCustomUrl] = useState(settings.customProxyUrl || '');
+  const [dataSource, setDataSource] = useState(settings.dataSource || 'tencent');
   const [navDataSource, setNavDataSource] = useState(settings.navDataSource || 'tiantian'); 
   const [isClosing, setIsClosing] = useState(false);
 
@@ -513,7 +513,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
   const [localFund, setLocalFund] = useState({
     id: fund.id, 
     name: fund.name || '',
-    transactions: fund.transactions?.length > 0 ?[...fund.transactions] :[{ id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }],
+    transactions: fund.transactions?.length > 0 ? [...fund.transactions] :[{ id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }],
     currentValueRaw: fund.currentValueRaw || '',
     mode: fund.mode || 'manual', 
     fundCode: fund.fundCode || '',
@@ -522,11 +522,11 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
     lastNav: fund.lastNav || 0
   });
 
-  const[isFetchingLocalNav, setIsFetchingLocalNav] = useState(false);
-  const [localNavError, setLocalNavError] = useState('');
+  const [isFetchingLocalNav, setIsFetchingLocalNav] = useState(false);
+  const[localNavError, setLocalNavError] = useState('');
 
   const handleUpdateTx = (index, field, val) => {
-    const updated =[...localFund.transactions];
+    const updated = [...localFund.transactions];
     updated[index] = { ...updated[index], [field]: val };
     setLocalFund({ ...localFund, transactions: updated });
   };
@@ -554,7 +554,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
         return (Number(localFund.shares) || 0) * nav;
      }
      return evaluateExpression(localFund.currentValueRaw);
-  },[localFund, fundNavs]);
+  }, [localFund, fundNavs]);
 
   const canArchive = currentEstimatedValue <= 0.01;
 
@@ -731,9 +731,9 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
 };
 
 export default function App() {
-  const[user, setUser] = useState(null); 
+  const [user, setUser] = useState(null); 
   const [authLoading, setAuthLoading] = useState(true);
-  const [funds, setFunds] = useState([]); 
+  const[funds, setFunds] = useState([]); 
   const [settings, setSettings] = useState({ 
     targetAmount: 100000, 
     targetDate: '2030-12-31', 
@@ -747,24 +747,24 @@ export default function App() {
   
   const[marketData, setMarketData] = useState([]); 
   const [isFetchingMarket, setIsFetchingMarket] = useState(false);
-  const[marketError, setMarketError] = useState('');
-  const[activeProxyIndex, setActiveProxyIndex] = useState(0); 
+  const [marketError, setMarketError] = useState('');
+  const [activeProxyIndex, setActiveProxyIndex] = useState(0); 
   const isFetchingRef = useRef(false); 
-  const [isAutoRefresh, setIsAutoRefresh] = useState(checkIsTradingTime()); 
+  const[isAutoRefresh, setIsAutoRefresh] = useState(checkIsTradingTime()); 
 
-  const[editingFundId, setEditingFundId] = useState(null);
-  const[isProxyModalOpen, setProxyModalOpen] = useState(false); 
+  const [editingFundId, setEditingFundId] = useState(null);
+  const [isProxyModalOpen, setProxyModalOpen] = useState(false); 
   const [dbError, setDbError] = useState(''); 
-  const [isDbConnected, setIsDbConnected] = useState(false);
-  const[sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' }); 
-  const[fundTab, setFundTab] = useState('active'); 
+  const[isDbConnected, setIsDbConnected] = useState(false);
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' }); 
+  const [fundTab, setFundTab] = useState('active'); 
   
-  const[fundNavs, setFundNavs] = useState({});
-  const[fetchingNavCodes, setFetchingNavCodes] = useState({}); 
-  const [isClosingEditor, setIsClosingEditor] = useState(false); 
+  const [fundNavs, setFundNavs] = useState({});
+  const [fetchingNavCodes, setFetchingNavCodes] = useState({}); 
+  const[isClosingEditor, setIsClosingEditor] = useState(false); 
   
-  const[xirrMap, setXirrMap] = useState({});
-  const [overallXirr, setOverallXirr] = useState(0);
+  const [xirrMap, setXirrMap] = useState({});
+  const[overallXirr, setOverallXirr] = useState(0);
   const INACTIVITY_LIMIT = 10 * 60 * 1000; 
   const logoutTimerRef = useRef(null);
   const targetAmountTimeoutRef = useRef(null); 
@@ -779,7 +779,7 @@ export default function App() {
     }
   }, [theme]);
 
-  // 修复 1：安全的 Capacitor 开屏销毁 + Web 端强行清理 DOM 的兜底机制
+  // 【优化点 2】：丝滑交接原生 Splash Screen 与 Web DOM Splash 动画
   useEffect(() => {
     const ultimateFallbackTimer = setTimeout(() => {
       try {
@@ -795,31 +795,28 @@ export default function App() {
     }, 5000); 
 
     if (!authLoading) {
-      const MIN_SPLASH_TIME = 1500; 
-      const loadStartTime = window.__splashStartTime || Date.now();
-      const elapsed = Date.now() - loadStartTime;
-      const remaining = Math.max(0, MIN_SPLASH_TIME - elapsed);
+      // 1. React 渲染完成，先立刻干掉原生的那张静态图片
+      try {
+        if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
+          SplashScreen.hide().catch(() => {});
+        }
+      } catch (e) {}
 
-      setTimeout(async () => {
+      // 2. 原生静态图消失后，暴露出底下我们写的 HTML 呼吸灯动画
+      // 让 DOM 开屏动画缓冲一小会儿再渐隐，实现无缝过渡
+      const MIN_SPLASH_TIME = window.__splashStartTime ? Math.max(0, 1000 - (Date.now() - window.__splashStartTime)) : 600;
+      
+      setTimeout(() => {
         const splash = document.getElementById('global-splash');
         if (splash) {
-          splash.style.opacity = '0';
+          splash.style.opacity = '0'; // 渐隐消失
            setTimeout(() => {
             splash.style.display = 'none';
             splash.remove(); 
           }, 500); 
         }
-        
-        try {
-          if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
-            await SplashScreen.hide();
-          }
-        } catch (e) {
-          console.warn("Capacitor SplashScreen 隐藏失败(可能在纯Web环境):", e);
-        }
-        
         clearTimeout(ultimateFallbackTimer); 
-      }, remaining);
+      }, MIN_SPLASH_TIME);
     }
 
     return () => clearTimeout(ultimateFallbackTimer);
@@ -844,7 +841,7 @@ export default function App() {
   }, [user, handleSignOut]);
 
   useEffect(() => {
-    const events =['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
+    const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
     const handleActivity = () => resetLogoutTimer();
     
     if (user) {
@@ -858,7 +855,7 @@ export default function App() {
     };
   }, [user, resetLogoutTimer]);
 
-  // 修复 2：Firebase 认证的强制异常捕获和解锁，防止卡死
+  // 【优化点 1】：精简 Firebase 检测逻辑，直接删除了匿名登录的尝试逻辑
   useEffect(() => {
     const fallbackTimer = setTimeout(() => {
       console.warn("Firebase 认证状态检测超时，强制解除开屏状态");
@@ -870,21 +867,6 @@ export default function App() {
       setAuthLoading(false);
       return;
     }
-    
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (e) {
-        console.error("Auth Init Error:", e);
-        setAuthLoading(false);
-      }
-    };
-    
-    initAuth();
     
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       clearTimeout(fallbackTimer);
@@ -935,13 +917,13 @@ export default function App() {
      let codesToQuery =[];
      if (codeToFetch) {
          codesToQuery.push(codeToFetch);
-         setFetchingNavCodes(prev => ({...prev,[codeToFetch]: true}));
+         setFetchingNavCodes(prev => ({...prev, [codeToFetch]: true}));
      } else {
          codesToQuery = funds.filter(f => f.mode === 'auto' && !f.isArchived && f.fundCode).map(f => f.fundCode);
      }
      
      if (codesToQuery.length === 0) return false;
-     codesToQuery = [...new Set(codesToQuery)];
+     codesToQuery =[...new Set(codesToQuery)];
      const newNavs = { ...fundNavs };
      let hasChanges = false;
      let fetchSuccess = false;
@@ -1309,7 +1291,6 @@ export default function App() {
     linkElement.click();
   };
 
-  // 修复 3：修正变量解构 `baseFundsData` 造成的致命 React 渲染崩溃
   const { baseFundsData, preXirrPayloads, globalPreCashFlows } = useMemo(() => {
     const globalPreCashFlows =[];
     
@@ -1405,10 +1386,10 @@ export default function App() {
     computeAllXirrAsync();
 
     return () => { isCancelled = true; };
-  },[preXirrPayloads, globalPreCashFlows]);
+  }, [preXirrPayloads, globalPreCashFlows]);
 
   const portfolioStats = useMemo(() => {
-    if (!baseFundsData) return { pieData: [], contributionPieData: [], rankedByXirr:[], rankedByProfit: [], computedFundsWithMetrics:[] };
+    if (!baseFundsData) return { pieData:[], contributionPieData: [], rankedByXirr: [], rankedByProfit: [], computedFundsWithMetrics:[] };
 
     const baseFunds = baseFundsData.map(f => ({ ...f, xirr: xirrMap[f.id] || 0 }));
 
@@ -1441,7 +1422,7 @@ export default function App() {
       .map(f => ({ name: f.name, value: f.contribution }))
       .sort((a, b) => b.value - a.value);
       
-    const rankedByXirr = [...computedFundsWithMetrics].filter(f => f.transactions.length > 0).sort((a, b) => b.xirr - a.xirr);
+    const rankedByXirr =[...computedFundsWithMetrics].filter(f => f.transactions.length > 0).sort((a, b) => b.xirr - a.xirr);
     const rankedByProfit = [...computedFundsWithMetrics].filter(f => f.transactions.length > 0).sort((a, b) => b.profit - a.profit);
     
     const netTotalInvested = Math.max(0, portfolioTotalCurrentValue - portfolioTotalProfit);
@@ -1672,18 +1653,23 @@ export default function App() {
                 
                 <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden flex flex-col transition-colors duration-500">
                   
-                  <div className="flex justify-between items-end border-b dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/20 px-4 sm:px-5 pt-4 sm:pt-5 relative">
-                    <div className="flex space-x-1 sm:space-x-4 h-full relative">
-                      <button type="button" onClick={() => setFundTab('active')} className={`pb-3 px-2 sm:px-4 text-base sm:text-lg font-bold flex items-center transition-all duration-300 ${fundTab === 'active' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
-                          <PieChart className="mr-1.5" size={20}/> 投资组合持仓
+                  {/* 【优化点 3】：移动端无换行且自适应的紧凑型菜单栏 */}
+                  <div className="flex justify-between items-end border-b dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/20 px-3 sm:px-5 pt-4 sm:pt-5 relative overflow-x-auto no-scrollbar">
+                    
+                    <div className="flex space-x-0 sm:space-x-4 h-full relative shrink-0">
+                      <button type="button" onClick={() => setFundTab('active')} className={`pb-3 px-3 sm:px-4 text-sm sm:text-lg font-bold flex items-center whitespace-nowrap transition-all duration-300 ${fundTab === 'active' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
+                          <PieChart className="mr-1 sm:mr-1.5 w-4 h-4 sm:w-5 sm:h-5" /> 投资组合
                       </button>
-                      <button type="button" onClick={() => setFundTab('archived')} className={`pb-3 px-2 sm:px-4 text-base sm:text-lg font-bold flex items-center transition-all duration-300 ${fundTab === 'archived' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
-                          <Archive className="mr-1.5" size={20}/> 已清仓历史
+                      <button type="button" onClick={() => setFundTab('archived')} className={`pb-3 px-3 sm:px-4 text-sm sm:text-lg font-bold flex items-center whitespace-nowrap transition-all duration-300 ${fundTab === 'archived' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
+                          <Archive className="mr-1 sm:mr-1.5 w-4 h-4 sm:w-5 sm:h-5" /> 清仓历史
                       </button>
-                      <div className={`absolute bottom-0 h-0.5 transition-all duration-300 ease-out ${fundTab === 'active' ? 'bg-blue-600 dark:bg-blue-400 w-32 sm:w-40 left-0' : 'bg-amber-500 dark:bg-amber-400 w-32 sm:w-40 translate-x-[8.5rem] sm:translate-x-[11rem]'}`}></div>
+                      
+                      <div className={`absolute bottom-0 h-0.5 transition-all duration-300 ease-out rounded-t-full ${fundTab === 'active' ? 'bg-blue-600 dark:bg-blue-400 w-[5.5rem] sm:w-[8rem] left-0 ml-1.5 sm:ml-2' : 'bg-amber-500 dark:bg-amber-400 w-[5.5rem] sm:w-[8rem] translate-x-[5.5rem] sm:translate-x-[8.5rem]'}`}></div>
                     </div>
-                    <button type="button" onClick={() => setEditingFundId('new')} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-4 py-2 sm:px-5 sm:py-2.5 rounded-lg text-sm font-medium flex items-center transition-all shadow-sm hover:shadow-md active:scale-95 mb-3 group">
-                      <Plus size={18} className="mr-1 transition-transform group-hover:rotate-90 duration-300" /> <span className="hidden sm:inline">新增基金</span><span className="sm:hidden">新增</span>
+                    
+                    <button type="button" onClick={() => setEditingFundId('new')} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg text-sm font-medium flex items-center shrink-0 transition-all shadow-sm hover:shadow-md active:scale-95 mb-2 group">
+                      <Plus className="w-4 h-4 sm:w-5 sm:h-5 sm:mr-1 transition-transform group-hover:rotate-90 duration-300" /> 
+                      <span className="hidden sm:inline">新增资产</span><span className="sm:hidden ml-1">新增</span>
                     </button>
                   </div>
 

@@ -6,10 +6,10 @@ import {
   ArrowUp, ArrowDown, Download, Settings, Database, Clock, Bell,
   Play, Pause, Archive, RefreshCcw, CheckCircle2
 } from 'lucide-react';
+import { SplashScreen } from '@capacitor/splash-screen';
 
-// 替换为标准 npm 导入方式
 import { initializeApp } from 'firebase/app';
-import { getAuth, onAuthStateChanged, signInWithCustomToken, signInAnonymously, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query } from 'firebase/firestore';
 
 const USER_FIREBASE_CONFIG = {
@@ -26,14 +26,17 @@ const firebaseConfig = (typeof __firebase_config !== 'undefined' && __firebase_c
   ? JSON.parse(__firebase_config) 
   : USER_FIREBASE_CONFIG;
 
-// 修复：将 appId 中的斜杠替换为连字符，防止 Firestore 将其误识别为多层嵌套路径（导致路径变为偶数段）
 const appId = typeof __app_id !== 'undefined' ? String(__app_id).replace(/\//g, '-') : 'my-fund-tracker';
 
 let app, auth, db;
-if (firebaseConfig.apiKey) {
-  app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
+try {
+  if (firebaseConfig.apiKey) {
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+  }
+} catch (error) {
+  console.error("Firebase 初始化失败 (当前 WebView 环境可能限制了 IndexedDB 等存储权限):", error);
 }
 
 const evaluateExpression = (expr) => {
@@ -74,7 +77,6 @@ const calculateXIRR = (cashFlows) => {
   let low = -0.999999;
   let high = 10000;   
   let rate = 0;
-
   for (let i = 0; i < 100; i++) {
     rate = (low + high) / 2;
     let val = xnpv(rate);
@@ -103,7 +105,7 @@ const ASSET_NAMES = {
   'sh511090': '30年期国债ETF'
 };
 
-const PROXY_NODES = [
+const PROXY_NODES =[
   { name: '节点 1 (AllOrigins-Raw)', fetcher: async (url) => { const r = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`); return await r.text(); } },
   { name: '节点 2 (ThingProxy)', fetcher: async (url) => { const r = await fetch(`https://thingproxy.freeboard.io/fetch/${url}`); return await r.text(); } },
   { name: '节点 3 (CorsProxy.io)', fetcher: async (url) => { const r = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`); return await r.text(); } },
@@ -111,8 +113,8 @@ const PROXY_NODES = [
   { name: '节点 5 (AllOrigins-JSON)', fetcher: async (url) => { const r = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`); const d = await r.json(); return d.contents; } }
 ];
 
-const AnimatedNumber = ({ value, formatter = formatMoney, className }) => {
-  const [displayValue, setDisplayValue] = useState(value);
+const AnimatedNumber = ({ value, formatter = formatMoney, className = "" }) => {
+  const[displayValue, setDisplayValue] = useState(value);
   const isInitialMount = useRef(true);
 
   useEffect(() => {
@@ -146,16 +148,16 @@ const AnimatedNumber = ({ value, formatter = formatMoney, className }) => {
     };
 
     requestAnimationFrame(animate);
-  }, [value]);
+  },[value]);
 
-  return <span className={className}>{formatter(displayValue)}</span>;
+  return <span className={`tabular-nums ${className}`}>{formatter(displayValue)}</span>;
 };
 
 const SmartInput = ({ value, onChange, placeholder, className, isDate = false, type = "text", disabled = false }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [localValue, setLocalValue] = useState(value || '');
 
-  useEffect(() => { if (!isEditing) setLocalValue(value || ''); }, [value, isEditing]);
+  useEffect(() => { if (!isEditing) setLocalValue(value || ''); },[value, isEditing]);
 
   const handleBlur = () => {
     setIsEditing(false);
@@ -177,7 +179,7 @@ const SmartInput = ({ value, onChange, placeholder, className, isDate = false, t
 };
 
 const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计" }) => {
-  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#14b8a6', '#84cc16'];
+  const COLORS =['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#14b8a6', '#84cc16'];
   const total = data.reduce((sum, item) => sum + Math.max(0, item.value), 0);
   
   if (total === 0 || data.length === 0) {
@@ -188,7 +190,7 @@ const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计"
   const getCoordinatesForPercent = (percent) => {
     const x = Math.cos(2 * Math.PI * percent);
     const y = Math.sin(2 * Math.PI * percent);
-    return [x, y];
+    return[x, y];
   };
 
   return (
@@ -206,12 +208,12 @@ const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计"
               );
             }
 
-            const [startX, startY] = getCoordinatesForPercent(cumulativePercent);
+            const[startX, startY] = getCoordinatesForPercent(cumulativePercent);
             cumulativePercent += percent;
-            const [endX, endY] = getCoordinatesForPercent(cumulativePercent);
+            const[endX, endY] = getCoordinatesForPercent(cumulativePercent);
             const largeArcFlag = percent > 0.5 ? 1 : 0;
             
-            const pathData = [
+            const pathData =[
               `M ${startX * 0.8} ${startY * 0.8}`,
               `A 0.8 0.8 0 ${largeArcFlag} 1 ${endX * 0.8} ${endY * 0.8}`
             ].join(' ');
@@ -248,7 +250,7 @@ const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计"
                 <div className="w-2.5 h-2.5 rounded-sm mr-1.5 shrink-0 shadow-sm" style={{backgroundColor: COLORS[i % COLORS.length]}}></div>
                 <span className="truncate text-slate-600 dark:text-slate-400" title={slice.name}>{slice.name}</span>
               </div>
-              <span className="font-mono text-slate-800 dark:text-slate-200 font-medium pl-4">{formatPercent(slice.value/total)}</span>
+              <span className="font-mono text-slate-800 dark:text-slate-200 font-medium pl-4 tabular-nums">{formatPercent(slice.value/total)}</span>
             </div>
           );
         })}
@@ -263,7 +265,7 @@ const MarketTimeIndicator = () => {
   useEffect(() => {
     const timer = setInterval(() => setTimeObj(new Date()), 1000);
     return () => clearInterval(timer);
-  }, []);
+  },[]);
 
   const formatTime = (date) => {
     const h = date.getHours().toString().padStart(2, '0');
@@ -277,7 +279,7 @@ const MarketTimeIndicator = () => {
     const hours = date.getHours();
     const mins = date.getMinutes();
     const currentTimeInMinutes = hours * 60 + mins;
-    
+
     if (day === 0 || day === 6) return { status: '休市中', isTrading: false, countdown: null };
 
     if (currentTimeInMinutes < 540) {
@@ -315,21 +317,22 @@ const MarketTimeIndicator = () => {
   const { status, isTrading, countdown, urgent } = getMarketStatus(timeObj);
 
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center text-sm font-medium">
+    <div className="flex flex-col sm:flex-row sm:items-center text-sm font-medium transform-gpu" style={{ willChange: 'transform' }}>
       <div className="flex items-center space-x-3 mb-2 sm:mb-0 sm:mr-4">
          <div className="flex items-center text-slate-700 dark:text-slate-300">
            <Clock className="mr-1.5 text-slate-500 w-[18px] h-[18px] xl:w-[24px] xl:h-[24px]" />
-           <span className="font-mono tracking-wide text-base sm:text-lg xl:text-2xl transition-all">{timeObj.toLocaleDateString().replace(/\//g, '-')} {formatTime(timeObj)}</span>
+           <span className="font-mono tabular-nums tracking-wide text-base sm:text-lg xl:text-2xl">{timeObj.toLocaleDateString().replace(/\//g, '-')} {formatTime(timeObj)}</span>
          </div>
+         
          <div className={`px-2.5 py-0.5 rounded-full text-xs xl:text-sm flex items-center border transition-colors duration-500 ${isTrading ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'}`}>
-           {isTrading && <div className="w-1.5 h-1.5 xl:w-2 xl:h-2 rounded-full bg-green-500 mr-1.5 animate-pulse"></div>}
+           {isTrading && <div className="w-1.5 h-1.5 xl:w-2 xl:h-2 rounded-full bg-green-500 mr-1.5 shadow-[0_0_6px_rgba(34,197,94,0.6)]"></div>}
            {status}
          </div>
       </div>
       
       {countdown && (
-        <div className={`flex items-center px-3 py-1 rounded-md text-xs xl:text-sm font-bold transition-all duration-500 ${urgent ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 animate-pulse-fast shadow-sm' : 'text-amber-600 dark:text-amber-500'}`}>
-          <Bell className={`mr-1 w-[14px] h-[14px] xl:w-[18px] xl:h-[18px] ${urgent ? 'animate-bounce' : ''}`} />
+        <div className={`flex items-center px-3 py-1 rounded-md text-xs xl:text-sm font-bold transition-all duration-500 ${urgent ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 shadow-sm' : 'text-amber-600 dark:text-amber-500'}`}>
+          <Bell className="mr-1 w-[14px] h-[14px] xl:w-[18px] xl:h-[18px] text-red-500" />
           {countdown}
         </div>
       )}
@@ -417,7 +420,7 @@ const LoginScreen = ({ theme, setTheme, dbError }) => {
 };
 
 const ProxySettingsModal = ({ settings, onSave, onClose }) => {
-  const [mode, setMode] = useState(settings.proxyMode || 'builtin');
+  const[mode, setMode] = useState(settings.proxyMode || 'builtin');
   const [customUrl, setCustomUrl] = useState(settings.customProxyUrl || '');
   const [dataSource, setDataSource] = useState(settings.dataSource || 'tencent');
   const [navDataSource, setNavDataSource] = useState(settings.navDataSource || 'tiantian'); 
@@ -460,8 +463,8 @@ const ProxySettingsModal = ({ settings, onSave, onClose }) => {
                 { id: 'danjuan', label: '蛋卷基金', desc: '需代理格式佳' }
               ].map((src) => (
                 <button key={src.id} type="button" onClick={() => setNavDataSource(src.id)} className={`p-2.5 border rounded-xl flex flex-col items-center justify-center transition-all duration-200 active:scale-95 text-sm font-medium ${navDataSource === src.id ? 'bg-blue-50 border-blue-500 text-blue-700 dark:bg-blue-900/30 dark:border-blue-500 dark:text-blue-300 shadow-sm' : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-700/50'}`}>
-                   <span>{src.label}</span>
-                   <span className="text-[10px] font-normal opacity-80 mt-0.5">({src.desc})</span>
+                  <span>{src.label}</span>
+                  <span className="text-[10px] font-normal opacity-80 mt-0.5">({src.desc})</span>
                 </button>
               ))}
             </div>
@@ -510,7 +513,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
   const [localFund, setLocalFund] = useState({
     id: fund.id, 
     name: fund.name || '',
-    transactions: fund.transactions?.length > 0 ? [...fund.transactions] : [{ id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }],
+    transactions: fund.transactions?.length > 0 ? [...fund.transactions] :[{ id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }],
     currentValueRaw: fund.currentValueRaw || '',
     mode: fund.mode || 'manual', 
     fundCode: fund.fundCode || '',
@@ -520,7 +523,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
   });
 
   const [isFetchingLocalNav, setIsFetchingLocalNav] = useState(false);
-  const [localNavError, setLocalNavError] = useState('');
+  const[localNavError, setLocalNavError] = useState('');
 
   const handleUpdateTx = (index, field, val) => {
     const updated = [...localFund.transactions];
@@ -532,14 +535,12 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
      if (!localFund.fundCode) return;
      setIsFetchingLocalNav(true);
      setLocalNavError('');
-     
      const result = await fetchNavManually(localFund.fundCode);
      if (!result) {
         setLocalNavError('获取失败，请检查代码或重试');
      } else {
         const isCurrentlyOfficial = Object.values(fundNavs).some(navObj => navObj.name === localFund.name);
         const canOverwriteName = !localFund.name || localFund.name === '未知名称' || isCurrentlyOfficial;
-
         if (result.name && result.name !== '未知名称' && canOverwriteName) {
            setLocalFund(prev => ({ ...prev, name: result.name }));
         }
@@ -604,7 +605,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
         {localFund.mode === 'manual' ? (
           <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800 animate-in zoom-in-95 duration-300">
             <label className="text-sm font-bold mb-1.5 block text-slate-700 dark:text-slate-300 pl-1">现持仓总市值 (元)</label>
-            <SmartInput value={localFund.currentValueRaw} onChange={(raw) => setLocalFund({...localFund, currentValueRaw: raw})} placeholder="请输入现在的账面总价值，支持简单公式如 =10000+500" className="w-full py-3 shadow-sm bg-white" />
+            <SmartInput value={localFund.currentValueRaw} onChange={(raw) => setLocalFund({...localFund, currentValueRaw: raw})} placeholder="请输入现在的账面总价值，支持简单公式如 =10000+500" className="w-full py-3 shadow-sm bg-white tabular-nums" />
           </div>
         ) : (
           <div className="bg-blue-50/50 dark:bg-slate-800/80 p-5 rounded-2xl border border-blue-100 dark:border-slate-700 animate-in zoom-in-95 duration-300 space-y-4 shadow-sm">
@@ -620,16 +621,16 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
                 </div>
                 <div>
                    <label className="text-sm font-bold mb-1.5 block text-slate-700 dark:text-slate-300 pl-1">当前持有总份额</label>
-                   <input type="number" value={localFund.shares} onChange={(e) => setLocalFund({...localFund, shares: e.target.value})} placeholder="例如: 10500.55" className="w-full px-4 py-3 border border-slate-200 rounded-xl dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all shadow-sm text-base font-mono bg-white" />
+                   <input type="number" value={localFund.shares} onChange={(e) => setLocalFund({...localFund, shares: e.target.value})} placeholder="例如: 10500.55" className="w-full px-4 py-3 border border-slate-200 rounded-xl dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all shadow-sm text-base font-mono bg-white tabular-nums" />
                 </div>
              </div>
              
              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col gap-3">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                     <span className="text-sm text-slate-500 font-medium">系统自动计算持仓市值：</span>
-                    <span className="text-2xl font-black font-mono text-blue-600 dark:text-blue-400 tracking-tight">
+                    <span className="text-2xl font-black font-mono tabular-nums text-blue-600 dark:text-blue-400 tracking-tight">
                        {formatMoney(currentEstimatedValue)}
-                    </span>
+                     </span>
                 </div>
                 <div className="w-full h-px bg-slate-100 dark:bg-slate-800"></div>
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-sm gap-2">
@@ -639,26 +640,26 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
                         <span className="text-blue-500 flex items-center font-medium bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded"><RefreshCcw size={14} className="animate-spin mr-1.5"/> 拉取中...</span>
                       ) : (
                         <div className="flex items-center gap-2">
-                           <span className={`font-bold font-mono text-base ${fundNavs[localFund.fundCode] ? 'text-indigo-600 dark:text-indigo-400' : (localNavError ? 'text-red-500' : 'text-slate-400')}`}>
+                           <span className={`font-bold font-mono tabular-nums text-base ${fundNavs[localFund.fundCode] ? 'text-indigo-600 dark:text-indigo-400' : (localNavError ? 'text-red-500' : 'text-slate-400')}`}>
                               {fundNavs[localFund.fundCode]?.nav || localFund.lastNav || localNavError || '等待拉取'}
                            </span>
                            {(fundNavs[localFund.fundCode]?.date || localFund.lastNavDate) && !localNavError && (
-                             <span className="text-xs text-slate-400 font-mono">({fundNavs[localFund.fundCode]?.date || localFund.lastNavDate})</span>
+                             <span className="text-xs text-slate-400 font-mono tabular-nums">({fundNavs[localFund.fundCode]?.date || localFund.lastNavDate})</span>
                            )}
                            {fundNavs[localFund.fundCode] && (
                               <span className="flex items-center text-[10px] bg-indigo-50 text-indigo-600 border border-indigo-100 dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-300 px-1.5 py-0.5 rounded-md font-medium">
                                 <CheckCircle2 size={10} className="mr-1"/> {fundNavs[localFund.fundCode].source}
-                              </span>
+                               </span>
                            )}
                         </div>
                       )}
-                    </div>
+                     </div>
                     
                     {!!(localFund.currentValueRaw && !isNaN(evaluateExpression(localFund.currentValueRaw)) && evaluateExpression(localFund.currentValueRaw) > 0 && (fundNavs[localFund.fundCode]?.nav || localFund.lastNav)) ? (
                        <button type="button" onClick={() => setLocalFund({...localFund, shares: (evaluateExpression(localFund.currentValueRaw) / (fundNavs[localFund.fundCode]?.nav || localFund.lastNav)).toFixed(2)})} className="text-blue-500 hover:text-blue-700 font-medium hover:underline flex items-center transition-colors active:scale-95">
                          <Zap size={14} className="mr-1 text-amber-500"/> 用历史手动市值反推份额
                        </button>
-                    ) : null}
+                     ) : null}
                 </div>
              </div>
           </div>
@@ -667,7 +668,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
       
       <div className="pt-4 border-t border-slate-100 dark:border-slate-700">
         <div className="mb-4">
-          <h4 className="text-base font-bold text-slate-800 dark:text-slate-200 mb-1">历史现金流记录</h4>
+           <h4 className="text-base font-bold text-slate-800 dark:text-slate-200 mb-1">历史现金流记录</h4>
           <div className="text-xs text-slate-500 flex items-center flex-wrap gap-3">
             <span className="flex items-center"><ArrowDown size={14} className="text-blue-500 mr-1"/>本金投入 / 费用 (记为负向)</span>
             <span className="flex items-center"><ArrowUp size={14} className="text-amber-500 mr-1"/>卖出 / 现金分红 (记为正向)</span>
@@ -677,7 +678,6 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
         <div className="space-y-4 max-h-[35vh] overflow-y-auto pr-2 pb-2 custom-scrollbar">
           {localFund.transactions.map((tx, index) => {
             const meta = getTypeMeta(tx.type, tx.amountRaw);
-
             return (
             <div key={tx.id} className={`flex items-center bg-white dark:bg-slate-900 p-2 sm:p-3 rounded-xl border-y border-r border-l-4 shadow-sm hover:shadow-md transition-all group animate-in fade-in slide-in-from-left-4 duration-300 ${tx.type === 'buy' ? 'border-l-blue-500 border-y-slate-200 border-r-slate-200 dark:border-y-slate-700 dark:border-r-slate-700' : (tx.type === 'sell' || tx.type === 'dividend_cash') ? 'border-l-amber-500 border-y-slate-200 border-r-slate-200 dark:border-y-slate-700 dark:border-r-slate-700' : 'border-l-slate-300 border-y-slate-200 border-r-slate-200 dark:border-slate-700'}`}>
               
@@ -687,28 +687,27 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
 
               <div className="flex-1 flex flex-col lg:flex-row gap-2 lg:gap-4">
                  <SmartInput isDate={true} value={tx.date} onChange={(val) => handleUpdateTx(index, 'date', val)} className="w-full lg:w-36 py-2 text-sm bg-slate-50 dark:bg-slate-800/50 border-transparent hover:border-slate-300 focus:bg-white dark:focus:bg-slate-900" />
-                 
                  <div className="flex flex-1 gap-2">
                    <select 
                      value={tx.type || (evaluateExpression(tx.amountRaw) < 0 ? 'buy' : 'sell')} 
                      onChange={(e) => handleUpdateTx(index, 'type', e.target.value)}
                      className="text-sm border-transparent bg-slate-50 dark:bg-slate-800/50 rounded-lg py-2 px-1 sm:px-2 focus:ring-blue-500 focus:outline-none font-bold text-slate-600 dark:text-slate-300 outline-none hover:bg-slate-100 dark:hover:bg-slate-800"
                    >
-                     <option value="buy">买入建仓</option>
+                      <option value="buy">买入建仓</option>
                      <option value="sell">卖出提现</option>
                      <option value="dividend_cash">现金分红</option>
                      <option value="dividend_reinvest">红利再投</option>
                      <option value="fee">手续费</option>
-                   </select>
+                    </select>
 
                    <div className="relative flex-1 flex items-center">
                      <div className="absolute left-3 pointer-events-none">{meta.icon}</div>
                      <SmartInput 
-                       value={tx.amountRaw} 
+                        value={tx.amountRaw} 
                        onChange={(raw) => handleUpdateTx(index, 'amountRaw', raw)} 
                        placeholder="输入金额 (绝对值即可)" 
                        className={`w-full py-2 pl-9 font-mono font-medium text-base sm:text-lg bg-slate-50 dark:bg-slate-800/50 border-transparent hover:border-slate-300 focus:bg-white dark:focus:bg-slate-900 ${meta.color}`} 
-                     />
+                      />
                    </div>
                  </div>
               </div>
@@ -717,7 +716,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
             </div>
           )})}
 
-          <button type="button" onClick={() => setLocalFund({...localFund, transactions: [...localFund.transactions, { id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }]})} className="w-full mt-2 py-3.5 border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-600 rounded-xl flex items-center justify-center text-sm font-bold text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 transition-all bg-slate-50/50 hover:bg-blue-50/50 dark:bg-slate-800/20 dark:hover:bg-blue-900/20 active:scale-[0.99]">
+          <button type="button" onClick={() => setLocalFund({...localFund, transactions:[...localFund.transactions, { id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }]})} className="w-full mt-2 py-3.5 border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-600 rounded-xl flex items-center justify-center text-sm font-bold text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 transition-all bg-slate-50/50 hover:bg-blue-50/50 dark:bg-slate-800/20 dark:hover:bg-blue-900/20 active:scale-[0.99]">
             <Plus size={18} className="mr-2" /> 继续添加交易记录
           </button>
         </div>
@@ -733,9 +732,8 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
 
 export default function App() {
   const [user, setUser] = useState(null); 
-  const [authLoading, setAuthLoading] = useState(true); 
-  
-  const [funds, setFunds] = useState([]); 
+  const [authLoading, setAuthLoading] = useState(true);
+  const[funds, setFunds] = useState([]); 
   const [settings, setSettings] = useState({ 
     targetAmount: 100000, 
     targetDate: '2030-12-31', 
@@ -744,31 +742,29 @@ export default function App() {
     customProxyUrl: 'https://my-cors-proxy.wh1637063482.workers.dev/?url={{url}}', 
     dataSource: 'tencent',
     navDataSource: 'tiantian' 
-  }); 
+  });
   const [theme, setTheme] = useState('light'); 
   
-  const [marketData, setMarketData] = useState([]); 
+  const[marketData, setMarketData] = useState([]); 
   const [isFetchingMarket, setIsFetchingMarket] = useState(false);
   const [marketError, setMarketError] = useState('');
   const [activeProxyIndex, setActiveProxyIndex] = useState(0); 
   const isFetchingRef = useRef(false); 
-  const [isAutoRefresh, setIsAutoRefresh] = useState(checkIsTradingTime()); 
+  const[isAutoRefresh, setIsAutoRefresh] = useState(checkIsTradingTime()); 
 
-  const [editingFundId, setEditingFundId] = useState(null); 
+  const [editingFundId, setEditingFundId] = useState(null);
   const [isProxyModalOpen, setProxyModalOpen] = useState(false); 
   const [dbError, setDbError] = useState(''); 
-  const [isDbConnected, setIsDbConnected] = useState(false); 
-
+  const[isDbConnected, setIsDbConnected] = useState(false);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' }); 
   const [fundTab, setFundTab] = useState('active'); 
   
-  const [fundNavs, setFundNavs] = useState({}); 
+  const [fundNavs, setFundNavs] = useState({});
   const [fetchingNavCodes, setFetchingNavCodes] = useState({}); 
-  const [isClosingEditor, setIsClosingEditor] = useState(false); 
+  const[isClosingEditor, setIsClosingEditor] = useState(false); 
   
   const [xirrMap, setXirrMap] = useState({});
-  const [overallXirr, setOverallXirr] = useState(0);
-
+  const[overallXirr, setOverallXirr] = useState(0);
   const INACTIVITY_LIMIT = 10 * 60 * 1000; 
   const logoutTimerRef = useRef(null);
   const targetAmountTimeoutRef = useRef(null); 
@@ -783,37 +779,47 @@ export default function App() {
     }
   }, [theme]);
 
-  // 原生 Splash Screen 处理与开屏动画平滑过渡
+  // 【优化点 2】：丝滑交接原生 Splash Screen 与 Web DOM Splash 动画
   useEffect(() => {
-    if (!authLoading) {
-      const MIN_SPLASH_TIME = 1500; 
-      const loadStartTime = window.__splashStartTime || Date.now();
-      const elapsed = Date.now() - loadStartTime;
-      const remaining = Math.max(0, MIN_SPLASH_TIME - elapsed);
-
-      setTimeout(() => {
+    const ultimateFallbackTimer = setTimeout(() => {
+      try {
         const splash = document.getElementById('global-splash');
         if (splash) {
           splash.style.opacity = '0';
-          setTimeout(() => {
+          setTimeout(() => splash.remove(), 500);
+        }
+        if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
+          SplashScreen.hide().catch(() => {});
+        }
+      } catch (e) {}
+    }, 5000); 
+
+    if (!authLoading) {
+      // 1. React 渲染完成，先立刻干掉原生的那张静态图片
+      try {
+        if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
+          SplashScreen.hide().catch(() => {});
+        }
+      } catch (e) {}
+
+      // 2. 原生静态图消失后，暴露出底下我们写的 HTML 呼吸灯动画
+      // 让 DOM 开屏动画缓冲一小会儿再渐隐，实现无缝过渡
+      const MIN_SPLASH_TIME = window.__splashStartTime ? Math.max(0, 1000 - (Date.now() - window.__splashStartTime)) : 600;
+      
+      setTimeout(() => {
+        const splash = document.getElementById('global-splash');
+        if (splash) {
+          splash.style.opacity = '0'; // 渐隐消失
+           setTimeout(() => {
             splash.style.display = 'none';
             splash.remove(); 
           }, 500); 
         }
-        
-        // 【关键】使用 Capacitor 插件关闭原生白色遮罩
-        const hideNativeSplash = async () => {
-          try {
-            const { SplashScreen } = await import('@capacitor/splash-screen');
-            await SplashScreen.hide();
-          } catch (e) {
-            // 非 Capacitor 环境会忽略
-          }
-        };
-        hideNativeSplash();
-
-      }, remaining);
+        clearTimeout(ultimateFallbackTimer); 
+      }, MIN_SPLASH_TIME);
     }
+
+    return () => clearTimeout(ultimateFallbackTimer);
   }, [authLoading]);
 
   const handleSignOut = useCallback(() => {
@@ -822,7 +828,7 @@ export default function App() {
         setFunds([]); setMarketData([]); setFundNavs({});
       });
     }
-  }, []);
+  },[]);
 
   const resetLogoutTimer = useCallback(() => {
     if (logoutTimerRef.current) clearTimeout(logoutTimerRef.current);
@@ -849,35 +855,35 @@ export default function App() {
     };
   }, [user, resetLogoutTimer]);
 
-  // 重构 Firebase 认证逻辑，符合标准生命周期与安全规则
+  // 【优化点 1】：精简 Firebase 检测逻辑，直接删除了匿名登录的尝试逻辑
   useEffect(() => {
+    const fallbackTimer = setTimeout(() => {
+      console.warn("Firebase 认证状态检测超时，强制解除开屏状态");
+      setAuthLoading(false); 
+    }, 5000);
+
     if (!auth) {
+      clearTimeout(fallbackTimer);
       setAuthLoading(false);
       return;
     }
     
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          // 增加匿名登录 fallback，确保获得合法用户状态以访问 Firestore
-          await signInAnonymously(auth);
-        }
-      } catch (e) {
-        console.error("Auth Init Error:", e);
-      }
-    };
-    
-    initAuth();
-    
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      clearTimeout(fallbackTimer);
       setUser(currentUser);
       if (!currentUser) setDbError('');
+      setAuthLoading(false); 
+    }, (error) => {
+      console.error("Auth State 监听错误:", error);
+      clearTimeout(fallbackTimer);
       setAuthLoading(false);
     });
-    return () => unsubscribe();
-  }, []); // 移除 [user] 依赖
+    
+    return () => {
+      clearTimeout(fallbackTimer);
+      if (unsubscribe) unsubscribe();
+    };
+  },[]); 
 
   useEffect(() => {
     if (!user || !db) return;
@@ -886,7 +892,7 @@ export default function App() {
     const fundsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'funds');
     
     const unsubFunds = onSnapshot(query(fundsRef), (snapshot) => {
-      const data = [];
+      const data =[];
       snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
       setFunds(data);
       setDbError(''); 
@@ -908,7 +914,7 @@ export default function App() {
   }, [user]);
 
   const fetchFundNavManually = async (codeToFetch = null) => {
-     let codesToQuery = [];
+     let codesToQuery =[];
      if (codeToFetch) {
          codesToQuery.push(codeToFetch);
          setFetchingNavCodes(prev => ({...prev, [codeToFetch]: true}));
@@ -917,8 +923,7 @@ export default function App() {
      }
      
      if (codesToQuery.length === 0) return false;
-     codesToQuery = [...new Set(codesToQuery)];
-
+     codesToQuery =[...new Set(codesToQuery)];
      const newNavs = { ...fundNavs };
      let hasChanges = false;
      let fetchSuccess = false;
@@ -929,7 +934,7 @@ export default function App() {
         if (settings.proxyMode === 'custom' && settings.customProxyUrl) {
             fetchUrl = settings.customProxyUrl.includes('{{url}}') 
                 ? settings.customProxyUrl.replace('{{url}}', encodeURIComponent(targetUrl))
-                : settings.customProxyUrl + targetUrl; 
+                : settings.customProxyUrl + targetUrl;
         } else {
             fetchUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
         }
@@ -960,7 +965,7 @@ export default function App() {
                   const originalCallback = window.jsonpgz;
                   window.jsonpgz = (data) => {
                      if (data && data.fundcode === code) {
-                         const actualNav = parseFloat(data.dwjz); 
+                         const actualNav = parseFloat(data.dwjz);
                          if (!isNaN(actualNav)) {
                              const dateStr = data.gztime ? data.gztime.substring(5, 16) : (data.jzrq || '');
                              resolve({ nav: actualNav, name: data.name, source: '天天(盘中估值)', date: dateStr });
@@ -986,7 +991,6 @@ export default function App() {
                const buffer = await res.arrayBuffer();
                const decoder = new TextDecoder('gbk');
                const text = decoder.decode(buffer);
-               
                const match = text.match(new RegExp(`hq_str_f_${code}="([^"]*)";`));
                if (match && match[1]) {
                   const parts = match[1].split(',');
@@ -1044,7 +1048,7 @@ export default function App() {
   useEffect(() => {
      if (!user || funds.length === 0) return;
      fetchFundNavManually();
-  }, [user, funds, settings.proxyMode, settings.customProxyUrl, settings.navDataSource]);
+  },[user, funds, settings.proxyMode, settings.customProxyUrl, settings.navDataSource]);
 
   const fetchMarketAPI = async () => {
     if (!user) return; 
@@ -1071,14 +1075,14 @@ export default function App() {
 
     let textData = '';
     let isJsonResp = false;
-    
+
     if (settings.proxyMode === 'custom' && settings.customProxyUrl) {
        let fetchUrl = settings.customProxyUrl.includes('{{url}}') 
            ? settings.customProxyUrl.replace('{{url}}', encodeURIComponent(targetUrl))
-           : settings.customProxyUrl + targetUrl; 
+           : settings.customProxyUrl + targetUrl;
        const r = await fetch(fetchUrl);
        if (dataSourceStr === 'xueqiu') {
-          textData = await r.json(); 
+          textData = await r.json();
           isJsonResp = true;
        } else {
           textData = await r.text();
@@ -1096,8 +1100,7 @@ export default function App() {
     }
 
     if (textData) {
-      let parsedData = [];
-
+      let parsedData =[];
       if (dataSourceStr === 'xueqiu' && isJsonResp && textData.data) {
          parsedData = textData.data.map(item => {
            let codeRaw = item.symbol.toLowerCase();
@@ -1128,7 +1131,7 @@ export default function App() {
               const code = codeMatch[1];
               const vals = block.split('"')[1]?.split(',');
               if (!vals || vals.length < 4) return null;
-              const currentPrice = parseFloat(vals[3]);
+               const currentPrice = parseFloat(vals[3]);
               const prevClose = parseFloat(vals[2]);
               const change = currentPrice - prevClose;
               const percent = prevClose !== 0 ? change / prevClose : 0;
@@ -1138,7 +1141,7 @@ export default function App() {
               };
           }
           return null;
-        }).filter(Boolean); 
+        }).filter(Boolean);
       }
       
       if (parsedData.length > 0) {
@@ -1168,7 +1171,7 @@ export default function App() {
         setIsFetchingMarket(false);
         isFetchingRef.current = false;
      }
-  }, [activeProxyIndex, user, settings.proxyMode, settings.customProxyUrl, settings.dataSource]);
+  },[activeProxyIndex, user, settings.proxyMode, settings.customProxyUrl, settings.dataSource]);
 
   useEffect(() => {
     if (!user) return;
@@ -1179,13 +1182,12 @@ export default function App() {
     return () => clearInterval(intervalId); 
   }, [isAutoRefresh, manualFetch, user]);
 
-
   const handleCloseEditor = () => {
      setIsClosingEditor(true);
      setTimeout(() => {
          setEditingFundId(null);
          setIsClosingEditor(false);
-     }, 200); 
+     }, 200);
   };
 
   const handleSaveFund = async (fund) => {
@@ -1204,7 +1206,7 @@ export default function App() {
 
     const payload = {
       name: fund.name || '未命名基金',
-      transactions: fund.transactions || [],
+      transactions: fund.transactions ||[],
       currentValueRaw: fund.currentValueRaw || '0',
       currentValue: finalCurrentValue,
       mode: fund.mode === 'auto' ? 'auto' : 'manual',
@@ -1260,7 +1262,6 @@ export default function App() {
   const handleTargetDateChange = (e) => {
     const val = e.target.value;
     setSettings(prev => ({...prev, targetDate: val}));
-
     if (targetDateTimeoutRef.current) clearTimeout(targetDateTimeoutRef.current);
     targetDateTimeoutRef.current = setTimeout(() => { handleSaveSettings({ targetDate: val }); }, 800);
   };
@@ -1290,18 +1291,19 @@ export default function App() {
     linkElement.click();
   };
 
-  const { baseFunds, preXirrPayloads, globalPreCashFlows } = useMemo(() => {
-    const globalPreCashFlows = [];
+  const { baseFundsData, preXirrPayloads, globalPreCashFlows } = useMemo(() => {
+    const globalPreCashFlows =[];
     
-    const baseFunds = funds.map(f => {
+    const baseFundsData = funds.map(f => {
       let totalInvested = 0; 
       let realizedReturns = 0; 
-      let cashFlowsForXirr = []; 
+      let cashFlowsForXirr =[]; 
       
-      f.transactions.forEach(t => {
+      (f.transactions ||[]).forEach(t => {
         const rawAmt = evaluateExpression(t.amountRaw);
         const inferredType = t.type || (rawAmt < 0 ? 'buy' : 'sell');
-        let amt = Math.abs(rawAmt);
+        
+        let amt = Math.round(Math.abs(rawAmt) * 100) / 100;
         
         if (inferredType === 'buy' || inferredType === 'fee') {
             totalInvested += amt;
@@ -1312,13 +1314,12 @@ export default function App() {
             cashFlowsForXirr.push({ date: t.date, amount: amt }); 
             globalPreCashFlows.push({ date: t.date, amount: amt });
         } else if (inferredType === 'dividend_reinvest') {
-            
         }
       });
-
+      
       let currentVal = 0;
       if (f.isArchived) {
-          currentVal = 0; 
+          currentVal = 0;
       } else if (f.mode === 'auto') {
           const navObj = fundNavs[f.fundCode];
           const nav = navObj ? navObj.nav : (f.lastNav || 0);
@@ -1331,6 +1332,8 @@ export default function App() {
           currentVal = evaluateExpression(f.currentValueRaw) || 0;
       }
 
+      currentVal = Math.round(currentVal * 100) / 100;
+
       if (currentVal > 0) {
         cashFlowsForXirr.push({ date: new Date().toISOString().split('T')[0], amount: currentVal });
       }
@@ -1338,19 +1341,23 @@ export default function App() {
       const profit = currentVal + realizedReturns - totalInvested;
       const simpleReturn = totalInvested === 0 ? 0 : profit / totalInvested;
       const netInvested = Math.max(0, totalInvested - realizedReturns);
-
       return { ...f, xirr: xirrMap[f.id] || 0, profit, simpleReturn, totalInvested, netInvested, currentValue: currentVal, _flows: cashFlowsForXirr };
     });
 
-    const totalCurrentValue = baseFunds.reduce((sum, f) => sum + f.currentValue, 0);
-    if (totalCurrentValue > 0) {
-      globalPreCashFlows.push({ date: new Date().toISOString().split('T')[0], amount: totalCurrentValue });
+    const totalCurrentValue = baseFundsData.reduce((sum, f) => sum + f.currentValue, 0);
+    const finalTotalCurrentValue = Math.round(totalCurrentValue * 100) / 100;
+    
+    if (finalTotalCurrentValue > 0) {
+      globalPreCashFlows.push({ 
+        date: new Date().toISOString().split('T')[0], 
+        amount: finalTotalCurrentValue,
+        isTerminal: true 
+      });
     }
 
-    const preXirrPayloads = baseFunds.map(f => ({ id: f.id, flows: f._flows }));
-
-    return { baseFunds, preXirrPayloads, globalPreCashFlows };
-  }, [funds, fundNavs, xirrMap]); 
+    const preXirrPayloads = baseFundsData.map(f => ({ id: f.id, flows: f._flows }));
+    return { baseFundsData, preXirrPayloads, globalPreCashFlows };
+  }, [funds, fundNavs, xirrMap]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -1358,21 +1365,22 @@ export default function App() {
     const computeAllXirrAsync = () => {
       setTimeout(() => {
         if (isCancelled) return;
-        const newMap = {};
-        let changed = false;
 
-        preXirrPayloads.forEach(p => {
-            const res = calculateXIRR(p.flows);
-            newMap[p.id] = res;
-            changed = true; 
+        setXirrMap(prev => {
+           let isChanged = false;
+           const updatedMap = { ...prev };
+           preXirrPayloads.forEach(p => {
+               const res = calculateXIRR(p.flows);
+               if (updatedMap[p.id] !== res) {
+                   updatedMap[p.id] = res;
+                   isChanged = true;
+               }
+           });
+           return isChanged ? updatedMap : prev; 
         });
-        
-        if (changed) {
-            setXirrMap(prev => ({ ...prev, ...newMap }));
-        }
 
         const gRes = calculateXIRR(globalPreCashFlows);
-        if (overallXirr !== gRes) setOverallXirr(gRes);
+        setOverallXirr(prev => (prev !== gRes ? gRes : prev));
       }, 0);
     };
     computeAllXirrAsync();
@@ -1381,6 +1389,10 @@ export default function App() {
   }, [preXirrPayloads, globalPreCashFlows]);
 
   const portfolioStats = useMemo(() => {
+    if (!baseFundsData) return { pieData:[], contributionPieData: [], rankedByXirr: [], rankedByProfit: [], computedFundsWithMetrics:[] };
+
+    const baseFunds = baseFundsData.map(f => ({ ...f, xirr: xirrMap[f.id] || 0 }));
+
     const portfolioTotalCurrentValue = baseFunds.reduce((sum, f) => sum + f.currentValue, 0);
     const portfolioTotalInvested = baseFunds.reduce((sum, f) => sum + f.totalInvested, 0);
     const portfolioTotalProfit = baseFunds.reduce((sum, f) => sum + f.profit, 0); 
@@ -1389,6 +1401,7 @@ export default function App() {
     const computedFundsWithMetrics = baseFunds.map(f => {
       const holdingWeight = portfolioTotalCurrentValue === 0 ? 0 : (f.currentValue / portfolioTotalCurrentValue);
       let profitWeight = 0;
+     
       if (portfolioTotalProfit > 0 && f.profit > 0) {
         profitWeight = f.profit / portfolioTotalProfit;
       } else if (portfolioTotalProfit < 0 && f.profit < 0) {
@@ -1403,23 +1416,21 @@ export default function App() {
       .filter(f => f.currentValue > 0 && !f.isArchived)
       .map(f => ({ name: f.name, value: f.currentValue }))
       .sort((a, b) => b.value - a.value);
-
+      
     const contributionPieData = computedFundsWithMetrics
       .filter(f => f.contribution > 0)
       .map(f => ({ name: f.name, value: f.contribution }))
       .sort((a, b) => b.value - a.value);
-
-    const rankedByXirr = [...computedFundsWithMetrics].filter(f => f.transactions.length > 0).sort((a, b) => b.xirr - a.xirr);
+      
+    const rankedByXirr =[...computedFundsWithMetrics].filter(f => f.transactions.length > 0).sort((a, b) => b.xirr - a.xirr);
     const rankedByProfit = [...computedFundsWithMetrics].filter(f => f.transactions.length > 0).sort((a, b) => b.profit - a.profit);
     
     const netTotalInvested = Math.max(0, portfolioTotalCurrentValue - portfolioTotalProfit);
-    
     const safeTargetAmount = Number(settings.targetAmount) || 0;
     const gap = Math.max(0, safeTargetAmount - portfolioTotalProfit); 
     const today = new Date();
     const target = new Date(settings.targetDate);
     const monthsLeft = Math.max(1, (target.getFullYear() - today.getFullYear()) * 12 + target.getMonth() - today.getMonth());
-
     let projectedAssets = portfolioTotalCurrentValue;
     if (overallXirr > 0 && monthsLeft > 0) {
        projectedAssets = portfolioTotalCurrentValue * Math.pow(1 + overallXirr, monthsLeft / 12);
@@ -1430,25 +1441,19 @@ export default function App() {
     let daysToBreakEven = null;
     let baselineValue = 0;
     
-    const localDate = new Date();
-    const year = localDate.getFullYear();
-    const month = String(localDate.getMonth() + 1).padStart(2, '0');
-    const day = String(localDate.getDate()).padStart(2, '0');
-    const localTodayStr = `${year}-${month}-${day}`;
-
     globalPreCashFlows.forEach(cf => {
        if (cf.amount < 0) {
            const days = (new Date() - new Date(cf.date)) / (1000 * 60 * 60 * 24);
            const years = Math.max(0, days / 365);
            baselineValue += Math.abs(cf.amount) * Math.pow(1 + (targetAnnualRate / 100), years); 
-       } else if (cf.amount > 0 && cf.date !== localTodayStr) {
+       } else if (cf.amount > 0 && !cf.isTerminal) { 
            baselineValue -= cf.amount;
        }
     });
-    baselineValue = Math.max(0, baselineValue);
     
+    baselineValue = Math.max(0, baselineValue);
     const deviationAmount = portfolioTotalCurrentValue - baselineValue;
-
+    
     if (portfolioTotalProfit < 0 && portfolioTotalInvested > 0) {
        expectedDailyProfit = (portfolioTotalInvested * (targetAnnualRate / 100)) / 365;
        if (expectedDailyProfit > 0) {
@@ -1458,9 +1463,9 @@ export default function App() {
     
     return { 
       totalInvested: netTotalInvested, 
-      totalCurrentValue: portfolioTotalCurrentValue, 
+      totalCurrentValue: Math.round(portfolioTotalCurrentValue * 100) / 100,
       overallXirr, 
-      totalProfit: portfolioTotalProfit, 
+      totalProfit: Math.round(portfolioTotalProfit * 100) / 100, 
       overallSimpleReturn, 
       pieData,
       contributionPieData,
@@ -1472,9 +1477,10 @@ export default function App() {
       projectedAssets, daysToBreakEven, expectedDailyProfit,
       baselineValue, deviationAmount
     };
-  }, [baseFunds, settings, overallXirr, globalPreCashFlows]);
+  },[baseFundsData, settings, overallXirr, globalPreCashFlows, xirrMap]);
 
   const sortedFunds = useMemo(() => {
+    if (!portfolioStats.computedFundsWithMetrics) return[];
     let list = portfolioStats.computedFundsWithMetrics.filter(f => fundTab === 'active' ? !f.isArchived : f.isArchived);
     
     if (sortConfig.key !== null) {
@@ -1489,14 +1495,14 @@ export default function App() {
       });
     }
     return list;
-  }, [portfolioStats.computedFundsWithMetrics, sortConfig, fundTab]);
+  },[portfolioStats.computedFundsWithMetrics, sortConfig, fundTab]);
 
   const requestSort = (key) => {
-    let direction = 'desc'; 
+    let direction = 'desc';
     if (sortConfig.key === key && sortConfig.direction === 'desc') {
       direction = 'asc';
     } else if (sortConfig.key === key && sortConfig.direction === 'asc') {
-      setSortConfig({ key: null, direction: 'asc' }); 
+      setSortConfig({ key: null, direction: 'asc' });
       return;
     }
     setSortConfig({ key, direction });
@@ -1514,7 +1520,7 @@ export default function App() {
 
   const editingFundData = useMemo(() => {
     if (editingFundId === 'new') {
-      return { name: '', transactions: [{ id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }], currentValueRaw: '', mode: 'manual', fundCode: '', shares: '', isArchived: false };
+      return { name: '', transactions:[{ id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }], currentValueRaw: '', mode: 'manual', fundCode: '', shares: '', isArchived: false };
     }
     if (editingFundId) {
       return funds.find(f => f.id === editingFundId) || null;
@@ -1554,12 +1560,12 @@ export default function App() {
                   <div className="flex items-center space-x-1.5 text-xs bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 px-3 py-1.5 rounded-full border border-green-200 dark:border-green-800 transition-all duration-500">
                     {isDbConnected ? (
                       <Fragment>
-                        <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                        <span className="hidden sm:inline font-medium">云端同步中</span>
+                        <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
+                        <span className="hidden sm:inline font-medium">云端已同步</span>
                       </Fragment>
                     ) : (
                       <Fragment>
-                        <RefreshCw size={12} className="animate-spin" />
+                        <RefreshCw size={12} />
                         <span className="hidden sm:inline font-medium">连接中</span>
                       </Fragment>
                     )}
@@ -1582,7 +1588,6 @@ export default function App() {
           <main className="max-w-[1600px] mx-auto px-4 py-6 sm:py-8 space-y-6">
             
             <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 sm:p-5 relative overflow-hidden transition-colors duration-500">
-              
               <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-5 gap-3">
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                   <h2 className="font-extrabold flex items-center text-xl sm:text-3xl xl:text-4xl tracking-wide text-slate-800 dark:text-white">
@@ -1627,12 +1632,12 @@ export default function App() {
                     const textColor = isPositive ? 'text-red-500' : (data.change < 0 ? 'text-green-500' : 'text-slate-500');
                     return (
                       <div key={data.id} className="bg-slate-50 dark:bg-slate-900 p-4 sm:p-5 rounded-xl border border-slate-100 dark:border-slate-700 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 cursor-default">
-                        <div className="text-sm sm:text-base text-slate-600 dark:text-slate-400 mb-1.5 font-bold tracking-wide">{data.name}</div>
-                        <div className={`text-2xl sm:text-4xl font-bold font-mono ${textColor} transition-colors duration-300`}>
+                        <div className="text-sm sm:text-base text-slate-600 dark:text-slate-400 mb-1.5 font-bold tracking-wide truncate">{data.name}</div>
+                        <div className={`text-xl sm:text-2xl lg:text-3xl font-bold font-mono ${textColor} transition-colors duration-300 truncate w-full block`}>
                           <AnimatedNumber value={data.price} formatter={(v) => v.toFixed(3)} />
                         </div>
-                        <div className={`text-sm sm:text-base flex items-center mt-1.5 font-mono font-medium ${textColor} transition-colors duration-300`}>
-                          {isPositive ? <TrendingUp size={16} className="mr-1"/> : (data.change < 0 ? <TrendingDown size={16} className="mr-1"/> : null)}
+                        <div className={`text-sm sm:text-base flex items-center mt-1.5 font-mono font-medium ${textColor} transition-colors duration-300 truncate`}>
+                          {isPositive ? <TrendingUp size={16} className="mr-1 shrink-0"/> : (data.change < 0 ? <TrendingDown size={16} className="mr-1 shrink-0"/> : null)}
                           {isPositive ? '+' : ''}{(data.percent * 100).toFixed(2)}%
                         </div>
                       </div>
@@ -1648,18 +1653,23 @@ export default function App() {
                 
                 <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden flex flex-col transition-colors duration-500">
                   
-                  <div className="flex justify-between items-end border-b dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/20 px-4 sm:px-5 pt-4 sm:pt-5 relative">
-                    <div className="flex space-x-1 sm:space-x-4 h-full relative">
-                      <button type="button" onClick={() => setFundTab('active')} className={`pb-3 px-2 sm:px-4 text-base sm:text-lg font-bold flex items-center transition-all duration-300 ${fundTab === 'active' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
-                          <PieChart className="mr-1.5" size={20}/> 投资组合持仓
+                  {/* 【优化点 3】：移动端无换行且自适应的紧凑型菜单栏 */}
+                  <div className="flex justify-between items-end border-b dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/20 px-3 sm:px-5 pt-4 sm:pt-5 relative overflow-x-auto no-scrollbar">
+                    
+                    <div className="flex space-x-0 sm:space-x-4 h-full relative shrink-0">
+                      <button type="button" onClick={() => setFundTab('active')} className={`pb-3 px-3 sm:px-4 text-sm sm:text-lg font-bold flex items-center whitespace-nowrap transition-all duration-300 ${fundTab === 'active' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
+                          <PieChart className="mr-1 sm:mr-1.5 w-4 h-4 sm:w-5 sm:h-5" /> 投资组合
                       </button>
-                      <button type="button" onClick={() => setFundTab('archived')} className={`pb-3 px-2 sm:px-4 text-base sm:text-lg font-bold flex items-center transition-all duration-300 ${fundTab === 'archived' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
-                          <Archive className="mr-1.5" size={20}/> 已清仓历史
+                      <button type="button" onClick={() => setFundTab('archived')} className={`pb-3 px-3 sm:px-4 text-sm sm:text-lg font-bold flex items-center whitespace-nowrap transition-all duration-300 ${fundTab === 'archived' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
+                          <Archive className="mr-1 sm:mr-1.5 w-4 h-4 sm:w-5 sm:h-5" /> 清仓历史
                       </button>
-                      <div className={`absolute bottom-0 h-0.5 transition-all duration-300 ease-out ${fundTab === 'active' ? 'bg-blue-600 dark:bg-blue-400 w-32 sm:w-40 left-0' : 'bg-amber-500 dark:bg-amber-400 w-32 sm:w-40 translate-x-[8.5rem] sm:translate-x-[11rem]'}`}></div>
+                      
+                      <div className={`absolute bottom-0 h-0.5 transition-all duration-300 ease-out rounded-t-full ${fundTab === 'active' ? 'bg-blue-600 dark:bg-blue-400 w-[5.5rem] sm:w-[8rem] left-0 ml-1.5 sm:ml-2' : 'bg-amber-500 dark:bg-amber-400 w-[5.5rem] sm:w-[8rem] translate-x-[5.5rem] sm:translate-x-[8.5rem]'}`}></div>
                     </div>
-                    <button type="button" onClick={() => setEditingFundId('new')} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-4 py-2 sm:px-5 sm:py-2.5 rounded-lg text-sm font-medium flex items-center transition-all shadow-sm hover:shadow-md active:scale-95 mb-3 group">
-                      <Plus size={18} className="mr-1 transition-transform group-hover:rotate-90 duration-300" /> <span className="hidden sm:inline">新增基金</span><span className="sm:hidden">新增</span>
+                    
+                    <button type="button" onClick={() => setEditingFundId('new')} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg text-sm font-medium flex items-center shrink-0 transition-all shadow-sm hover:shadow-md active:scale-95 mb-2 group">
+                      <Plus className="w-4 h-4 sm:w-5 sm:h-5 sm:mr-1 transition-transform group-hover:rotate-90 duration-300" /> 
+                      <span className="hidden sm:inline">新增资产</span><span className="sm:hidden ml-1">新增</span>
                     </button>
                   </div>
 
@@ -1667,80 +1677,80 @@ export default function App() {
                     <table className="w-full text-center min-w-[800px]">
                       <thead>
                         <tr className="bg-slate-50 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 text-sm sm:text-base xl:text-lg border-b dark:border-slate-700 uppercase tracking-wider select-none">
-                          <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-left" onClick={() => requestSort('name')}>
+                          <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-left whitespace-nowrap" onClick={() => requestSort('name')}>
                             <div className="flex items-center">资产名称 {getSortIcon('name')}</div>
                           </th>
-                          <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-center" onClick={() => requestSort('currentValue')}>
+                          <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-center whitespace-nowrap" onClick={() => requestSort('currentValue')}>
                             <div className="flex items-center justify-center">{fundTab === 'active' ? '现持仓总值' : '清仓时市值'} {getSortIcon('currentValue')}</div>
                           </th>
                           {fundTab === 'active' && (
-                            <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors w-32 sm:w-40 text-center" onClick={() => requestSort('holdingWeight')}>
+                            <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors w-32 sm:w-40 text-center whitespace-nowrap" onClick={() => requestSort('holdingWeight')}>
                               <div className="flex items-center justify-center">持仓占比 {getSortIcon('holdingWeight')}</div>
                             </th>
                           )}
-                          <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors w-32 sm:w-40 text-center" onClick={() => requestSort('profit')}>
+                          <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors w-32 sm:w-40 text-center whitespace-nowrap" onClick={() => requestSort('profit')}>
                             <div className="flex items-center justify-center">总计盈亏 {getSortIcon('profit')}</div>
                           </th>
-                          <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-center" onClick={() => requestSort('xirr')}>
+                          <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-center whitespace-nowrap" onClick={() => requestSort('xirr')}>
                             <div className="flex items-center justify-center">年化(XIRR) {getSortIcon('xirr')}</div>
                           </th>
-                          <th className="p-4 sm:p-5 font-bold text-center">操作</th>
+                          <th className="p-4 sm:p-5 font-bold text-center whitespace-nowrap">操作</th>
                         </tr>
                       </thead>
                       
                       <tbody className="divide-y dark:divide-slate-700 text-sm sm:text-base xl:text-lg relative">
-                        {sortedFunds.length === 0 ? <tr><td colSpan="6" className="text-center py-16 text-slate-400 animate-in fade-in duration-500">空空如也，这里很干净。</td></tr> : null}
+                        {sortedFunds.length === 0 ? <tr><td colSpan="6" className="text-center py-16 text-slate-400 animate-in fade-in duration-500 whitespace-nowrap">空空如也，这里很干净。</td></tr> : null}
                         {sortedFunds.map((fund, fIndex) => (
                           <tr key={fund.id} style={{animationDelay: `${fIndex * 50}ms`}} className={`group transition-all duration-300 animate-in fade-in slide-in-from-bottom-2 ${fundTab === 'active' ? 'hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:-translate-y-px hover:shadow-sm relative z-10' : 'bg-slate-50/50 dark:bg-slate-900/30 hover:bg-slate-100 dark:hover:bg-slate-800 opacity-80'}`}>
-                            <td className="p-4 sm:p-5 font-medium min-w-[140px] sm:min-w-[160px] text-left">
+                            <td className="p-4 sm:p-5 font-medium min-w-[140px] sm:min-w-[160px] text-left whitespace-nowrap">
                               <div className="flex flex-col">
                                 <div className="flex items-center">
                                   <div className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full mr-2 sm:mr-3 shrink-0 transition-colors duration-500 ${fundTab==='archived'?'bg-amber-500':(fund.profit >= 0 ? 'bg-red-500' : 'bg-green-500')}`}></div>
-                                  <span className={`transition-all duration-300 ${fundTab==='archived' ? 'line-through text-slate-500' : ''}`}>{fund.name}</span>
+                                  <span className={`transition-all duration-300 whitespace-nowrap ${fundTab==='archived' ? 'line-through text-slate-500' : ''}`}>{fund.name}</span>
                                 </div>
                                 {fund.mode === 'auto' && fundTab === 'active' && (
-                                  <div className="text-[11px] text-slate-500 mt-2 flex flex-wrap items-center gap-x-2 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/50 pl-1.5 pr-2 py-1 rounded-md w-fit shadow-sm">
+                                  <div className="text-[11px] text-slate-500 mt-2 flex items-center gap-x-2 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/50 pl-1.5 pr-2 py-1 rounded-md w-fit shadow-sm whitespace-nowrap">
                                     <button type="button" onClick={(e) => { e.stopPropagation(); fetchFundNavManually(fund.fundCode); }} className={`p-1 rounded-md hover:bg-indigo-50 dark:hover:bg-indigo-900/30 text-indigo-500 transition-all active:scale-90 ${fetchingNavCodes[fund.fundCode] ? 'animate-spin text-indigo-600' : 'hover:rotate-180 duration-500'}`} title="单点强力刷新净值">
-                                        <RefreshCcw size={12}/>
+                                      <RefreshCcw size={12}/>
                                     </button>
-                                    <span className="text-indigo-600 dark:text-indigo-400 font-mono font-medium tracking-wide">{fund.fundCode}</span>
+                                    <span className="text-indigo-600 dark:text-indigo-400 font-mono font-medium tracking-wide whitespace-nowrap">{fund.fundCode}</span>
                                     <span className="text-slate-300 dark:text-slate-600">|</span>
-                                    <span className="text-slate-600 dark:text-slate-400 flex items-center">
-                                        净值: <span className="font-bold text-indigo-600 dark:text-indigo-400 font-mono ml-1">{fundNavs[fund.fundCode]?.nav || fund.lastNav || '--'}</span>
-                                        <span className="text-[10px] text-slate-400 ml-1.5 opacity-80">({fundNavs[fund.fundCode]?.date || fund.lastNavDate || '未知'})</span>
+                                    <span className="text-slate-600 dark:text-slate-400 flex items-center whitespace-nowrap">
+                                      净值: <span className="font-bold text-indigo-600 dark:text-indigo-400 font-mono ml-1 whitespace-nowrap">{fundNavs[fund.fundCode]?.nav || fund.lastNav || '--'}</span>
+                                        <span className="text-[10px] text-slate-400 ml-1.5 opacity-80 whitespace-nowrap">({fundNavs[fund.fundCode]?.date || fund.lastNavDate || '未知'})</span>
                                     </span>
                                     <span className="text-slate-300 dark:text-slate-600">|</span>
-                                    <span className="text-slate-600 dark:text-slate-400">份额: <span className="font-mono">{fund.shares || 0}</span></span>
+                                    <span className="text-slate-600 dark:text-slate-400 whitespace-nowrap">份额: <span className="font-mono whitespace-nowrap">{fund.shares || 0}</span></span>
                                   </div>
                                 )}
                               </div>
                             </td>
-                            <td className="p-4 sm:p-5 text-center font-mono font-medium text-blue-600 dark:text-blue-400">
-                              <div className="text-base sm:text-lg xl:text-xl">{fundTab==='archived' ? '-' : <AnimatedNumber value={fund.currentValue} />}</div>
-                              <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100">净本金: {formatMoney(fund.netInvested)}</div>
+                            <td className="p-4 sm:p-5 text-center font-mono font-medium text-blue-600 dark:text-blue-400 whitespace-nowrap">
+                              <div className="text-base sm:text-lg xl:text-xl whitespace-nowrap">{fundTab==='archived' ? '-' : <AnimatedNumber value={fund.currentValue} />}</div>
+                              <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100 whitespace-nowrap">净本金: {formatMoney(fund.netInvested)}</div>
                             </td>
                             {fundTab === 'active' && (
-                              <td className="p-4 sm:p-5 text-center">
-                                <div className="font-mono text-slate-700 dark:text-slate-300 text-base sm:text-lg xl:text-xl"><AnimatedNumber value={fund.holdingWeight} formatter={formatPercent} /></div>
+                              <td className="p-4 sm:p-5 text-center whitespace-nowrap">
+                                <div className="font-mono text-slate-700 dark:text-slate-300 text-base sm:text-lg xl:text-xl whitespace-nowrap"><AnimatedNumber value={fund.holdingWeight} formatter={formatPercent} /></div>
                                 <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full mt-2 overflow-hidden mx-auto max-w-[120px] flex justify-start shadow-inner">
                                   <div className="bg-gradient-to-r from-blue-400 to-indigo-500 h-full rounded-full transition-all duration-1000 ease-out" style={{width: `${Math.min(100, fund.holdingWeight * 100)}%`}}></div>
                                 </div>
                               </td>
                             )}
-                            <td className="p-4 sm:p-5 text-center">
-                              <div className={`font-mono font-medium text-base sm:text-lg xl:text-xl transition-colors duration-500 ${fund.profit >= 0 ? 'text-red-500' : 'text-green-500'}`}><AnimatedNumber value={fund.profit} /></div>
-                              <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100">占比: {formatPercent(fund.profitWeight)}</div>
+                            <td className="p-4 sm:p-5 text-center whitespace-nowrap">
+                               <div className={`font-mono font-medium text-base sm:text-lg xl:text-xl transition-colors duration-500 whitespace-nowrap ${fund.profit >= 0 ? 'text-red-500' : 'text-green-500'}`}><AnimatedNumber value={fund.profit} /></div>
+                              <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100 whitespace-nowrap">占比: {formatPercent(fund.profitWeight)}</div>
                             </td>
-                            <td className={`p-4 sm:p-5 text-center font-mono font-bold text-base sm:text-lg xl:text-xl transition-colors duration-500 ${fund.xirr >= 0 ? 'text-red-500' : 'text-green-500'}`}>
+                            <td className={`p-4 sm:p-5 text-center font-mono font-bold text-base sm:text-lg xl:text-xl transition-colors duration-500 whitespace-nowrap ${fund.xirr >= 0 ? 'text-red-500' : 'text-green-500'}`}>
                               <AnimatedNumber value={fund.xirr} formatter={formatPercent} />
                             </td>
                             <td className="p-4 sm:p-5 text-center whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                               <div className="flex justify-center items-center">
-                                <button type="button" onClick={() => setEditingFundId(fund.id)} className="text-slate-400 hover:text-blue-600 mx-0.5 sm:mx-1 p-2 rounded-lg hover:bg-blue-50 dark:hover:bg-slate-700 transition-all active:scale-90 shadow-sm" title="编辑这笔投资">
+                                <button type="button" onClick={() => setEditingFundId(fund.id)} className="text-slate-400 hover:text-blue-600 mx-0.5 sm:mx-1 p-2 rounded-lg hover:bg-blue-50 dark:hover:bg-slate-700 transition-all active:scale-90 shadow-sm whitespace-nowrap" title="编辑这笔投资">
                                   <Edit3 size={18}/>
                                 </button>
-                                <button type="button" onClick={() => handleDeleteFund(fund.id)} className="text-slate-400 hover:text-red-600 mx-0.5 sm:mx-1 p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 transition-all active:scale-90 shadow-sm" title="永久删除">
-                                  <Trash2 size={18}/>
+                                <button type="button" onClick={() => handleDeleteFund(fund.id)} className="text-slate-400 hover:text-red-600 mx-0.5 sm:mx-1 p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 transition-all active:scale-90 shadow-sm whitespace-nowrap" title="永久删除">
+                                   <Trash2 size={18}/>
                                 </button>
                               </div>
                             </td>
@@ -1760,10 +1770,10 @@ export default function App() {
                   ].map((item, idx) => (
                     <div key={idx} className="bg-white dark:bg-slate-800 p-4 sm:p-6 xl:p-8 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm relative overflow-hidden z-10 transition-colors duration-500 hover:shadow-md hover:-translate-y-0.5">
                       <div className="text-xs sm:text-sm xl:text-base font-bold text-slate-500 mb-1.5 sm:mb-2 relative z-10">{item.label}</div>
-                      <div className={`text-lg sm:text-xl xl:text-3xl font-bold font-mono relative z-10 ${item.color} truncate transition-colors duration-500`} title={item.val}>
+                      <div className={`text-lg sm:text-xl xl:text-3xl font-bold font-mono tabular-nums relative z-10 ${item.color} truncate transition-colors duration-500`} title={item.val}>
                           <AnimatedNumber value={item.val} formatter={item.isPercent ? formatPercent : formatMoney} />
                       </div>
-                      {idx === 3 && <div className="absolute -right-2 -bottom-2 text-slate-100 dark:text-slate-700/50"><Award size={90} className="w-[60px] h-[60px] sm:w-[80px] sm:h-[80px] xl:w-[100px] xl:h-[100px] transform rotate-12"/></div>}
+                      {idx === 3 && <div className="absolute -right-2 -bottom-2 text-slate-100 dark:text-slate-700/50 transform-gpu"><Award size={90} className="w-[60px] h-[60px] sm:w-[80px] sm:h-[80px] xl:w-[100px] xl:h-[100px] transform rotate-12"/></div>}
                     </div>
                   ))}
                 </div>
@@ -1782,7 +1792,7 @@ export default function App() {
                             <span className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full text-white text-xs sm:text-sm flex items-center justify-center mr-3 sm:mr-4 transition-transform hover:scale-110 ${i===0?'bg-gradient-to-br from-yellow-400 to-yellow-600 shadow-md':i===1?'bg-gradient-to-br from-slate-300 to-slate-500 shadow-sm':i===2?'bg-gradient-to-br from-amber-600 to-amber-800 shadow-sm':'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>{i+1}</span>
                             <span className="truncate" title={f.name}>{f.name}</span>
                           </span>
-                          <span className={`font-mono font-bold shrink-0 text-base sm:text-lg ${f.xirr>=0?'text-red-500':'text-green-500'}`}>{formatPercent(f.xirr)}</span>
+                          <span className={`font-mono font-bold shrink-0 text-base sm:text-lg tabular-nums ${f.xirr>=0?'text-red-500':'text-green-500'}`}>{formatPercent(f.xirr)}</span>
                         </div>
                       ))}
                     </div>
@@ -1800,7 +1810,7 @@ export default function App() {
                             <span className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full text-white text-xs sm:text-sm flex items-center justify-center mr-3 sm:mr-4 transition-transform hover:scale-110 ${i===0?'bg-gradient-to-br from-yellow-400 to-yellow-600 shadow-md':i===1?'bg-gradient-to-br from-slate-300 to-slate-500 shadow-sm':i===2?'bg-gradient-to-br from-amber-600 to-amber-800 shadow-sm':'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>{i+1}</span>
                             <span className="truncate" title={f.name}>{f.name}</span>
                           </span>
-                          <span className={`font-mono font-bold shrink-0 text-base sm:text-lg ${f.profit>=0?'text-red-500':'text-green-500'}`}>{formatMoney(f.profit)}</span>
+                          <span className={`font-mono font-bold shrink-0 text-base sm:text-lg tabular-nums ${f.profit>=0?'text-red-500':'text-green-500'}`}>{formatMoney(f.profit)}</span>
                         </div>
                       ))}
                     </div>
@@ -1825,11 +1835,11 @@ export default function App() {
                 </div>
 
                 <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-5 sm:p-6 relative overflow-hidden transition-colors duration-500">
-                  <div className="absolute -right-10 -top-10 text-blue-50 dark:text-blue-900/10 transition-transform duration-1000 hover:scale-110 hover:rotate-12"><Target size={160}/></div>
+                  <div className="absolute -right-10 -top-10 text-blue-50 dark:text-blue-900/10 transition-transform duration-1000 hover:scale-110 hover:rotate-12 transform-gpu"><Target size={160}/></div>
                   
                   <h3 className="text-base sm:text-lg font-bold mb-4 sm:mb-5 flex items-center relative z-10"><Target className="mr-2 text-blue-500"/> 财富目标与年化复盘</h3>
                   <div className="space-y-4 relative z-10">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 block">总目标金额 (元)</label>
                         <input 
@@ -1842,7 +1852,7 @@ export default function App() {
                       </div>
                       <div>
                         <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 block">预计达成日期</label>
-                        <input 
+                         <input 
                           type="date" 
                           value={settings.targetDate} 
                           onChange={handleTargetDateChange} 
@@ -1865,30 +1875,28 @@ export default function App() {
                     <div className="pt-5 sm:pt-6 border-t border-slate-100 dark:border-slate-700 space-y-3">
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-slate-600 dark:text-slate-400">当前资产偏离基准:</span>
-                        <span className={`font-mono font-bold ${portfolioStats.deviationAmount >= 0 ? 'text-red-500' : 'text-green-500'}`}>
+                        <span className={`font-mono font-bold tabular-nums ${portfolioStats.deviationAmount >= 0 ? 'text-red-500' : 'text-green-500'}`}>
                           {portfolioStats.deviationAmount >= 0 ? '+' : ''}{formatMoney(portfolioStats.deviationAmount)}
                         </span>
                       </div>
                       
                       <div className="w-full h-px bg-slate-100 dark:bg-slate-700 my-2"></div>
-                      
                       <div className="flex justify-between text-sm"><span className="text-slate-500">距总收益目标还差</span><span className="font-bold font-mono text-base"><AnimatedNumber value={portfolioStats.gap} /></span></div>
                       <div className="flex justify-between text-sm"><span className="text-slate-500">剩余倒数时间</span><span className="font-bold text-base">{portfolioStats.monthsLeft} 个月</span></div>
-                      
                       <div className="w-full bg-slate-100 dark:bg-slate-700 h-2.5 rounded-full overflow-hidden mt-3 mb-1 shadow-inner">
                         <div className="bg-gradient-to-r from-blue-500 to-indigo-500 h-full rounded-full transition-all duration-1000 ease-out" style={{width: `${Math.max(0, Math.min(100, (portfolioStats.totalProfit / (portfolioStats.safeTargetAmount || 1)) * 100))}%`}}></div>
                       </div>
 
                       <div className="flex flex-col text-sm bg-blue-50 dark:bg-blue-900/20 p-4 sm:p-5 rounded-xl mt-4 border border-blue-100 dark:border-blue-800/50 shadow-sm transition-colors duration-500">
                         <span className="text-blue-700 dark:text-blue-300 font-medium mb-1">为达成目标金额，每月需新增收益：</span>
-                        <span className="text-xl sm:text-2xl font-bold font-mono text-blue-600 dark:text-blue-400 break-all"><AnimatedNumber value={portfolioStats.requiredMonthly} /></span>
+                        <span className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-blue-600 dark:text-blue-400 break-all"><AnimatedNumber value={portfolioStats.requiredMonthly} /></span>
                       </div>
                       
                       {portfolioStats.totalProfit < 0 && portfolioStats.daysToBreakEven !== null && (
                          <div className="bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-100 dark:border-amber-800/50 mt-2 text-sm flex items-start animate-in fade-in zoom-in">
                             <AlertCircle size={16} className="text-amber-500 mr-2 shrink-0 mt-0.5" />
                             <div>
-                              按照 <span className="font-bold">{settings.targetAnnualRate}%</span> 的设定基准年化复利推演，要填平当前的亏损缺口，预计还需要 <span className="font-bold text-amber-600 dark:text-amber-400 text-base">{portfolioStats.daysToBreakEven}</span> 天。
+                              按照 <span className="font-bold">{settings.targetAnnualRate}%</span> 的设定基准年化复利推演，要填平当前的亏损缺口，预计还需要 <span className="font-bold tabular-nums text-amber-600 dark:text-amber-400 text-base">{portfolioStats.daysToBreakEven}</span> 天。
                             </div>
                          </div>
                       )}
@@ -1903,17 +1911,17 @@ export default function App() {
                 </div>
 
                 <div className="bg-gradient-to-br from-slate-800 to-slate-900 dark:from-slate-900 dark:to-black rounded-xl shadow-lg border border-slate-700 p-6 sm:p-8 relative overflow-hidden text-white transition-all hover:shadow-xl hover:-translate-y-1 duration-300">
-                  <div className="absolute -right-6 -bottom-6 text-white/5 pointer-events-none"><TrendingUp size={140}/></div>
+                  <div className="absolute -right-6 -bottom-6 text-white/5 pointer-events-none transform-gpu"><TrendingUp size={140}/></div>
                   <h3 className="text-lg sm:text-xl font-bold mb-4 flex items-center relative z-10 text-blue-400">
                     <TrendingUp className="mr-2" size={24}/> 静态复利推演
                   </h3>
                   <div className="space-y-4 relative z-10">
                     <div className="text-slate-300 text-sm sm:text-base leading-relaxed">
-                      基于当前 <span className="font-bold text-white text-base sm:text-lg bg-white/10 px-2 py-0.5 rounded-md ml-1 mr-1 shadow-inner">{formatPercent(portfolioStats.overallXirr)}</span> 综合年化收益率推演：
+                      基于当前 <span className="font-bold text-white tabular-nums text-base sm:text-lg bg-white/10 px-2 py-0.5 rounded-md ml-1 mr-1 shadow-inner">{formatPercent(portfolioStats.overallXirr)}</span> 综合年化收益率推演：
                     </div>
                     <div className="pt-2 border-t border-white/10 mt-2">
                       <div className="text-slate-400 text-sm sm:text-base mb-1">至目标日期预计总持仓将达到:</div>
-                      <div className="text-3xl sm:text-4xl font-bold font-mono text-red-500 tracking-tight break-all drop-shadow-md">
+                      <div className="text-3xl sm:text-4xl font-bold font-mono tabular-nums text-red-500 tracking-tight break-all drop-shadow-md">
                         <AnimatedNumber value={portfolioStats.projectedAssets} />
                       </div>
                     </div>
