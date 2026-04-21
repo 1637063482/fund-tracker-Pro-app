@@ -4,7 +4,9 @@ import {
   PieChart, Activity, Sun, Moon, Edit3, RefreshCw, AlertCircle, 
   Zap, LogOut, Mail, Lock, LogIn, Cloud, CloudOff, ArrowUpDown, 
   ArrowUp, ArrowDown, Download, Settings, Database, Clock, Bell,
-  Play, Pause, Archive, RefreshCcw, CheckCircle2
+  Play, Pause, Archive, RefreshCcw, CheckCircle2,
+  // 【新增引入的图标，用于全景弹窗】
+  User, Calendar, BarChart2
 } from 'lucide-react';
 import { SplashScreen } from '@capacitor/splash-screen';
 
@@ -36,7 +38,7 @@ try {
     db = getFirestore(app);
   }
 } catch (error) {
-  console.error("Firebase 初始化失败:", error);
+  console.error("Firebase 初始化失败 (当前 WebView 环境可能限制了 IndexedDB 等存储权限):", error);
 }
 
 const evaluateExpression = (expr) => {
@@ -123,20 +125,30 @@ const AnimatedNumber = ({ value, formatter = formatMoney, className = "" }) => {
       isInitialMount.current = false;
       return;
     }
+
     let start = displayValue;
     let end = value;
     if (start === end) return;
+
     const duration = 500;
     const startTime = performance.now();
+
     const animate = (currentTime) => {
       const elapsed = currentTime - startTime;
       const progress = Math.min(elapsed / duration, 1);
+      
       const easeProgress = 1 - Math.pow(1 - progress, 3);
       const current = start + (end - start) * easeProgress;
+      
       setDisplayValue(current);
-      if (progress < 1) requestAnimationFrame(animate);
-      else setDisplayValue(end);
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        setDisplayValue(end);
+      }
     };
+
     requestAnimationFrame(animate);
   },[value]);
 
@@ -144,8 +156,8 @@ const AnimatedNumber = ({ value, formatter = formatMoney, className = "" }) => {
 };
 
 const SmartInput = ({ value, onChange, placeholder, className, isDate = false, type = "text", disabled = false }) => {
-  const [isEditing, setIsEditing] = useState(false);
-  const[localValue, setLocalValue] = useState(value || '');
+  const[isEditing, setIsEditing] = useState(false);
+  const [localValue, setLocalValue] = useState(value || '');
 
   useEffect(() => { if (!isEditing) setLocalValue(value || ''); },[value, isEditing]);
 
@@ -175,6 +187,7 @@ const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计"
   if (total === 0 || data.length === 0) {
     return <div className="flex items-center justify-center h-48 text-slate-400 text-sm animate-in fade-in duration-500">暂无数据</div>;
   }
+
   let cumulativePercent = 0;
   const getCoordinatesForPercent = (percent) => {
     const x = Math.cos(2 * Math.PI * percent);
@@ -189,16 +202,34 @@ const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计"
           {data.map((slice, i) => {
             const value = Math.max(0, slice.value);
             if (value === 0) return null; 
+            
             const percent = value / total;
-            if (percent === 1) return <circle key={i} r="0.8" cx="0" cy="0" fill="transparent" stroke={COLORS[i % COLORS.length]} strokeWidth="0.4" />;
+            if (percent === 1) {
+              return (
+                <circle key={i} r="0.8" cx="0" cy="0" fill="transparent" stroke={COLORS[i % COLORS.length]} strokeWidth="0.4" />
+              );
+            }
+
             const[startX, startY] = getCoordinatesForPercent(cumulativePercent);
             cumulativePercent += percent;
             const[endX, endY] = getCoordinatesForPercent(cumulativePercent);
             const largeArcFlag = percent > 0.5 ? 1 : 0;
-            const pathData =[`M ${startX * 0.8} ${startY * 0.8}`, `A 0.8 0.8 0 ${largeArcFlag} 1 ${endX * 0.8} ${endY * 0.8}`].join(' ');
+            
+            const pathData =[
+              `M ${startX * 0.8} ${startY * 0.8}`,
+              `A 0.8 0.8 0 ${largeArcFlag} 1 ${endX * 0.8} ${endY * 0.8}`
+            ].join(' ');
 
             return (
-              <path key={i} d={pathData} fill="transparent" stroke={COLORS[i % COLORS.length]} strokeWidth="0.4" className="transition-all duration-300 hover:stroke-[0.45] hover:opacity-80 cursor-pointer origin-center" style={{ transformOrigin: '0 0' }}>
+              <path 
+                key={i} 
+                d={pathData} 
+                fill="transparent" 
+                stroke={COLORS[i % COLORS.length]} 
+                strokeWidth="0.4" 
+                className="transition-all duration-300 hover:stroke-[0.45] hover:opacity-80 cursor-pointer origin-center"
+                style={{ transformOrigin: '0 0' }}
+              >
                 <title>{slice.name}: {valueFormatter(slice.value)} ({formatPercent(percent)})</title>
               </path>
             );
@@ -230,6 +261,136 @@ const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计"
   );
 };
 
+// =======================================================================
+// 【新增】: 基金全景详情弹窗组件 (Fund Profile Modal)
+// 结合了蛋卷 API 获取到的底层数据，进行结构化展示
+// =======================================================================
+const FundProfileModal = ({ fundName, fundCode, profile, onClose }) => {
+  const [isClosing, setIsClosing] = useState(false);
+
+  const handleClose = () => {
+    setIsClosing(true);
+    setTimeout(onClose, 250); 
+  };
+
+  if (!profile) {
+    return (
+      <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity duration-250 ${isClosing ? 'opacity-0' : 'opacity-100'}`}>
+        <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl flex flex-col items-center shadow-2xl">
+          <RefreshCw size={32} className="animate-spin text-blue-500 mb-4" />
+          <p className="text-slate-500 dark:text-slate-400 font-medium">正在拉取深度数据...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const derived = profile.fund_derived || {};
+  const baseData = profile.sec_header_base_data ||[];
+  
+  const maxDrawdown = baseData.find(d => d.data_name === '最大回撤')?.data_value_str || '--';
+  const manager = baseData.find(d => d.data_name === '基金经理')?.data_value_str || profile.manager_name || '--';
+  const foundDate = profile.found_date || '--';
+  const scale = baseData.find(d => d.data_name === '基金规模')?.data_value_str || profile.totshare || '--';
+  const typeDesc = profile.type_desc || '--';
+  const rank1y = derived.srank_l1y || '--';
+  const rank3y = derived.srank_l3y || '--';
+  
+  const annualPerformance = (derived.annual_performance_list ||[])
+    .filter(a => !a.period.includes('以来'))
+    .slice(0, 5)
+    .reverse();
+
+  return (
+    <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4 transition-opacity duration-250 ${isClosing ? 'opacity-0' : 'opacity-100'}`} onClick={handleClose}>
+      <div className={`bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col transform transition-all duration-250 ${isClosing ? 'scale-95 translate-y-4' : 'scale-100 translate-y-0'} animate-in fade-in zoom-in-95`} onClick={e => e.stopPropagation()}>
+        
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-5 sm:p-6 text-white relative overflow-hidden">
+          <div className="absolute right-0 top-0 opacity-10 transform scale-150 -translate-y-4 translate-x-4">
+            <BarChart2 size={120} />
+          </div>
+          <div className="flex justify-between items-start relative z-10">
+            <div>
+              <div className="text-blue-100 text-sm font-mono mb-1 bg-white/20 px-2 py-0.5 rounded inline-block">{fundCode}</div>
+              <h2 className="text-xl sm:text-2xl font-bold tracking-tight">{profile.fd_name || fundName}</h2>
+              <div className="mt-2 flex flex-wrap gap-2 text-xs font-medium">
+                <span className="bg-white/20 px-2 py-1 rounded">{typeDesc}</span>
+                <span className="bg-white/20 px-2 py-1 rounded">{profile.fund_status === "0" ? "开放申赎" : "状态未知"}</span>
+              </div>
+            </div>
+            <button onClick={handleClose} className="p-1.5 bg-white/10 hover:bg-white/30 rounded-full transition-colors active:scale-90">
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-5 sm:p-6 grid grid-cols-2 gap-4 sm:gap-6 bg-slate-50 dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700 text-sm">
+          <div className="space-y-3">
+             <div className="flex justify-between border-b border-slate-200 dark:border-slate-700 pb-1.5">
+               <span className="text-slate-500 flex items-center"><User size={14} className="mr-1"/>基金经理</span>
+               <span className="font-medium text-slate-800 dark:text-slate-200">{manager}</span>
+             </div>
+             <div className="flex justify-between border-b border-slate-200 dark:border-slate-700 pb-1.5">
+               <span className="text-slate-500 flex items-center"><PieChart size={14} className="mr-1"/>基金规模</span>
+               <span className="font-medium text-slate-800 dark:text-slate-200">{scale}</span>
+             </div>
+             <div className="flex justify-between border-b border-slate-200 dark:border-slate-700 pb-1.5">
+               <span className="text-slate-500 flex items-center"><Calendar size={14} className="mr-1"/>成立日期</span>
+               <span className="font-mono text-slate-800 dark:text-slate-200">{foundDate}</span>
+             </div>
+          </div>
+          <div className="space-y-3">
+             <div className="flex justify-between border-b border-slate-200 dark:border-slate-700 pb-1.5">
+               <span className="text-slate-500 flex items-center"><TrendingDown size={14} className="mr-1"/>最大回撤</span>
+               <span className="font-mono font-bold text-green-500">{maxDrawdown}</span>
+             </div>
+             <div className="flex justify-between border-b border-slate-200 dark:border-slate-700 pb-1.5">
+               <span className="text-slate-500 flex items-center"><Target size={14} className="mr-1"/>近1年排名</span>
+               <span className="font-mono font-medium text-slate-800 dark:text-slate-200">{rank1y}</span>
+             </div>
+             <div className="flex justify-between border-b border-slate-200 dark:border-slate-700 pb-1.5">
+               <span className="text-slate-500 flex items-center"><Target size={14} className="mr-1"/>近3年排名</span>
+               <span className="font-mono font-medium text-slate-800 dark:text-slate-200">{rank3y}</span>
+             </div>
+          </div>
+        </div>
+
+        <div className="p-5 sm:p-6 bg-white dark:bg-slate-900">
+           <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-4 flex items-center">
+             <BarChart2 size={16} className="mr-1.5 text-blue-500"/> 历年业绩涨跌幅
+           </h3>
+           
+           {annualPerformance.length > 0 ? (
+             <div className="flex items-end h-28 space-x-2">
+                {annualPerformance.map((item, idx) => {
+                   const val = parseFloat(item.nav);
+                   const isPos = val >= 0;
+                   const heightStr = `${Math.min(100, Math.max(8, Math.abs(val) * 1.5))}%`; 
+                   
+                   return (
+                     <div key={idx} className="flex-1 flex flex-col items-center justify-end h-full group cursor-default">
+                        <span className={`text-xs font-mono font-bold opacity-0 group-hover:opacity-100 transition-opacity mb-1 ${isPos ? 'text-red-500' : 'text-green-500'}`}>
+                          {item.nav}%
+                        </span>
+                        <div 
+                          className={`w-full max-w-[32px] sm:max-w-[48px] rounded-t-md transition-all duration-500 ${isPos ? 'bg-red-400 dark:bg-red-500' : 'bg-green-400 dark:bg-green-500'}`} 
+                          style={{ height: heightStr }}
+                        ></div>
+                        <span className="text-[10px] sm:text-xs text-slate-500 mt-2 font-mono">{item.period}</span>
+                     </div>
+                   )
+                })}
+             </div>
+           ) : (
+             <div className="text-center text-sm text-slate-400 py-6">暂无历年数据</div>
+           )}
+        </div>
+
+      </div>
+    </div>
+  );
+};
+// =======================================================================
+
 const MarketTimeIndicator = () => {
   const[timeObj, setTimeObj] = useState(new Date());
 
@@ -252,21 +413,36 @@ const MarketTimeIndicator = () => {
     const currentTimeInMinutes = hours * 60 + mins;
 
     if (day === 0 || day === 6) return { status: '休市中', isTrading: false, countdown: null };
-    if (currentTimeInMinutes < 540) return { status: '未开盘', isTrading: false, countdown: null };
-    if (currentTimeInMinutes >= 540 && currentTimeInMinutes < 570) {
-       return { status: '盘前准备', isTrading: false, countdown: `距开盘仅剩 ${570 - currentTimeInMinutes} 分钟`, urgent: true };
+
+    if (currentTimeInMinutes < 540) {
+       return { status: '未开盘', isTrading: false, countdown: null };
     }
-    if (currentTimeInMinutes >= 570 && currentTimeInMinutes < 690) return { status: '交易中 (早盘)', isTrading: true, countdown: null };
+
+    if (currentTimeInMinutes >= 540 && currentTimeInMinutes < 570) {
+       const minsLeft = 570 - currentTimeInMinutes;
+       return { status: '盘前准备', isTrading: false, countdown: `距开盘仅剩 ${minsLeft} 分钟`, urgent: true };
+    }
+
+    if (currentTimeInMinutes >= 570 && currentTimeInMinutes < 690) {
+       return { status: '交易中 (早盘)', isTrading: true, countdown: null };
+    }
+    
     if (currentTimeInMinutes >= 690 && currentTimeInMinutes < 780) {
        const minsLeft = 780 - currentTimeInMinutes;
-       if (minsLeft <= 30) return { status: '午间休市', isTrading: false, countdown: `距午盘开盘仅剩 ${minsLeft} 分钟`, urgent: true };
+       if (minsLeft <= 30) {
+         return { status: '午间休市', isTrading: false, countdown: `距午盘开盘仅剩 ${minsLeft} 分钟`, urgent: true };
+       }
        return { status: '午间休市', isTrading: false, countdown: null };
     }
+
     if (currentTimeInMinutes >= 780 && currentTimeInMinutes < 900) {
        const minsLeft = 900 - currentTimeInMinutes;
-       if (minsLeft <= 30) return { status: '交易中(即将收盘)', isTrading: true, countdown: `距收盘仅剩 ${minsLeft} 分钟`, urgent: true };
+       if (minsLeft <= 30) {
+          return { status: '交易中 (即将收盘)', isTrading: true, countdown: `距收盘仅剩 ${minsLeft} 分钟`, urgent: true };
+       }
        return { status: '交易中 (午盘)', isTrading: true, countdown: null };
     }
+
     return { status: '已收盘', isTrading: false, countdown: null };
   };
 
@@ -279,14 +455,15 @@ const MarketTimeIndicator = () => {
            <Clock className="mr-1.5 text-slate-500 w-[18px] h-[18px] xl:w-[24px] xl:h-[24px]" />
            <span className="font-mono tabular-nums tracking-wide text-base sm:text-lg xl:text-2xl">{timeObj.toLocaleDateString().replace(/\//g, '-')} {formatTime(timeObj)}</span>
          </div>
-         {/* 修复 2：加入 whitespace-nowrap 防止状态标签文字被挤成两行 */}
-         <div className={`px-2.5 py-0.5 rounded-full text-xs xl:text-sm flex items-center border transition-colors duration-500 whitespace-nowrap ${isTrading ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'}`}>
+         
+         <div className={`px-2.5 py-0.5 rounded-full text-xs xl:text-sm flex items-center border transition-colors duration-500 ${isTrading ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'}`}>
            {isTrading && <div className="w-1.5 h-1.5 xl:w-2 xl:h-2 rounded-full bg-green-500 mr-1.5 shadow-[0_0_6px_rgba(34,197,94,0.6)]"></div>}
            {status}
          </div>
       </div>
+      
       {countdown && (
-        <div className={`flex items-center px-3 py-1 rounded-md text-xs xl:text-sm font-bold transition-all duration-500 whitespace-nowrap ${urgent ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 shadow-sm' : 'text-amber-600 dark:text-amber-500'}`}>
+        <div className={`flex items-center px-3 py-1 rounded-md text-xs xl:text-sm font-bold transition-all duration-500 ${urgent ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 shadow-sm' : 'text-amber-600 dark:text-amber-500'}`}>
           <Bell className="mr-1 w-[14px] h-[14px] xl:w-[18px] xl:h-[18px] text-red-500" />
           {countdown}
         </div>
@@ -321,7 +498,7 @@ const LoginScreen = ({ theme, setTheme, dbError }) => {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-slate-900 dark:to-slate-800 py-12 px-4 sm:px-6 lg:px-8 transition-colors duration-500">
       <div className="absolute top-4 right-4">
-        <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2.5 rounded-full bg-white/50 hover:bg-white/80 dark:bg-slate-800/50 dark:hover:bg-slate-700/80 backdrop-blur-sm text-slate-500 dark:text-slate-400 transition-all hover:scale-110 active:scale-95 shadow-sm z-50">
+        <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2.5 rounded-full bg-white/50 hover:bg-white/80 dark:bg-slate-800/50 dark:hover:bg-slate-700/80 backdrop-blur-sm text-slate-500 dark:text-slate-400 transition-all hover:scale-110 active:scale-95 shadow-sm">
           {theme === 'dark' ? <Sun size={20} className="text-yellow-400"/> : <Moon size={20}/>}
         </button>
       </div>
@@ -465,10 +642,10 @@ const ProxySettingsModal = ({ settings, onSave, onClose }) => {
 };
 
 const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
-  const[localFund, setLocalFund] = useState({
+  const [localFund, setLocalFund] = useState({
     id: fund.id, 
     name: fund.name || '',
-    transactions: fund.transactions?.length > 0 ? [...fund.transactions] :[{ id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }],
+    transactions: fund.transactions?.length > 0 ?[...fund.transactions] :[{ id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }],
     currentValueRaw: fund.currentValueRaw || '',
     mode: fund.mode || 'manual', 
     fundCode: fund.fundCode || '',
@@ -478,7 +655,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
   });
 
   const[isFetchingLocalNav, setIsFetchingLocalNav] = useState(false);
-  const[localNavError, setLocalNavError] = useState('');
+  const [localNavError, setLocalNavError] = useState('');
 
   const handleUpdateTx = (index, field, val) => {
     const updated = [...localFund.transactions];
@@ -509,7 +686,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
         return (Number(localFund.shares) || 0) * nav;
      }
      return evaluateExpression(localFund.currentValueRaw);
-  }, [localFund, fundNavs]);
+  },[localFund, fundNavs]);
 
   const canArchive = currentEstimatedValue <= 0.01;
 
@@ -688,7 +865,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
 export default function App() {
   const [user, setUser] = useState(null); 
   const[authLoading, setAuthLoading] = useState(true);
-  const[funds, setFunds] = useState([]); 
+  const [funds, setFunds] = useState([]); 
   const[settings, setSettings] = useState({ 
     targetAmount: 100000, 
     targetDate: '2030-12-31', 
@@ -698,65 +875,50 @@ export default function App() {
     dataSource: 'tencent',
     navDataSource: 'tiantian' 
   });
-
-  // 修复 1：主题切换状态初始化和监听
-  const [theme, setTheme] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    }
-    return 'light';
-  }); 
+  const[theme, setTheme] = useState('light'); 
   
-  const[marketData, setMarketData] = useState([]); 
-  const [isFetchingMarket, setIsFetchingMarket] = useState(false);
+  const [marketData, setMarketData] = useState([]); 
+  const[isFetchingMarket, setIsFetchingMarket] = useState(false);
   const [marketError, setMarketError] = useState('');
   const [activeProxyIndex, setActiveProxyIndex] = useState(0); 
   const isFetchingRef = useRef(false); 
-  const[isAutoRefresh, setIsAutoRefresh] = useState(checkIsTradingTime()); 
+  const [isAutoRefresh, setIsAutoRefresh] = useState(checkIsTradingTime()); 
 
-  const [editingFundId, setEditingFundId] = useState(null);
+  const[editingFundId, setEditingFundId] = useState(null);
   const [isProxyModalOpen, setProxyModalOpen] = useState(false); 
-  const[dbError, setDbError] = useState(''); 
+  const [dbError, setDbError] = useState(''); 
   const[isDbConnected, setIsDbConnected] = useState(false);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' }); 
   const [fundTab, setFundTab] = useState('active'); 
   
-  const[fundNavs, setFundNavs] = useState({});
+  const [fundNavs, setFundNavs] = useState({});
   const [fetchingNavCodes, setFetchingNavCodes] = useState({}); 
   const[isClosingEditor, setIsClosingEditor] = useState(false); 
   
-  const[xirrMap, setXirrMap] = useState({});
+  const [xirrMap, setXirrMap] = useState({});
   const[overallXirr, setOverallXirr] = useState(0);
+
+  // =======================================================
+  // 【新增状态】: 用于管理基金全景弹窗及高级 API 数据
+  // =======================================================
+  const [fundProfiles, setFundProfiles] = useState({});
+  const[viewingProfileCode, setViewingProfileCode] = useState(null);
+
   const INACTIVITY_LIMIT = 10 * 60 * 1000; 
   const logoutTimerRef = useRef(null);
   const targetAmountTimeoutRef = useRef(null); 
   const targetDateTimeoutRef = useRef(null);
   const targetRateTimeoutRef = useRef(null);
 
-  // 修复 1：更稳健的深色/浅色模式控制
   useEffect(() => {
     if (theme === 'dark') {
       document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
     } else {
       document.documentElement.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
     }
   }, [theme]);
 
-  const toggleTheme = () => {
-    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
-  };
-
   useEffect(() => {
-    try {
-      if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
-        SplashScreen.hide().catch(() => {});
-      }
-    } catch (e) {
-      console.warn("隐藏原生开屏异常", e);
-    }
-
     const ultimateFallbackTimer = setTimeout(() => {
       try {
         const splash = document.getElementById('global-splash');
@@ -764,11 +926,20 @@ export default function App() {
           splash.style.opacity = '0';
           setTimeout(() => splash.remove(), 500);
         }
+        if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
+          SplashScreen.hide().catch(() => {});
+        }
       } catch (e) {}
-    }, 8000); 
+    }, 5000); 
 
     if (!authLoading) {
-      const HTML_SPLASH_MIN_TIME = window.__splashStartTime ? Math.max(0, 1000 - (Date.now() - window.__splashStartTime)) : 1000;
+      try {
+        if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
+          SplashScreen.hide().catch(() => {});
+        }
+      } catch (e) {}
+
+      const MIN_SPLASH_TIME = window.__splashStartTime ? Math.max(0, 1000 - (Date.now() - window.__splashStartTime)) : 600;
       
       setTimeout(() => {
         const splash = document.getElementById('global-splash');
@@ -780,7 +951,7 @@ export default function App() {
           }, 500); 
         }
         clearTimeout(ultimateFallbackTimer); 
-      }, HTML_SPLASH_MIN_TIME);
+      }, MIN_SPLASH_TIME);
     }
 
     return () => clearTimeout(ultimateFallbackTimer);
@@ -805,7 +976,7 @@ export default function App() {
   }, [user, handleSignOut]);
 
   useEffect(() => {
-    const events =['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
+    const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
     const handleActivity = () => resetLogoutTimer();
     
     if (user) {
@@ -821,9 +992,9 @@ export default function App() {
 
   useEffect(() => {
     const fallbackTimer = setTimeout(() => {
-      console.warn("Firebase 认证状态检测超时，触发熔断，解除加载状态");
+      console.warn("Firebase 认证状态检测超时，强制解除开屏状态");
       setAuthLoading(false); 
-    }, 8000);
+    }, 5000);
 
     if (!auth) {
       clearTimeout(fallbackTimer);
@@ -875,6 +1046,70 @@ export default function App() {
 
     return () => { unsubFunds(); unsubSettings(); setIsDbConnected(false); };
   }, [user]);
+
+
+  // =======================================================
+  // 【新增逻辑】: 静默拉取蛋卷深度剖析 API 数据
+  // =======================================================
+  const fetchDanjuanProfile = async (code) => {
+      if (!code) return null;
+      const targetUrl = `https://danjuanfunds.com/djapi/fund/${code}`;
+      let fetchUrl = '';
+      if (settings.proxyMode === 'custom' && settings.customProxyUrl) {
+          fetchUrl = settings.customProxyUrl.includes('{{url}}') 
+              ? settings.customProxyUrl.replace('{{url}}', encodeURIComponent(targetUrl)) 
+              : settings.customProxyUrl + targetUrl;
+      } else {
+          fetchUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
+      }
+
+      try {
+          const res = await fetch(fetchUrl);
+          if (settings.proxyMode === 'custom') {
+              const data = await res.json();
+              return data?.data || null;
+          } else {
+              const data = await res.json();
+              const parsed = JSON.parse(data.contents);
+              return parsed?.data || null;
+          }
+      } catch (e) {
+          console.warn(`拉取基金深度配置失败 (${code}):`, e);
+          return null;
+      }
+  };
+
+  // 后台自动拉取所有在持基金的高级属性（用于体检和智能徽章）
+  useEffect(() => {
+     const fetchAllProfiles = async () => {
+         const codes =[...new Set(funds.filter(f => f.fundCode && f.mode === 'auto' && !f.isArchived).map(f => f.fundCode))];
+         const newProfiles = { ...fundProfiles };
+         let changed = false;
+         for (const code of codes) {
+             if (!newProfiles[code]) {
+                 const profile = await fetchDanjuanProfile(code);
+                 if (profile) { 
+                    newProfiles[code] = profile; 
+                    changed = true; 
+                 }
+             }
+         }
+         if (changed) setFundProfiles(newProfiles);
+     };
+     if (funds.length > 0) fetchAllProfiles();
+  },[funds, settings.proxyMode, settings.customProxyUrl]); 
+
+  // 点击表格中名字时的弹窗处理函数
+  const handleViewProfile = async (code) => {
+      if (!code) return;
+      setViewingProfileCode(code);
+      if (!fundProfiles[code]) {
+          const data = await fetchDanjuanProfile(code);
+          if (data) setFundProfiles(prev => ({ ...prev, [code]: data }));
+      }
+  };
+  // =======================================================
+
 
   const fetchFundNavManually = async (codeToFetch = null) => {
      let codesToQuery =[];
@@ -1143,7 +1378,7 @@ export default function App() {
     if (!isAutoRefresh) return; 
     const intervalId = setInterval(manualFetch, 5000); 
     return () => clearInterval(intervalId); 
-  },[isAutoRefresh, manualFetch, user]);
+  }, [isAutoRefresh, manualFetch, user]);
 
   const handleCloseEditor = () => {
      setIsClosingEditor(true);
@@ -1349,10 +1584,11 @@ export default function App() {
     computeAllXirrAsync();
 
     return () => { isCancelled = true; };
-  }, [preXirrPayloads, globalPreCashFlows]);
+  },[preXirrPayloads, globalPreCashFlows]);
 
   const portfolioStats = useMemo(() => {
-    if (!baseFundsData) return { pieData:[], contributionPieData: [], rankedByXirr:[], rankedByProfit: [], computedFundsWithMetrics:[] };
+    // 增加容错并初始化新增的高级统计字段
+    if (!baseFundsData) return { pieData:[], contributionPieData:[], assetAllocationData:[], rankedByXirr: [], rankedByProfit: [], computedFundsWithMetrics:[], alpha: 0 };
 
     const baseFunds = baseFundsData.map(f => ({ ...f, xirr: xirrMap[f.id] || 0 }));
 
@@ -1384,6 +1620,26 @@ export default function App() {
       .filter(f => f.contribution > 0)
       .map(f => ({ name: f.name, value: f.contribution }))
       .sort((a, b) => b.value - a.value);
+
+    // =======================================================
+    // 【新增逻辑】: 资产配置穿透体检 (Asset Allocation)
+    // =======================================================
+    const assetAllocation = {};
+    computedFundsWithMetrics.forEach(f => {
+        if (f.currentValue <= 0 || f.isArchived) return;
+        const profile = fundProfiles[f.fundCode];
+        let category = "其他偏股/未分类"; 
+        if (profile && profile.op_fund && profile.op_fund.fund_tags) {
+            const typeTag = profile.op_fund.fund_tags.find(t => t.category === "1"); 
+            if (typeTag) category = typeTag.name;
+            else if (profile.type_desc) category = profile.type_desc;
+        } else if (f.name.includes("债")) {
+            category = "债券型"; // 没拉到数据时的简单文字推测
+        }
+        assetAllocation[category] = (assetAllocation[category] || 0) + f.currentValue;
+    });
+    const assetAllocationData = Object.keys(assetAllocation).map(k => ({ name: k, value: assetAllocation[k] })).sort((a, b) => b.value - a.value);
+    // =======================================================
       
     const rankedByXirr =[...computedFundsWithMetrics].filter(f => f.transactions.length > 0).sort((a, b) => b.xirr - a.xirr);
     const rankedByProfit = [...computedFundsWithMetrics].filter(f => f.transactions.length > 0).sort((a, b) => b.profit - a.profit);
@@ -1424,6 +1680,9 @@ export default function App() {
        }
     }
     
+    // 【新增逻辑】: 超额收益率 (Alpha) 计算
+    const alpha = overallXirr - (targetAnnualRate / 100);
+
     return { 
       totalInvested: netTotalInvested, 
       totalCurrentValue: Math.round(portfolioTotalCurrentValue * 100) / 100,
@@ -1432,15 +1691,17 @@ export default function App() {
       overallSimpleReturn, 
       pieData,
       contributionPieData,
+      assetAllocationData, // 抛出给大类资产饼图
       rankedByXirr, 
       rankedByProfit,
       computedFundsWithMetrics,
+      alpha, // 抛出给基准展示
       gap, monthsLeft, requiredMonthly: gap / monthsLeft,
       safeTargetAmount, targetAnnualRate,
       projectedAssets, daysToBreakEven, expectedDailyProfit,
       baselineValue, deviationAmount
     };
-  },[baseFundsData, settings, overallXirr, globalPreCashFlows, xirrMap]);
+  },[baseFundsData, settings, overallXirr, globalPreCashFlows, xirrMap, fundProfiles]);
 
   const sortedFunds = useMemo(() => {
     if (!portfolioStats.computedFundsWithMetrics) return[];
@@ -1491,15 +1752,56 @@ export default function App() {
     return null;
   }, [editingFundId, funds]);
 
-  // 修复 1：最外层包裹 div 必须强制应用背景色和主题控制，以确保 dark 模式能正常切换
+  // =======================================================
+  // 【新增逻辑】: 智能加减仓徽章判定（包含债券智能嗅探）
+  // =======================================================
+  const renderSmartBadges = (fund) => {
+      if (fundTab !== 'active' || fund.mode !== 'auto' || !fund.fundCode) return null;
+      const profile = fundProfiles[fund.fundCode];
+      if (!profile) return null;
+
+      // 自动嗅探是否为债券型基金
+      const isBond = fund.name.includes("债") || (profile.type_desc && profile.type_desc.includes("债"));
+      
+      // 债券与股票的动态阈值（股票15%止盈，债券4%止盈；股票5%黄金坑，债券0.5%加仓）
+      const profitThreshold = isBond ? 0.04 : 0.15; 
+      const dropThreshold = isBond ? -0.5 : -5.0;   
+
+      const grl1m = parseFloat(profile.fund_derived?.nav_grl1m || 0);
+      const returnRate = fund.totalInvested > 0 ? fund.profit / fund.totalInvested : 0;
+      const badges =[];
+
+      if (returnRate > profitThreshold) { 
+          // 止盈提示
+          const badgeText = isBond ? "🥚 宜收蛋" : "📈 止盈区";
+          badges.push(<span key="sell" className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-red-100 text-red-600 border border-red-200 dark:bg-red-900/30 dark:border-red-800 dark:text-red-400 leading-none shadow-sm whitespace-nowrap">{badgeText}</span>);
+      } else if (grl1m < dropThreshold) { 
+          // 抄底提示
+          const badgeText = isBond ? "💧 加仓点" : "🔥 黄金坑";
+          badges.push(<span key="buy" className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-green-100 text-green-600 border border-green-200 dark:bg-green-900/30 dark:border-green-800 dark:text-green-400 leading-none shadow-sm whitespace-nowrap">{badgeText}</span>);
+      }
+      return badges;
+  };
+  // =======================================================
+
   return (
-    <div className="min-h-screen text-slate-800 dark:text-slate-200 bg-slate-50 dark:bg-slate-900 transition-colors duration-500">
+    <>
+      {/* 渲染基金详情全景弹窗 */}
+      {viewingProfileCode && (
+        <FundProfileModal 
+           fundCode={viewingProfileCode}
+           fundName={funds.find(f => f.fundCode === viewingProfileCode)?.name || '详情'}
+           profile={fundProfiles[viewingProfileCode]}
+           onClose={() => setViewingProfileCode(null)}
+        />
+      )}
+
       {!authLoading && !user && (
-         <LoginScreen theme={theme} setTheme={toggleTheme} dbError={dbError} />
+         <LoginScreen theme={theme} setTheme={setTheme} dbError={dbError} />
       )}
 
       {!authLoading && user && (
-        <div className="pb-10 relative animate-in fade-in duration-700">
+        <div className="min-h-screen text-slate-800 dark:text-slate-200 pb-10 relative animate-in fade-in duration-700 bg-slate-50 dark:bg-slate-900">
           
           <header className="bg-white/90 dark:bg-slate-800/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-700 sticky top-0 z-30 shadow-sm transition-colors duration-500">
             <div className="max-w-[1600px] mx-auto px-4 h-16 flex items-center justify-between">
@@ -1536,8 +1838,7 @@ export default function App() {
                   </div>
                 )}
 
-                {/* 修复 1：传递正确的 toggleTheme 供按钮切换 */}
-                <button type="button" onClick={toggleTheme} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors active:scale-90 z-50">
+                <button type="button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors active:scale-90">
                   {theme === 'dark' ? <Sun size={20} className="text-yellow-400"/> : <Moon size={20}/>}
                 </button>
                 <div className="flex items-center bg-slate-100 dark:bg-slate-700 rounded-full pr-1 pl-3 py-1 transition-colors shadow-sm">
@@ -1618,24 +1919,23 @@ export default function App() {
                 
                 <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden flex flex-col transition-colors duration-500">
                   
-                  {/* 修复 3、4：完美对齐的 Tabs 栏与响应式排版 */}
-                  <div className="flex flex-wrap sm:flex-nowrap justify-between items-end border-b dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/20 px-3 sm:px-5 pt-3 sm:pt-5 gap-y-3 relative overflow-x-auto no-scrollbar">
+                  {/* 【优化点】：移动端无换行且自适应的紧凑型菜单栏 */}
+                  <div className="flex justify-between items-end border-b dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/20 px-3 sm:px-5 pt-4 sm:pt-5 relative overflow-x-auto no-scrollbar">
                     
-                    <div className="flex space-x-2 sm:space-x-6 h-full shrink-0 min-w-max">
-                      <button type="button" onClick={() => setFundTab('active')} className={`relative pb-3 px-2 sm:px-4 text-sm sm:text-lg font-bold flex items-center transition-all duration-300 ${fundTab === 'active' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
-                          <PieChart className="mr-1.5 w-4 h-4 sm:w-5 sm:h-5" /> 投资组合持仓
-                          {/* 下划线作为伪元素相对按钮居中 */}
-                          {fundTab === 'active' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 dark:bg-blue-400 rounded-t-full transition-all duration-300"></div>}
+                    <div className="flex space-x-0 sm:space-x-4 h-full relative shrink-0">
+                      <button type="button" onClick={() => setFundTab('active')} className={`pb-3 px-3 sm:px-4 text-sm sm:text-lg font-bold flex items-center whitespace-nowrap transition-all duration-300 ${fundTab === 'active' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
+                          <PieChart className="mr-1 sm:mr-1.5 w-4 h-4 sm:w-5 sm:h-5" /> 投资组合
                       </button>
-                      <button type="button" onClick={() => setFundTab('archived')} className={`relative pb-3 px-2 sm:px-4 text-sm sm:text-lg font-bold flex items-center transition-all duration-300 ${fundTab === 'archived' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
-                          <Archive className="mr-1.5 w-4 h-4 sm:w-5 sm:h-5" /> 已清仓历史
-                          {fundTab === 'archived' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-500 dark:bg-amber-400 rounded-t-full transition-all duration-300"></div>}
+                      <button type="button" onClick={() => setFundTab('archived')} className={`pb-3 px-3 sm:px-4 text-sm sm:text-lg font-bold flex items-center whitespace-nowrap transition-all duration-300 ${fundTab === 'archived' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
+                          <Archive className="mr-1 sm:mr-1.5 w-4 h-4 sm:w-5 sm:h-5" /> 清仓历史
                       </button>
+                      
+                      <div className={`absolute bottom-0 h-0.5 transition-all duration-300 ease-out rounded-t-full ${fundTab === 'active' ? 'bg-blue-600 dark:bg-blue-400 w-[5.5rem] sm:w-[8rem] left-0 ml-1.5 sm:ml-2' : 'bg-amber-500 dark:bg-amber-400 w-[5.5rem] sm:w-[8rem] translate-x-[5.5rem] sm:translate-x-[8.5rem]'}`}></div>
                     </div>
                     
-                    <button type="button" onClick={() => setEditingFundId('new')} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg text-sm font-medium flex items-center shrink-0 min-w-max transition-all shadow-sm hover:shadow-md active:scale-95 mb-2 group">
+                    <button type="button" onClick={() => setEditingFundId('new')} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-3 sm:px-5 py-2 sm:py-2.5 rounded-lg text-sm font-medium flex items-center shrink-0 transition-all shadow-sm hover:shadow-md active:scale-95 mb-2 group">
                       <Plus className="w-4 h-4 sm:w-5 sm:h-5 sm:mr-1 transition-transform group-hover:rotate-90 duration-300" /> 
-                      <span>新增资产记录</span>
+                      <span className="hidden sm:inline">新增资产</span><span className="sm:hidden ml-1">新增</span>
                     </button>
                   </div>
 
@@ -1672,7 +1972,19 @@ export default function App() {
                               <div className="flex flex-col">
                                 <div className="flex items-center">
                                   <div className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full mr-2 sm:mr-3 shrink-0 transition-colors duration-500 ${fundTab==='archived'?'bg-amber-500':(fund.profit >= 0 ? 'bg-red-500' : 'bg-green-500')}`}></div>
-                                  <span className={`transition-all duration-300 whitespace-nowrap ${fundTab==='archived' ? 'line-through text-slate-500' : ''}`}>{fund.name}</span>
+                                  
+                                  {/* 【修改点】：如果是自动拉取净值的基金，名称可点击，并附加徽章 */}
+                                  {fund.mode === 'auto' && fundTab === 'active' ? (
+                                    <div className="flex items-center">
+                                      <button type="button" onClick={() => handleViewProfile(fund.fundCode)} className="text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 transition-colors duration-300 font-bold whitespace-nowrap underline decoration-dashed decoration-blue-200 dark:decoration-blue-800 underline-offset-4">
+                                        {fund.name}
+                                      </button>
+                                      {renderSmartBadges(fund)}
+                                    </div>
+                                  ) : (
+                                    <span className={`transition-all duration-300 whitespace-nowrap ${fundTab==='archived' ? 'line-through text-slate-500' : ''}`}>{fund.name}</span>
+                                  )}
+                                  
                                 </div>
                                 {fund.mode === 'auto' && fundTab === 'active' && (
                                   <div className="text-[11px] text-slate-500 mt-2 flex items-center gap-x-2 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/50 pl-1.5 pr-2 py-1 rounded-md w-fit shadow-sm whitespace-nowrap">
@@ -1786,8 +2098,14 @@ export default function App() {
 
               <section className="lg:col-span-4 xl:col-span-3 space-y-6">
                 
+                {/* 【新增】：大类资产配置分析图 */}
                 <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-5 sm:p-6 transition-colors duration-500 hover:shadow-md">
-                  <h3 className="text-base sm:text-lg font-bold mb-4 sm:mb-5 flex items-center"><PieChart className="mr-2 text-blue-500"/> 持仓资产分布</h3>
+                  <h3 className="text-base sm:text-lg font-bold mb-4 sm:mb-5 flex items-center"><PieChart className="mr-2 text-indigo-500"/> 大类资产配置图</h3>
+                  <DonutChart data={portfolioStats.assetAllocationData} centerLabel="类别比重" />
+                </div>
+
+                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-5 sm:p-6 transition-colors duration-500 hover:shadow-md">
+                  <h3 className="text-base sm:text-lg font-bold mb-4 sm:mb-5 flex items-center"><PieChart className="mr-2 text-blue-500"/> 单一持仓比重分布</h3>
                   <DonutChart data={portfolioStats.pieData} />
                 </div>
 
@@ -1839,14 +2157,23 @@ export default function App() {
                     </div>
 
                     <div className="pt-5 sm:pt-6 border-t border-slate-100 dark:border-slate-700 space-y-3">
+                      {/* 【新增】：超额收益 (Alpha) 指标显示 */}
                       <div className="flex justify-between items-center text-sm">
-                        <span className="text-slate-600 dark:text-slate-400">当前资产偏离基准:</span>
+                        <span className="text-slate-600 dark:text-slate-400">对比设定基准的超额收益 (Alpha):</span>
+                        <span className={`font-mono font-bold tabular-nums text-base bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded shadow-inner ${portfolioStats.alpha >= 0 ? 'text-red-500' : 'text-green-500'}`}>
+                          {portfolioStats.alpha >= 0 ? '+' : ''}{formatPercent(portfolioStats.alpha)}
+                        </span>
+                      </div>
+                      
+                      <div className="w-full h-px bg-slate-100 dark:bg-slate-700 my-2"></div>
+                      
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-600 dark:text-slate-400">当前资产偏离基准轨迹:</span>
                         <span className={`font-mono font-bold tabular-nums ${portfolioStats.deviationAmount >= 0 ? 'text-red-500' : 'text-green-500'}`}>
                           {portfolioStats.deviationAmount >= 0 ? '+' : ''}{formatMoney(portfolioStats.deviationAmount)}
                         </span>
                       </div>
                       
-                      <div className="w-full h-px bg-slate-100 dark:bg-slate-700 my-2"></div>
                       <div className="flex justify-between text-sm"><span className="text-slate-500">距总收益目标还差</span><span className="font-bold font-mono text-base"><AnimatedNumber value={portfolioStats.gap} /></span></div>
                       <div className="flex justify-between text-sm"><span className="text-slate-500">剩余倒数时间</span><span className="font-bold text-base">{portfolioStats.monthsLeft} 个月</span></div>
                       <div className="w-full bg-slate-100 dark:bg-slate-700 h-2.5 rounded-full overflow-hidden mt-3 mb-1 shadow-inner">
@@ -1924,6 +2251,6 @@ export default function App() {
           )}
         </div>
       )}
-    </div>
+    </>
   );
 }
