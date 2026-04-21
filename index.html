@@ -10,6 +10,17 @@
   <link rel="apple-touch-icon" href="/icon-192.png">
   
   <script>window.__splashStartTime = Date.now();</script>
+
+  <style>
+    @keyframes splash-pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.05); opacity: 0.9; box-shadow: 0 25px 50px -12px rgba(59, 130, 246, 0.5); }
+    }
+    @keyframes splash-loading-raw {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(200%); }
+    }
+  </style>
 </head>
 <body class="bg-slate-50 dark:bg-slate-900 transition-colors duration-500">
   

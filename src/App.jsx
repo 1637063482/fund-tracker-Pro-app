@@ -105,7 +105,7 @@ const ASSET_NAMES = {
   'sh511090': '30年期国债ETF'
 };
 
-const PROXY_NODES = [
+const PROXY_NODES =[
   { name: '节点 1 (AllOrigins-Raw)', fetcher: async (url) => { const r = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`); return await r.text(); } },
   { name: '节点 2 (ThingProxy)', fetcher: async (url) => { const r = await fetch(`https://thingproxy.freeboard.io/fetch/${url}`); return await r.text(); } },
   { name: '节点 3 (CorsProxy.io)', fetcher: async (url) => { const r = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`); return await r.text(); } },
@@ -148,7 +148,7 @@ const AnimatedNumber = ({ value, formatter = formatMoney, className = "" }) => {
     };
 
     requestAnimationFrame(animate);
-  }, [value]);
+  },[value]);
 
   return <span className={`tabular-nums ${className}`}>{formatter(displayValue)}</span>;
 };
@@ -179,7 +179,7 @@ const SmartInput = ({ value, onChange, placeholder, className, isDate = false, t
 };
 
 const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计" }) => {
-  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#14b8a6', '#84cc16'];
+  const COLORS =['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#14b8a6', '#84cc16'];
   const total = data.reduce((sum, item) => sum + Math.max(0, item.value), 0);
   
   if (total === 0 || data.length === 0) {
@@ -190,7 +190,7 @@ const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计"
   const getCoordinatesForPercent = (percent) => {
     const x = Math.cos(2 * Math.PI * percent);
     const y = Math.sin(2 * Math.PI * percent);
-    return [x, y];
+    return[x, y];
   };
 
   return (
@@ -210,10 +210,10 @@ const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计"
 
             const [startX, startY] = getCoordinatesForPercent(cumulativePercent);
             cumulativePercent += percent;
-            const [endX, endY] = getCoordinatesForPercent(cumulativePercent);
+            const[endX, endY] = getCoordinatesForPercent(cumulativePercent);
             const largeArcFlag = percent > 0.5 ? 1 : 0;
             
-            const pathData = [
+            const pathData =[
               `M ${startX * 0.8} ${startY * 0.8}`,
               `A 0.8 0.8 0 ${largeArcFlag} 1 ${endX * 0.8} ${endY * 0.8}`
             ].join(' ');
@@ -265,7 +265,7 @@ const MarketTimeIndicator = () => {
   useEffect(() => {
     const timer = setInterval(() => setTimeObj(new Date()), 1000);
     return () => clearInterval(timer);
-  }, []);
+  },[]);
 
   const formatTime = (date) => {
     const h = date.getHours().toString().padStart(2, '0');
@@ -421,8 +421,8 @@ const LoginScreen = ({ theme, setTheme, dbError }) => {
 
 const ProxySettingsModal = ({ settings, onSave, onClose }) => {
   const [mode, setMode] = useState(settings.proxyMode || 'builtin');
-  const [customUrl, setCustomUrl] = useState(settings.customProxyUrl || '');
-  const [dataSource, setDataSource] = useState(settings.dataSource || 'tencent');
+  const[customUrl, setCustomUrl] = useState(settings.customProxyUrl || '');
+  const[dataSource, setDataSource] = useState(settings.dataSource || 'tencent');
   const [navDataSource, setNavDataSource] = useState(settings.navDataSource || 'tiantian'); 
   const [isClosing, setIsClosing] = useState(false);
 
@@ -513,7 +513,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
   const [localFund, setLocalFund] = useState({
     id: fund.id, 
     name: fund.name || '',
-    transactions: fund.transactions?.length > 0 ? [...fund.transactions] : [{ id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }],
+    transactions: fund.transactions?.length > 0 ?[...fund.transactions] :[{ id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }],
     currentValueRaw: fund.currentValueRaw || '',
     mode: fund.mode || 'manual', 
     fundCode: fund.fundCode || '',
@@ -522,7 +522,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
     lastNav: fund.lastNav || 0
   });
 
-  const [isFetchingLocalNav, setIsFetchingLocalNav] = useState(false);
+  const[isFetchingLocalNav, setIsFetchingLocalNav] = useState(false);
   const [localNavError, setLocalNavError] = useState('');
 
   const handleUpdateTx = (index, field, val) => {
@@ -554,7 +554,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
         return (Number(localFund.shares) || 0) * nav;
      }
      return evaluateExpression(localFund.currentValueRaw);
-  }, [localFund, fundNavs]);
+  },[localFund, fundNavs]);
 
   const canArchive = currentEstimatedValue <= 0.01;
 
@@ -716,7 +716,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
             </div>
           )})}
 
-          <button type="button" onClick={() => setLocalFund({...localFund, transactions: [...localFund.transactions, { id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }]})} className="w-full mt-2 py-3.5 border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-600 rounded-xl flex items-center justify-center text-sm font-bold text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 transition-all bg-slate-50/50 hover:bg-blue-50/50 dark:bg-slate-800/20 dark:hover:bg-blue-900/20 active:scale-[0.99]">
+          <button type="button" onClick={() => setLocalFund({...localFund, transactions:[...localFund.transactions, { id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }]})} className="w-full mt-2 py-3.5 border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-600 rounded-xl flex items-center justify-center text-sm font-bold text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 transition-all bg-slate-50/50 hover:bg-blue-50/50 dark:bg-slate-800/20 dark:hover:bg-blue-900/20 active:scale-[0.99]">
             <Plus size={18} className="mr-2" /> 继续添加交易记录
           </button>
         </div>
@@ -731,7 +731,7 @@ const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
 };
 
 export default function App() {
-  const [user, setUser] = useState(null); 
+  const[user, setUser] = useState(null); 
   const [authLoading, setAuthLoading] = useState(true);
   const [funds, setFunds] = useState([]); 
   const [settings, setSettings] = useState({ 
@@ -747,7 +747,7 @@ export default function App() {
   
   const [marketData, setMarketData] = useState([]); 
   const [isFetchingMarket, setIsFetchingMarket] = useState(false);
-  const [marketError, setMarketError] = useState('');
+  const[marketError, setMarketError] = useState('');
   const [activeProxyIndex, setActiveProxyIndex] = useState(0); 
   const isFetchingRef = useRef(false); 
   const [isAutoRefresh, setIsAutoRefresh] = useState(checkIsTradingTime()); 
@@ -760,7 +760,7 @@ export default function App() {
   const [fundTab, setFundTab] = useState('active'); 
   
   const [fundNavs, setFundNavs] = useState({});
-  const [fetchingNavCodes, setFetchingNavCodes] = useState({}); 
+  const[fetchingNavCodes, setFetchingNavCodes] = useState({}); 
   const [isClosingEditor, setIsClosingEditor] = useState(false); 
   
   const [xirrMap, setXirrMap] = useState({});
@@ -779,14 +779,30 @@ export default function App() {
     }
   }, [theme]);
 
+  // 修改点1：加入终极兜底定时器，解决极端情况下的卡开屏死锁问题
   useEffect(() => {
+    // 无论如何，设置一个终极兜底定时器，防止任何异常导致卡开屏
+    const ultimateFallbackTimer = setTimeout(() => {
+      try {
+        const splash = document.getElementById('global-splash');
+        if (splash) {
+          splash.style.opacity = '0';
+          setTimeout(() => splash.remove(), 500);
+        }
+        if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
+          SplashScreen.hide().catch(() => {});
+        }
+      } catch (e) {}
+    }, 5000); 
+
     if (!authLoading) {
       const MIN_SPLASH_TIME = 1500; 
       const loadStartTime = window.__splashStartTime || Date.now();
       const elapsed = Date.now() - loadStartTime;
       const remaining = Math.max(0, MIN_SPLASH_TIME - elapsed);
 
-      setTimeout(() => {
+      setTimeout(async () => {
+        // 1. 优先清理 DOM (Web端兜底)
         const splash = document.getElementById('global-splash');
         if (splash) {
           splash.style.opacity = '0';
@@ -796,13 +812,20 @@ export default function App() {
           }, 500); 
         }
         
+        // 2. 安全调用 Capacitor 插件 (APK端)
         try {
-          SplashScreen.hide();
+          if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
+            await SplashScreen.hide();
+          }
         } catch (e) {
-          console.warn("SplashScreen.hide() call failed:", e);
+          console.warn("Capacitor SplashScreen 隐藏失败(可能在纯Web环境):", e);
         }
+        
+        clearTimeout(ultimateFallbackTimer); // 如果正常执行，清除终极兜底
       }, remaining);
     }
+
+    return () => clearTimeout(ultimateFallbackTimer);
   }, [authLoading]);
 
   const handleSignOut = useCallback(() => {
@@ -811,7 +834,7 @@ export default function App() {
         setFunds([]); setMarketData([]); setFundNavs({});
       });
     }
-  }, []);
+  },[]);
 
   const resetLogoutTimer = useCallback(() => {
     if (logoutTimerRef.current) clearTimeout(logoutTimerRef.current);
@@ -824,7 +847,7 @@ export default function App() {
   }, [user, handleSignOut]);
 
   useEffect(() => {
-    const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
+    const events =['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
     const handleActivity = () => resetLogoutTimer();
     
     if (user) {
@@ -838,16 +861,19 @@ export default function App() {
     };
   }, [user, resetLogoutTimer]);
 
+  // 修改点2：增加强制释放锁，并捕获 Auth 的内部异常，确保 authLoading 状态一定能变为 false
   useEffect(() => {
-    if (!auth) {
-      setAuthLoading(false);
-      return;
-    }
-
+    // 设置一个 5 秒的强制释放锁，如果 Firebase 5秒内没响应，强制进入 UI（哪怕是未登录状态）
     const fallbackTimer = setTimeout(() => {
       console.warn("Firebase 认证状态检测超时，强制解除开屏状态");
       setAuthLoading(false); 
-    }, 3000);
+    }, 5000);
+
+    if (!auth) {
+      clearTimeout(fallbackTimer);
+      setAuthLoading(false);
+      return;
+    }
     
     const initAuth = async () => {
       try {
@@ -858,6 +884,8 @@ export default function App() {
         }
       } catch (e) {
         console.error("Auth Init Error:", e);
+        // 即使出错也要释放 loading 状态
+        setAuthLoading(false);
       }
     };
     
@@ -867,14 +895,19 @@ export default function App() {
       clearTimeout(fallbackTimer);
       setUser(currentUser);
       if (!currentUser) setDbError('');
+      setAuthLoading(false); // 正常获取到状态后释放
+    }, (error) => {
+      // 捕获 onAuthStateChanged 的内部错误
+      console.error("Auth State 监听错误:", error);
+      clearTimeout(fallbackTimer);
       setAuthLoading(false);
     });
     
     return () => {
       clearTimeout(fallbackTimer);
-      unsubscribe();
+      if (unsubscribe) unsubscribe();
     };
-  }, []); 
+  },[]); 
 
   useEffect(() => {
     if (!user || !db) return;
@@ -883,7 +916,7 @@ export default function App() {
     const fundsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'funds');
     
     const unsubFunds = onSnapshot(query(fundsRef), (snapshot) => {
-      const data = [];
+      const data =[];
       snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
       setFunds(data);
       setDbError(''); 
@@ -905,7 +938,7 @@ export default function App() {
   }, [user]);
 
   const fetchFundNavManually = async (codeToFetch = null) => {
-     let codesToQuery = [];
+     let codesToQuery =[];
      if (codeToFetch) {
          codesToQuery.push(codeToFetch);
          setFetchingNavCodes(prev => ({...prev, [codeToFetch]: true}));
@@ -1039,7 +1072,7 @@ export default function App() {
   useEffect(() => {
      if (!user || funds.length === 0) return;
      fetchFundNavManually();
-  }, [user, funds, settings.proxyMode, settings.customProxyUrl, settings.navDataSource]);
+  },[user, funds, settings.proxyMode, settings.customProxyUrl, settings.navDataSource]);
 
   const fetchMarketAPI = async () => {
     if (!user) return; 
@@ -1091,7 +1124,7 @@ export default function App() {
     }
 
     if (textData) {
-      let parsedData = [];
+      let parsedData =[];
       if (dataSourceStr === 'xueqiu' && isJsonResp && textData.data) {
          parsedData = textData.data.map(item => {
            let codeRaw = item.symbol.toLowerCase();
@@ -1162,7 +1195,7 @@ export default function App() {
         setIsFetchingMarket(false);
         isFetchingRef.current = false;
      }
-  }, [activeProxyIndex, user, settings.proxyMode, settings.customProxyUrl, settings.dataSource]);
+  },[activeProxyIndex, user, settings.proxyMode, settings.customProxyUrl, settings.dataSource]);
 
   useEffect(() => {
     if (!user) return;
@@ -1197,7 +1230,7 @@ export default function App() {
 
     const payload = {
       name: fund.name || '未命名基金',
-      transactions: fund.transactions || [],
+      transactions: fund.transactions ||[],
       currentValueRaw: fund.currentValueRaw || '0',
       currentValue: finalCurrentValue,
       mode: fund.mode === 'auto' ? 'auto' : 'manual',
@@ -1283,12 +1316,12 @@ export default function App() {
   };
 
   const { baseFundsData, preXirrPayloads, globalPreCashFlows } = useMemo(() => {
-    const globalPreCashFlows = [];
+    const globalPreCashFlows =[];
     
     const baseFunds = funds.map(f => {
       let totalInvested = 0; 
       let realizedReturns = 0; 
-      let cashFlowsForXirr = []; 
+      let cashFlowsForXirr =[]; 
       
       f.transactions.forEach(t => {
         const rawAmt = evaluateExpression(t.amountRaw);
@@ -1466,7 +1499,7 @@ export default function App() {
       projectedAssets, daysToBreakEven, expectedDailyProfit,
       baselineValue, deviationAmount
     };
-  }, [baseFundsData, settings, overallXirr, globalPreCashFlows, xirrMap]);
+  },[baseFundsData, settings, overallXirr, globalPreCashFlows, xirrMap]);
 
   const sortedFunds = useMemo(() => {
     let list = portfolioStats.computedFundsWithMetrics.filter(f => fundTab === 'active' ? !f.isArchived : f.isArchived);
@@ -1483,7 +1516,7 @@ export default function App() {
       });
     }
     return list;
-  }, [portfolioStats.computedFundsWithMetrics, sortConfig, fundTab]);
+  },[portfolioStats.computedFundsWithMetrics, sortConfig, fundTab]);
 
   const requestSort = (key) => {
     let direction = 'desc';
@@ -1508,7 +1541,7 @@ export default function App() {
 
   const editingFundData = useMemo(() => {
     if (editingFundId === 'new') {
-      return { name: '', transactions: [{ id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }], currentValueRaw: '', mode: 'manual', fundCode: '', shares: '', isArchived: false };
+      return { name: '', transactions:[{ id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }], currentValueRaw: '', mode: 'manual', fundCode: '', shares: '', isArchived: false };
     }
     if (editingFundId) {
       return funds.find(f => f.id === editingFundId) || null;
