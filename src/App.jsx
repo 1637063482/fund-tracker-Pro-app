@@ -1,944 +1,29 @@
 import React, { useState, useEffect, useMemo, useRef, Fragment, useCallback } from 'react';
 import { 
-  TrendingUp, TrendingDown, Plus, Trash2, Save, X, Target, Award, 
-  PieChart, Activity, Sun, Moon, Edit3, RefreshCw, AlertCircle, 
-  Zap, LogOut, Mail, Lock, LogIn, Cloud, CloudOff, ArrowUpDown, 
-  ArrowUp, ArrowDown, Download, Settings, Database, Clock, Bell,
-  Play, Pause, Archive, RefreshCcw, CheckCircle2,
-  // 【新增引入的图标，用于全景弹窗】
-  User, Calendar, BarChart2
+  Activity, Download, Cloud, CloudOff, RefreshCw, Sun, Moon, LogOut, Settings, Pause, Play, 
+  AlertCircle, TrendingUp, TrendingDown, PieChart, Archive, ArrowUpDown, ArrowUp, ArrowDown, 
+  Plus, Edit3, Trash2, Award, Target, CheckCircle2, RefreshCcw, Sparkles, X
 } from 'lucide-react';
 import { SplashScreen } from '@capacitor/splash-screen';
-
-import { initializeApp } from 'firebase/app';
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query } from 'firebase/firestore';
-
-const USER_FIREBASE_CONFIG = {
-  apiKey: "AIzaSyAHY-z7vomHW6AUVV-a4laSGogcC1BMGM0",
-  authDomain: "fund-tracker-66e68.firebaseapp.com",
-  projectId: "fund-tracker-66e68",
-  storageBucket: "fund-tracker-66e68.firebasestorage.app",
-  messagingSenderId: "199762393112",
-  appId: "1:199762393112:web:ffa3efa00339108c0ceb6d",
-  measurementId: "G-VM99BJCJSZ"
-};
-
-const firebaseConfig = (typeof __firebase_config !== 'undefined' && __firebase_config) 
-  ? JSON.parse(__firebase_config) 
-  : USER_FIREBASE_CONFIG;
-
-const appId = typeof __app_id !== 'undefined' ? String(__app_id).replace(/\//g, '-') : 'my-fund-tracker';
-
-let app, auth, db;
-try {
-  if (firebaseConfig.apiKey) {
-    app = initializeApp(firebaseConfig);
-    auth = getAuth(app);
-    db = getFirestore(app);
-  }
-} catch (error) {
-  console.error("Firebase 初始化失败 (当前 WebView 环境可能限制了 IndexedDB 等存储权限):", error);
-}
-
-const evaluateExpression = (expr) => {
-  if (typeof expr !== 'string') return expr || 0;
-  let toEval = expr.trim();
-  if (toEval.startsWith('=')) toEval = toEval.substring(1);
-  if (!toEval) return 0;
-  if (!/^[0-9+\-*/().\s]*$/.test(toEval)) return isNaN(parseFloat(expr)) ? 0 : parseFloat(expr);
-  try {
-    const result = new Function('"use strict";return (' + toEval + ')')();
-    return isNaN(result) || !isFinite(result) ? 0 : Number(result.toFixed(2));
-  } catch (e) {
-    return isNaN(parseFloat(expr)) ? 0 : parseFloat(expr);
-  }
-};
-
-const calculateXIRR = (cashFlows) => {
-  const flows = cashFlows.map(cf => ({ amount: cf.amount, date: new Date(cf.date) })).filter(cf => !isNaN(cf.date.getTime()));
-  if (flows.length < 2) return 0;
-  
-  flows.sort((a, b) => a.date - b.date);
-
-  const hasPositive = flows.some(f => f.amount > 0);
-  const hasNegative = flows.some(f => f.amount < 0);
-  if (!hasPositive || !hasNegative) return 0;
-
-  const d0 = flows[0].date;
-  if (flows[flows.length - 1].date - d0 === 0) return 0;
-
-  const xnpv = (rate) => {
-    if (rate <= -1) return NaN;
-    return flows.reduce((sum, cf) => {
-      const years = (cf.date - d0) / 86400000 / 365.0;
-      return sum + cf.amount / Math.pow(1 + rate, years);
-    }, 0);
-  };
-
-  let low = -0.999999;
-  let high = 10000;   
-  let rate = 0;
-  for (let i = 0; i < 100; i++) {
-    rate = (low + high) / 2;
-    let val = xnpv(rate);
-    if (Math.abs(val) < 0.00001 || (high - low) < 0.000001) break;
-    if (val > 0) low = rate; else high = rate;
-  }
-  return rate;
-};
-
-const formatMoney = (val) => new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(val);
-const formatPercent = (val) => new Intl.NumberFormat('zh-CN', { style: 'percent', minimumFractionDigits: 2 }).format(val);
-
-const checkIsTradingTime = () => {
-  const date = new Date();
-  const day = date.getDay();
-  if (day === 0 || day === 6) return false;
-  const mins = date.getHours() * 60 + date.getMinutes();
-  return (mins >= 555 && mins <= 690) || (mins >= 780 && mins <= 905);
-};
-
-const ASSET_NAMES = {
-  'sh000001': '上证指数',
-  'sz399001': '深证成指',
-  'sz399006': '创业板指',
-  'sh511260': '10年期国债ETF',
-  'sh511090': '30年期国债ETF'
-};
-
-const PROXY_NODES =[
-  { name: '节点 1 (AllOrigins-Raw)', fetcher: async (url) => { const r = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`); return await r.text(); } },
-  { name: '节点 2 (ThingProxy)', fetcher: async (url) => { const r = await fetch(`https://thingproxy.freeboard.io/fetch/${url}`); return await r.text(); } },
-  { name: '节点 3 (CorsProxy.io)', fetcher: async (url) => { const r = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`); return await r.text(); } },
-  { name: '节点 4 (CodeTabs)', fetcher: async (url) => { const r = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`); return await r.text(); } },
-  { name: '节点 5 (AllOrigins-JSON)', fetcher: async (url) => { const r = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`); const d = await r.json(); return d.contents; } }
-];
-
-const AnimatedNumber = ({ value, formatter = formatMoney, className = "" }) => {
-  const[displayValue, setDisplayValue] = useState(value);
-  const isInitialMount = useRef(true);
-
-  useEffect(() => {
-    if (isInitialMount.current) {
-      setDisplayValue(value);
-      isInitialMount.current = false;
-      return;
-    }
-
-    let start = displayValue;
-    let end = value;
-    if (start === end) return;
-
-    const duration = 500;
-    const startTime = performance.now();
-
-    const animate = (currentTime) => {
-      const elapsed = currentTime - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      
-      const easeProgress = 1 - Math.pow(1 - progress, 3);
-      const current = start + (end - start) * easeProgress;
-      
-      setDisplayValue(current);
-
-      if (progress < 1) {
-        requestAnimationFrame(animate);
-      } else {
-        setDisplayValue(end);
-      }
-    };
-
-    requestAnimationFrame(animate);
-  },[value]);
-
-  return <span className={`tabular-nums ${className}`}>{formatter(displayValue)}</span>;
-};
-
-const SmartInput = ({ value, onChange, placeholder, className, isDate = false, type = "text", disabled = false }) => {
-  const[isEditing, setIsEditing] = useState(false);
-  const [localValue, setLocalValue] = useState(value || '');
-
-  useEffect(() => { if (!isEditing) setLocalValue(value || ''); },[value, isEditing]);
-
-  const handleBlur = () => {
-    setIsEditing(false);
-    onChange(localValue, isDate ? localValue : evaluateExpression(localValue));
-  };
-
-  return (
-    <input
-      type={isDate ? "date" : type}
-      value={isEditing ? localValue : (isDate ? localValue : (type === "number" ? localValue : evaluateExpression(localValue)))}
-      onChange={(e) => setLocalValue(e.target.value)}
-      onFocus={() => setIsEditing(true)}
-      onBlur={handleBlur}
-      disabled={disabled}
-      placeholder={placeholder}
-      className={`px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all duration-300 dark:bg-slate-800 dark:border-slate-700 dark:text-white ${className} ${disabled ? 'opacity-50 cursor-not-allowed bg-slate-100 dark:bg-slate-900' : ''}`}
-    />
-  );
-};
-
-const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计" }) => {
-  const COLORS =['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#14b8a6', '#84cc16'];
-  const total = data.reduce((sum, item) => sum + Math.max(0, item.value), 0);
-  
-  if (total === 0 || data.length === 0) {
-    return <div className="flex items-center justify-center h-48 text-slate-400 text-sm animate-in fade-in duration-500">暂无数据</div>;
-  }
-
-  let cumulativePercent = 0;
-  const getCoordinatesForPercent = (percent) => {
-    const x = Math.cos(2 * Math.PI * percent);
-    const y = Math.sin(2 * Math.PI * percent);
-    return[x, y];
-  };
-
-  return (
-    <div className="flex flex-col items-center animate-in fade-in zoom-in-95 duration-500">
-      <div className="relative w-48 h-48 mb-6 group">
-        <svg viewBox="-1 -1 2 2" className="w-full h-full transform -rotate-90 overflow-visible drop-shadow-md transition-transform duration-300 group-hover:scale-105">
-          {data.map((slice, i) => {
-            const value = Math.max(0, slice.value);
-            if (value === 0) return null; 
-            
-            const percent = value / total;
-            if (percent === 1) {
-              return (
-                <circle key={i} r="0.8" cx="0" cy="0" fill="transparent" stroke={COLORS[i % COLORS.length]} strokeWidth="0.4" />
-              );
-            }
-
-            const[startX, startY] = getCoordinatesForPercent(cumulativePercent);
-            cumulativePercent += percent;
-            const[endX, endY] = getCoordinatesForPercent(cumulativePercent);
-            const largeArcFlag = percent > 0.5 ? 1 : 0;
-            
-            const pathData =[
-              `M ${startX * 0.8} ${startY * 0.8}`,
-              `A 0.8 0.8 0 ${largeArcFlag} 1 ${endX * 0.8} ${endY * 0.8}`
-            ].join(' ');
-
-            return (
-              <path 
-                key={i} 
-                d={pathData} 
-                fill="transparent" 
-                stroke={COLORS[i % COLORS.length]} 
-                strokeWidth="0.4" 
-                className="transition-all duration-300 hover:stroke-[0.45] hover:opacity-80 cursor-pointer origin-center"
-                style={{ transformOrigin: '0 0' }}
-              >
-                <title>{slice.name}: {valueFormatter(slice.value)} ({formatPercent(percent)})</title>
-              </path>
-            );
-          })}
-        </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none transition-transform duration-300 group-hover:scale-105">
-           <span className="text-xs text-slate-500 dark:text-slate-400">{centerLabel}</span>
-           <span className="text-sm font-bold font-mono text-slate-800 dark:text-slate-200">
-             {valueFormatter === formatMoney && total >= 10000 ? (total / 10000).toFixed(2) + '万' : valueFormatter(total)}
-           </span>
-        </div>
-      </div>
-      
-      <div className="w-full grid grid-cols-2 gap-x-2 gap-y-3 text-xs">
-        {data.map((slice, i) => {
-          if (slice.value <= 0) return null;
-          return (
-            <div key={i} className="flex flex-col truncate hover:-translate-y-0.5 transition-transform duration-200 cursor-default">
-              <div className="flex items-center truncate mb-0.5">
-                <div className="w-2.5 h-2.5 rounded-sm mr-1.5 shrink-0 shadow-sm" style={{backgroundColor: COLORS[i % COLORS.length]}}></div>
-                <span className="truncate text-slate-600 dark:text-slate-400" title={slice.name}>{slice.name}</span>
-              </div>
-              <span className="font-mono text-slate-800 dark:text-slate-200 font-medium pl-4 tabular-nums">{formatPercent(slice.value/total)}</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
-
-// =======================================================================
-// 【重大更新】: 基金全景详情弹窗组件 (超详尽版 + 移动端适配)
-// 结合了蛋卷 API 返回的大量底层字段，进行响应式结构化展示
-// =======================================================================
-const FundProfileModal = ({ fundName, fundCode, profile, onClose }) => {
-  const [isClosing, setIsClosing] = useState(false);
-
-  const handleClose = () => {
-    setIsClosing(true);
-    setTimeout(onClose, 250); 
-  };
-
-  if (!profile) {
-    return (
-      <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity duration-250 ${isClosing ? 'opacity-0' : 'opacity-100'}`}>
-        <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl flex flex-col items-center shadow-2xl">
-          <RefreshCw size={32} className="animate-spin text-blue-500 mb-4" />
-          <p className="text-slate-500 dark:text-slate-400 font-medium">正在深度解析底层配置...</p>
-        </div>
-      </div>
-    );
-  }
-
-  const derived = profile.fund_derived || {};
-  const baseData = profile.sec_header_base_data ||[];
-  
-  // 提取核心数据
-  const maxDrawdown = baseData.find(d => d.data_name === '最大回撤')?.data_value_str || '--';
-  const manager = baseData.find(d => d.data_name === '基金经理')?.data_value_str || profile.manager_name || '--';
-  const foundDate = profile.found_date || '--';
-  const scale = baseData.find(d => d.data_name === '基金规模')?.data_value_str || profile.totshare || '--';
-  const typeDesc = profile.type_desc || '--';
-  const rank1y = derived.srank_l1y || '--';
-  const rank3y = derived.srank_l3y || '--';
-  
-  // 提取进阶附加数据
-  const tips = profile.tips || profile.op_fund?.tips || '';
-  const fundTags = profile.op_fund?.fund_tags ||[];
-  const yieldHistory = derived.yield_history ||[];
-  const investTarget = profile.invest_target || profile.invest_orientation || '这只基金的基金经理很懒，什么都没写。';
-  
-  // 提取历年业绩，过滤掉“成立以来”等非具体年份，取最近5年
-  const annualPerformance = (derived.annual_performance_list ||[])
-    .filter(a => !a.period.includes('以来'))
-    .slice(0, 5)
-    .reverse();
-
-  return (
-    <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4 transition-opacity duration-250 ${isClosing ? 'opacity-0' : 'opacity-100'}`} onClick={handleClose}>
-      
-      {/* 主容器：限制最大高度为屏幕的 90%，确保在小手机上不会撑爆 */}
-      <div className={`bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col transform transition-all duration-250 ${isClosing ? 'scale-95 translate-y-4' : 'scale-100 translate-y-0'} animate-in fade-in zoom-in-95`} onClick={e => e.stopPropagation()}>
-        
-        {/* 头部固定区 (Header) */}
-        <div className="shrink-0 bg-gradient-to-r from-blue-600 to-indigo-600 p-5 sm:p-6 text-white relative overflow-hidden">
-          <div className="absolute right-0 top-0 opacity-10 transform scale-150 -translate-y-4 translate-x-4">
-            <BarChart2 size={120} />
-          </div>
-          <div className="flex justify-between items-start relative z-10">
-            <div className="pr-4">
-              <div className="text-blue-100 text-sm font-mono mb-1.5 bg-white/20 px-2 py-0.5 rounded inline-block shadow-sm">
-                {fundCode}
-              </div>
-              <h2 className="text-lg sm:text-2xl font-bold tracking-tight leading-tight">
-                {profile.fd_name || fundName}
-              </h2>
-            </div>
-            <button onClick={handleClose} className="p-1.5 bg-white/10 hover:bg-white/30 rounded-full transition-colors active:scale-90 shrink-0 shadow-sm">
-              <X size={20} />
-            </button>
-          </div>
-        </div>
-
-        {/* 滚动内容区 (Scrollable Body) */}
-        <div className="overflow-y-auto custom-scrollbar flex-1 flex flex-col bg-slate-50 dark:bg-slate-900">
-          
-          {/* Section 1: 基金特色箴言与标签 */}
-          <div className="p-4 sm:p-6 bg-white dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700">
-             {tips && (
-               <div className="text-amber-600 dark:text-amber-500 font-medium text-sm sm:text-base mb-3 flex items-start">
-                 <Award size={18} className="mr-1.5 shrink-0 mt-0.5"/> {tips}
-               </div>
-             )}
-             <div className="flex flex-wrap gap-2 text-xs font-medium">
-                <span className="bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 border border-blue-100 dark:border-blue-800 px-2.5 py-1 rounded-md shadow-sm">
-                  {typeDesc}
-                </span>
-                {fundTags.map((tag, i) => (
-                  <span key={i} className="bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-600 px-2.5 py-1 rounded-md shadow-sm">
-                    {tag.name}
-                  </span>
-                ))}
-                <span className={`px-2.5 py-1 rounded-md border shadow-sm ${profile.fund_status === "0" ? 'bg-green-50 text-green-600 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:border-slate-700'}`}>
-                  {profile.fund_status === "0" ? "开放申赎" : "限制交易"}
-                </span>
-             </div>
-          </div>
-
-          {/* Section 2: 基础档案网格 */}
-          <div className="p-4 sm:p-6 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 sm:gap-y-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-700 text-xs sm:text-sm">
-             <div className="space-y-3">
-               <div className="flex justify-between border-b border-slate-200 dark:border-slate-700 pb-1.5">
-                 <span className="text-slate-500 flex items-center"><User size={14} className="mr-1.5"/>基金经理</span>
-                 <span className="font-medium text-slate-800 dark:text-slate-200">{manager}</span>
-               </div>
-               <div className="flex justify-between border-b border-slate-200 dark:border-slate-700 pb-1.5">
-                 <span className="text-slate-500 flex items-center"><PieChart size={14} className="mr-1.5"/>资产规模</span>
-                 <span className="font-medium text-slate-800 dark:text-slate-200">{scale}</span>
-               </div>
-               <div className="flex justify-between border-b border-slate-200 dark:border-slate-700 pb-1.5">
-                 <span className="text-slate-500 flex items-center"><Calendar size={14} className="mr-1.5"/>成立日期</span>
-                 <span className="font-mono text-slate-800 dark:text-slate-200">{foundDate}</span>
-               </div>
-             </div>
-             <div className="space-y-3">
-               <div className="flex justify-between border-b border-slate-200 dark:border-slate-700 pb-1.5">
-                 <span className="text-slate-500 flex items-center"><TrendingDown size={14} className="mr-1.5"/>最大回撤</span>
-                 <span className="font-mono font-bold text-green-500">{maxDrawdown}</span>
-               </div>
-               <div className="flex justify-between border-b border-slate-200 dark:border-slate-700 pb-1.5">
-                 <span className="text-slate-500 flex items-center"><Target size={14} className="mr-1.5"/>近1年排名</span>
-                 <span className="font-mono font-medium text-slate-800 dark:text-slate-200">{rank1y}</span>
-               </div>
-               <div className="flex justify-between border-b border-slate-200 dark:border-slate-700 pb-1.5">
-                 <span className="text-slate-500 flex items-center"><Target size={14} className="mr-1.5"/>近3年排名</span>
-                 <span className="font-mono font-medium text-slate-800 dark:text-slate-200">{rank3y}</span>
-               </div>
-             </div>
-          </div>
-
-          {/* Section 3: 阶段历史收益矩阵 */}
-          {yieldHistory.length > 0 && (
-            <div className="p-4 sm:p-6 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-700">
-               <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-3 flex items-center">
-                 <Activity size={16} className="mr-1.5 text-indigo-500"/> 阶段涨跌幅看板
-               </h3>
-               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 sm:gap-3">
-                  {yieldHistory.map((yh, idx) => {
-                    const v = parseFloat(yh.yield);
-                    const isPos = v > 0;
-                    return (
-                       <div key={idx} className="bg-slate-50 dark:bg-slate-800 p-2 sm:p-3 rounded-xl border border-slate-100 dark:border-slate-700 flex flex-col items-center justify-center shadow-sm">
-                         <span className="text-[10px] sm:text-xs text-slate-500 mb-1">{yh.name}</span>
-                         <span className={`font-mono font-bold text-sm sm:text-base tracking-tight ${isPos ? 'text-red-500' : (v < 0 ? 'text-green-500' : 'text-slate-500')}`}>
-                           {isPos ? '+' : ''}{yh.yield}%
-                         </span>
-                       </div>
-                    )
-                  })}
-               </div>
-            </div>
-          )}
-
-          {/* Section 4: 历年走势柱状图 */}
-          <div className="p-4 sm:p-6 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-700">
-             <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-4 flex items-center">
-               <BarChart2 size={16} className="mr-1.5 text-blue-500"/> 历年业绩一览
-             </h3>
-             {annualPerformance.length > 0 ? (
-               <div className="flex items-end h-28 space-x-2">
-                  {annualPerformance.map((item, idx) => {
-                     const val = parseFloat(item.nav);
-                     const isPos = val >= 0;
-                     // 动态计算柱子高度，太小的给个保底高度以保证视觉可见
-                     const heightStr = `${Math.min(100, Math.max(10, Math.abs(val) * 2.5))}%`; 
-                     
-                     return (
-                       <div key={idx} className="flex-1 flex flex-col items-center justify-end h-full group cursor-default">
-                          <span className={`text-[10px] sm:text-xs font-mono font-bold opacity-70 group-hover:opacity-100 transition-opacity mb-1 ${isPos ? 'text-red-500' : 'text-green-500'}`}>
-                            {item.nav}%
-                          </span>
-                          <div 
-                            className={`w-full max-w-[28px] sm:max-w-[40px] rounded-t-md transition-all duration-500 shadow-sm ${isPos ? 'bg-red-400 dark:bg-red-500' : 'bg-green-400 dark:bg-green-500'}`} 
-                            style={{ height: heightStr }}
-                          ></div>
-                          <span className="text-[10px] sm:text-xs text-slate-500 mt-2 font-mono">
-                            {item.period}
-                          </span>
-                       </div>
-                     )
-                  })}
-               </div>
-             ) : (
-               <div className="text-center text-sm text-slate-400 py-6">该资产暂无完整的自然年历史数据</div>
-             )}
-          </div>
-
-          {/* Section 5: 投资策略与目标 */}
-          <div className="p-4 sm:p-6 bg-amber-50/50 dark:bg-slate-800/30">
-             <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-2 flex items-center">
-               <Target size={16} className="mr-1.5 text-amber-500"/> 底层投资策略
-             </h3>
-             <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed text-justify">
-               {investTarget}
-             </p>
-          </div>
-
-        </div>
-      </div>
-    </div>
-  );
-};
-// =======================================================================
-
-const MarketTimeIndicator = () => {
-  const[timeObj, setTimeObj] = useState(new Date());
-
-  useEffect(() => {
-    const timer = setInterval(() => setTimeObj(new Date()), 1000);
-    return () => clearInterval(timer);
-  },[]);
-
-  const formatTime = (date) => {
-    const h = date.getHours().toString().padStart(2, '0');
-    const m = date.getMinutes().toString().padStart(2, '0');
-    const s = date.getSeconds().toString().padStart(2, '0');
-    return `${h}:${m}:${s}`;
-  };
-
-  const getMarketStatus = (date) => {
-    const day = date.getDay();
-    const hours = date.getHours();
-    const mins = date.getMinutes();
-    const currentTimeInMinutes = hours * 60 + mins;
-
-    if (day === 0 || day === 6) return { status: '休市中', isTrading: false, countdown: null };
-
-    if (currentTimeInMinutes < 540) {
-       return { status: '未开盘', isTrading: false, countdown: null };
-    }
-
-    if (currentTimeInMinutes >= 540 && currentTimeInMinutes < 570) {
-       const minsLeft = 570 - currentTimeInMinutes;
-       return { status: '盘前准备', isTrading: false, countdown: `距开盘仅剩 ${minsLeft} 分钟`, urgent: true };
-    }
-
-    if (currentTimeInMinutes >= 570 && currentTimeInMinutes < 690) {
-       return { status: '交易中 (早盘)', isTrading: true, countdown: null };
-    }
-    
-    if (currentTimeInMinutes >= 690 && currentTimeInMinutes < 780) {
-       const minsLeft = 780 - currentTimeInMinutes;
-       if (minsLeft <= 30) {
-         return { status: '午间休市', isTrading: false, countdown: `距午盘开盘仅剩 ${minsLeft} 分钟`, urgent: true };
-       }
-       return { status: '午间休市', isTrading: false, countdown: null };
-    }
-
-    if (currentTimeInMinutes >= 780 && currentTimeInMinutes < 900) {
-       const minsLeft = 900 - currentTimeInMinutes;
-       if (minsLeft <= 30) {
-          return { status: '交易中 (即将收盘)', isTrading: true, countdown: `距收盘仅剩 ${minsLeft} 分钟`, urgent: true };
-       }
-       return { status: '交易中 (午盘)', isTrading: true, countdown: null };
-    }
-
-    return { status: '已收盘', isTrading: false, countdown: null };
-  };
-
-  const { status, isTrading, countdown, urgent } = getMarketStatus(timeObj);
-
-  return (
-    <div className="flex flex-col sm:flex-row sm:items-center text-sm font-medium transform-gpu" style={{ willChange: 'transform' }}>
-      <div className="flex items-center space-x-3 mb-2 sm:mb-0 sm:mr-4">
-         <div className="flex items-center text-slate-700 dark:text-slate-300">
-           <Clock className="mr-1.5 text-slate-500 w-[18px] h-[18px] xl:w-[24px] xl:h-[24px]" />
-           <span className="font-mono tabular-nums tracking-wide text-base sm:text-lg xl:text-2xl">{timeObj.toLocaleDateString().replace(/\//g, '-')} {formatTime(timeObj)}</span>
-         </div>
-         
-         <div className={`px-2.5 py-0.5 rounded-full text-xs xl:text-sm flex items-center border transition-colors duration-500 ${isTrading ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'}`}>
-           {isTrading && <div className="w-1.5 h-1.5 xl:w-2 xl:h-2 rounded-full bg-green-500 mr-1.5 shadow-[0_0_6px_rgba(34,197,94,0.6)]"></div>}
-           {status}
-         </div>
-      </div>
-      
-      {countdown && (
-        <div className={`flex items-center px-3 py-1 rounded-md text-xs xl:text-sm font-bold transition-all duration-500 ${urgent ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 shadow-sm' : 'text-amber-600 dark:text-amber-500'}`}>
-          <Bell className="mr-1 w-[14px] h-[14px] xl:w-[18px] xl:h-[18px] text-red-500" />
-          {countdown}
-        </div>
-      )}
-    </div>
-  );
-};
-
-const LoginScreen = ({ theme, setTheme, dbError }) => {
-  const[email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const[error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault(); 
-    setError('');
-    if (!auth) return setError('未检测到有效的 Firebase 配置，请检查源码参数。');
-    setLoading(true);
-    try {
-      await signInWithEmailAndPassword(auth, email, password);
-    } catch (err) {
-      let msg = "认证失败，请检查账号和密码。";
-      if (err.code === 'auth/invalid-email') msg = "邮箱格式不正确。";
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') msg = "账号或密码错误。";
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-slate-900 dark:to-slate-800 py-12 px-4 sm:px-6 lg:px-8 transition-colors duration-500">
-      <div className="absolute top-4 right-4">
-        <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2.5 rounded-full bg-white/50 hover:bg-white/80 dark:bg-slate-800/50 dark:hover:bg-slate-700/80 backdrop-blur-sm text-slate-500 dark:text-slate-400 transition-all hover:scale-110 active:scale-95 shadow-sm">
-          {theme === 'dark' ? <Sun size={20} className="text-yellow-400"/> : <Moon size={20}/>}
-        </button>
-      </div>
-      
-      <div className="max-w-md w-full space-y-8 bg-white/80 dark:bg-slate-800/80 backdrop-blur-xl p-10 rounded-3xl shadow-2xl border border-white/20 dark:border-slate-700/50 animate-in fade-in zoom-in-95 duration-500 slide-in-from-bottom-8">
-        <div>
-          <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 shadow-lg mb-6 transform transition-transform hover:rotate-12 duration-300">
-            <Activity className="h-8 w-8 text-white" />
-          </div>
-          <h2 className="text-center text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">Fund Tracker</h2>
-          <p className="mt-3 text-center text-sm text-slate-500 dark:text-slate-400">专属基金收益追踪系统 · 仅限授权访问</p>
-        </div>
-
-        {(dbError || error) && (
-          <div className="bg-red-50 dark:bg-red-900/30 border-l-4 border-red-500 p-4 rounded-r-lg flex items-start text-red-700 dark:text-red-400 animate-in fade-in slide-in-from-top-2 duration-300">
-            <AlertCircle size={20} className="mr-3 shrink-0 mt-0.5" />
-            <p className="text-sm font-medium">{error || dbError}</p>
-          </div>
-        )}
-
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 ml-1">授权邮箱</label>
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none transition-colors group-focus-within:text-blue-500"><Mail size={18} className="text-slate-400 group-focus-within:text-blue-500 transition-colors" /></div>
-                <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="block w-full pl-11 pr-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:text-white transition-all outline-none hover:border-slate-300 dark:hover:border-slate-600" placeholder="admin@example.com" />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 ml-1">访问密码</label>
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none transition-colors group-focus-within:text-blue-500"><Lock size={18} className="text-slate-400 group-focus-within:text-blue-500 transition-colors" /></div>
-                <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="block w-full pl-11 pr-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:text-white transition-all outline-none hover:border-slate-300 dark:hover:border-slate-600" placeholder="••••••••" />
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <button type="submit" disabled={loading} className="group relative w-full flex justify-center py-3.5 px-4 border border-transparent text-sm font-bold rounded-2xl text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 shadow-md hover:shadow-lg transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed overflow-hidden">
-              <span className="absolute left-0 inset-y-0 flex items-center pl-3">
-                {loading ? <RefreshCw size={20} className="animate-spin text-blue-300"/> : <LogIn size={20} className="text-blue-300 group-hover:text-blue-200 group-hover:translate-x-1 transition-all duration-300" />}
-              </span>
-              {loading ? '正在验证身份...' : '进入系统'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-const ProxySettingsModal = ({ settings, onSave, onClose }) => {
-  const[mode, setMode] = useState(settings.proxyMode || 'builtin');
-  const[customUrl, setCustomUrl] = useState(settings.customProxyUrl || '');
-  const [dataSource, setDataSource] = useState(settings.dataSource || 'tencent');
-  const [navDataSource, setNavDataSource] = useState(settings.navDataSource || 'tiantian'); 
-  const [isClosing, setIsClosing] = useState(false);
-
-  const handleClose = () => {
-    setIsClosing(true);
-    setTimeout(onClose, 200); 
-  };
-
-  return (
-    <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity duration-200 ${isClosing ? 'opacity-0' : 'opacity-100'}`}>
-      <div className={`bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all duration-200 ${isClosing ? 'scale-95 translate-y-4' : 'scale-100 translate-y-0'} animate-in fade-in zoom-in-95 slide-in-from-bottom-4`}>
-        
-        <div className="flex justify-between items-center p-6 border-b dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
-          <h3 className="text-xl font-bold flex items-center text-slate-800 dark:text-white"><Settings className="mr-2 text-blue-500 transition-transform hover:rotate-90 duration-500" /> 行情源与代理设置</h3>
-          <button type="button" onClick={handleClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 rounded-full p-1.5 shadow-sm active:scale-90"><X size={20} /></button>
-        </div>
-        
-        <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto custom-scrollbar">
-          
-          <div className="space-y-3">
-            <label className="text-sm font-bold text-slate-800 dark:text-slate-200 flex items-center"><Database size={16} className="mr-1.5 text-indigo-500"/> 实时行情数据源 (大盘/ETF)</label>
-            <div className="grid grid-cols-3 gap-2">
-              {['tencent', 'sina', 'xueqiu'].map((ds) => (
-                <button key={ds} type="button" onClick={() => setDataSource(ds)} className={`p-2.5 border rounded-xl flex items-center justify-center transition-all duration-200 active:scale-95 text-sm font-medium ${dataSource === ds ? 'bg-indigo-50 border-indigo-500 text-indigo-700 dark:bg-indigo-900/30 dark:border-indigo-500 dark:text-indigo-300 shadow-sm' : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-700/50'}`}>
-                  {ds === 'tencent' ? '腾讯财经' : ds === 'sina' ? '新浪财经' : '雪球行情'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-3 pt-2">
-            <label className="text-sm font-bold text-slate-800 dark:text-slate-200 flex items-center"><PieChart size={16} className="mr-1.5 text-blue-500"/> 基金净值数据源 (自动估值)</label>
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { id: 'tiantian', label: '天天(盘中)', desc: 'JSONP直连' },
-                { id: 'tiantian_lsjz', label: '天天(历史)', desc: 'Web真净值' },
-                { id: 'sina', label: '新浪财经', desc: '需代理' },
-                { id: 'danjuan', label: '蛋卷基金', desc: '需代理格式佳' }
-              ].map((src) => (
-                <button key={src.id} type="button" onClick={() => setNavDataSource(src.id)} className={`p-2.5 border rounded-xl flex flex-col items-center justify-center transition-all duration-200 active:scale-95 text-sm font-medium ${navDataSource === src.id ? 'bg-blue-50 border-blue-500 text-blue-700 dark:bg-blue-900/30 dark:border-blue-500 dark:text-blue-300 shadow-sm' : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-700/50'}`}>
-                  <span>{src.label}</span>
-                  <span className="text-[10px] font-normal opacity-80 mt-0.5">({src.desc})</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <hr className="border-slate-200 dark:border-slate-700" />
-
-          <div className="space-y-4">
-             <label className="text-sm font-bold text-slate-800 dark:text-slate-200 flex items-center"><Cloud size={16} className="mr-1.5 text-amber-500"/> 全局跨域代理模式</label>
-            
-            <label className={`flex items-center space-x-3 cursor-pointer p-3 rounded-xl border transition-all duration-200 ${mode === 'builtin' ? 'border-amber-500 bg-amber-50/50 dark:bg-amber-900/20 shadow-sm' : 'border-transparent hover:bg-slate-50 dark:hover:bg-slate-700/50'}`}>
-              <input type="radio" checked={mode === 'builtin'} onChange={() => setMode('builtin')} className="w-4 h-4 text-amber-600 focus:ring-amber-500 transition-colors" />
-              <span className="text-slate-700 dark:text-slate-300 font-medium text-sm">使用内置公共代理池 (自动灾备切换)</span>
-            </label>
-
-            <label className={`flex items-start space-x-3 cursor-pointer p-4 rounded-xl border transition-all duration-200 ${mode === 'custom' ? 'border-amber-500 bg-amber-50/50 dark:bg-amber-900/20 shadow-sm' : 'border-transparent hover:bg-slate-50 dark:hover:bg-slate-700/50'}`}>
-              <input type="radio" checked={mode === 'custom'} onChange={() => setMode('custom')} className="w-4 h-4 text-amber-600 focus:ring-amber-500 mt-1 transition-colors" />
-              <div className="flex-1">
-                <span className="text-slate-700 dark:text-slate-300 font-medium text-sm block mb-2">使用自定义 Web API 代理</span>
-                <input 
-                  value={customUrl} 
-                  onChange={e => setCustomUrl(e.target.value)} 
-                  disabled={mode !== 'custom'}
-                  placeholder="https://your-proxy.workers.dev/?url={{url}}" 
-                  className={`w-full px-3 py-2 border rounded-lg text-sm transition-all duration-300 font-mono ${mode === 'custom' ? 'bg-white dark:bg-slate-900 border-amber-300 dark:border-amber-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 outline-none shadow-inner' : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-400 cursor-not-allowed'}`} 
-                />
-                <p className={`text-xs mt-2 leading-relaxed transition-colors duration-300 ${mode === 'custom' ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 dark:text-slate-500'}`}>
-                  注：请填入支持 CORS 转发的 API 端点。使用 <code>{`{{url}}`}</code> 作为目标请求地址的占位符。
-                </p>
-              </div>
-            </label>
-          </div>
-
-        </div>
-        
-        <div className="p-6 border-t dark:border-slate-700 flex justify-end space-x-3 bg-slate-50 dark:bg-slate-800/50 rounded-b-2xl">
-          <button type="button" onClick={handleClose} className="px-5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors font-medium active:scale-95">取消</button>
-          <button type="button" onClick={() => onSave({ proxyMode: mode, customProxyUrl: customUrl, dataSource, navDataSource })} className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-md hover:shadow-lg transition-all active:scale-95">保存设置</button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
-  const [localFund, setLocalFund] = useState({
-    id: fund.id, 
-    name: fund.name || '',
-    transactions: fund.transactions?.length > 0 ?[...fund.transactions] :[{ id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }],
-    currentValueRaw: fund.currentValueRaw || '',
-    mode: fund.mode || 'manual', 
-    fundCode: fund.fundCode || '',
-    shares: fund.shares || '',
-    isArchived: fund.isArchived || false, 
-    lastNav: fund.lastNav || 0
-  });
-
-  const[isFetchingLocalNav, setIsFetchingLocalNav] = useState(false);
-  const[localNavError, setLocalNavError] = useState('');
-
-  const handleUpdateTx = (index, field, val) => {
-    const updated = [...localFund.transactions];
-    updated[index] = { ...updated[index], [field]: val };
-    setLocalFund({ ...localFund, transactions: updated });
-  };
-
-  const handleTriggerNavFetch = async () => {
-     if (!localFund.fundCode) return;
-     setIsFetchingLocalNav(true);
-     setLocalNavError('');
-     const result = await fetchNavManually(localFund.fundCode);
-     if (!result) {
-        setLocalNavError('获取失败，请检查代码或重试');
-     } else {
-        const isCurrentlyOfficial = Object.values(fundNavs).some(navObj => navObj.name === localFund.name);
-        const canOverwriteName = !localFund.name || localFund.name === '未知名称' || isCurrentlyOfficial;
-        if (result.name && result.name !== '未知名称' && canOverwriteName) {
-           setLocalFund(prev => ({ ...prev, name: result.name }));
-        }
-     }
-     setIsFetchingLocalNav(false);
-  };
-
-  const currentEstimatedValue = useMemo(() => {
-     if (localFund.mode === 'auto') {
-        const nav = fundNavs[localFund.fundCode]?.nav || localFund.lastNav || 0;
-        return (Number(localFund.shares) || 0) * nav;
-     }
-     return evaluateExpression(localFund.currentValueRaw);
-  },[localFund, fundNavs]);
-
-  const canArchive = currentEstimatedValue <= 0.01;
-
-  const getTypeMeta = (type, amountStr) => {
-    const rawAmt = evaluateExpression(amountStr);
-    const inferredType = type || (rawAmt < 0 ? 'buy' : 'sell');
-    switch(inferredType) {
-        case 'buy': return { icon: <ArrowDown size={16} className="text-blue-500" />, color: 'text-blue-600 dark:text-blue-400' };
-        case 'sell': return { icon: <ArrowUp size={16} className="text-amber-500" />, color: 'text-amber-600 dark:text-amber-400' };
-        case 'dividend_cash': return { icon: <Zap size={16} className="text-rose-500" />, color: 'text-rose-600 dark:text-rose-400' };
-        case 'dividend_reinvest': return { icon: <RefreshCw size={16} className="text-indigo-500" />, color: 'text-indigo-600 dark:text-indigo-400' };
-        case 'fee': return { icon: <AlertCircle size={16} className="text-slate-500" />, color: 'text-slate-600 dark:text-slate-400' };
-        default: return { icon: <Activity size={16} className="text-slate-300"/>, color: '' };
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
-         <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-xl w-full sm:w-fit shadow-inner h-fit">
-            <button 
-              type="button"
-              onClick={() => setLocalFund({...localFund, mode: 'manual'})}
-              className={`flex-1 sm:flex-none px-6 py-2 text-sm font-bold rounded-lg transition-all duration-300 ${localFund.mode === 'manual' ? 'bg-white text-blue-600 dark:bg-slate-700 dark:text-blue-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800/50'}`}
-            >手动录入市值</button>
-            <button 
-              type="button"
-              onClick={() => setLocalFund({...localFund, mode: 'auto'})}
-              className={`flex-1 sm:flex-none px-6 py-2 text-sm font-bold rounded-lg transition-all duration-300 flex items-center justify-center ${localFund.mode === 'auto' ? 'bg-white text-blue-600 dark:bg-slate-700 dark:text-blue-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800/50'}`}
-            ><RefreshCcw size={14} className="mr-1.5"/> 自动同步净值</button>
-         </div>
-         
-         <div className="flex flex-col items-end w-full sm:w-auto">
-           <label className={`flex items-center justify-center space-x-2 px-4 py-2 rounded-xl border transition-all duration-300 w-full sm:w-auto ${!canArchive ? 'opacity-60 cursor-not-allowed bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700' : (localFund.isArchived ? 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-400 shadow-sm cursor-pointer' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600 cursor-pointer')}`}>
-              <input type="checkbox" disabled={!canArchive} checked={!!localFund.isArchived} onChange={(e) => setLocalFund({...localFund, isArchived: e.target.checked})} className="rounded text-amber-500 focus:ring-amber-500 bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-600 disabled:opacity-50" />
-              <span className="text-sm font-bold flex items-center"><Archive size={16} className="mr-1.5"/> {localFund.isArchived ? '已归档 (隐藏不计入)' : '标记为已清仓/归档'}</span>
-           </label>
-           {!canArchive && <span className="text-xs text-red-500 mt-1.5 font-medium flex items-start max-w-[280px] text-right"><AlertCircle size={12} className="mr-1 shrink-0 mt-0.5"/>需现持仓金额为 0 才能清仓。请添加卖出记录，并确保将【当前持有总份额】清零。</span>}
-         </div>
-      </div>
-
-      <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
-        <div>
-          <label className="text-sm font-bold mb-1.5 block text-slate-700 dark:text-slate-300 pl-1">基金/资产名称</label>
-          <input value={localFund.name} onChange={(e) => setLocalFund({...localFund, name: e.target.value})} placeholder="例如: 易方达蓝筹精选混合" className="w-full px-4 py-3 border border-slate-200 rounded-xl dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all shadow-sm text-base" />
-        </div>
-
-        {localFund.mode === 'manual' ? (
-          <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800 animate-in zoom-in-95 duration-300">
-            <label className="text-sm font-bold mb-1.5 block text-slate-700 dark:text-slate-300 pl-1">现持仓总市值 (元)</label>
-            <SmartInput value={localFund.currentValueRaw} onChange={(raw) => setLocalFund({...localFund, currentValueRaw: raw})} placeholder="请输入现在的账面总价值，支持简单公式如 =10000+500" className="w-full py-3 shadow-sm bg-white tabular-nums" />
-          </div>
-        ) : (
-          <div className="bg-blue-50/50 dark:bg-slate-800/80 p-5 rounded-2xl border border-blue-100 dark:border-slate-700 animate-in zoom-in-95 duration-300 space-y-4 shadow-sm">
-             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                   <label className="text-sm font-bold mb-1.5 block text-slate-700 dark:text-slate-300 pl-1 flex justify-between items-end">
-                     基金代码
-                   </label>
-                   <div className="relative group">
-                     <input value={localFund.fundCode} onChange={(e) => setLocalFund({...localFund, fundCode: e.target.value})} onBlur={handleTriggerNavFetch} placeholder="例如: 005827" className="w-full px-4 py-3 border border-slate-200 rounded-xl dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all shadow-sm text-base font-mono uppercase bg-white" />
-                     <button type="button" onClick={handleTriggerNavFetch} className={`absolute right-2 top-2 p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-800 transition-all ${isFetchingLocalNav ? 'animate-spin text-blue-500' : ''}`} title="手动拉取净值"><RefreshCcw size={18}/></button>
-                   </div>
-                </div>
-                <div>
-                   <label className="text-sm font-bold mb-1.5 block text-slate-700 dark:text-slate-300 pl-1">当前持有总份额</label>
-                   <input type="number" value={localFund.shares} onChange={(e) => setLocalFund({...localFund, shares: e.target.value})} placeholder="例如: 10500.55" className="w-full px-4 py-3 border border-slate-200 rounded-xl dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all shadow-sm text-base font-mono bg-white tabular-nums" />
-                </div>
-             </div>
-             
-             <div className="bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col gap-3">
-                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-                    <span className="text-sm text-slate-500 font-medium">系统自动计算持仓市值：</span>
-                    <span className="text-2xl font-black font-mono tabular-nums text-blue-600 dark:text-blue-400 tracking-tight">
-                       {formatMoney(currentEstimatedValue)}
-                     </span>
-                </div>
-                <div className="w-full h-px bg-slate-100 dark:bg-slate-800"></div>
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-sm gap-2">
-                    <div className="flex items-center text-slate-500 flex-wrap gap-1">
-                      <span>获取到的最新单位净值:</span>
-                      {isFetchingLocalNav ? (
-                        <span className="text-blue-500 flex items-center font-medium bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded"><RefreshCcw size={14} className="animate-spin mr-1.5"/> 拉取中...</span>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                           <span className={`font-bold font-mono tabular-nums text-base ${fundNavs[localFund.fundCode] ? 'text-indigo-600 dark:text-indigo-400' : (localNavError ? 'text-red-500' : 'text-slate-400')}`}>
-                              {fundNavs[localFund.fundCode]?.nav || localFund.lastNav || localNavError || '等待拉取'}
-                           </span>
-                           {(fundNavs[localFund.fundCode]?.date || localFund.lastNavDate) && !localNavError && (
-                             <span className="text-xs text-slate-400 font-mono tabular-nums">({fundNavs[localFund.fundCode]?.date || localFund.lastNavDate})</span>
-                           )}
-                           {fundNavs[localFund.fundCode] && (
-                              <span className="flex items-center text-[10px] bg-indigo-50 text-indigo-600 border border-indigo-100 dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-300 px-1.5 py-0.5 rounded-md font-medium">
-                                <CheckCircle2 size={10} className="mr-1"/> {fundNavs[localFund.fundCode].source}
-                               </span>
-                           )}
-                        </div>
-                      )}
-                     </div>
-                    
-                    {!!(localFund.currentValueRaw && !isNaN(evaluateExpression(localFund.currentValueRaw)) && evaluateExpression(localFund.currentValueRaw) > 0 && (fundNavs[localFund.fundCode]?.nav || localFund.lastNav)) ? (
-                       <button type="button" onClick={() => setLocalFund({...localFund, shares: (evaluateExpression(localFund.currentValueRaw) / (fundNavs[localFund.fundCode]?.nav || localFund.lastNav)).toFixed(2)})} className="text-blue-500 hover:text-blue-700 font-medium hover:underline flex items-center transition-colors active:scale-95">
-                         <Zap size={14} className="mr-1 text-amber-500"/> 用历史手动市值反推份额
-                       </button>
-                     ) : null}
-                </div>
-             </div>
-          </div>
-        )}
-      </div>
-      
-      <div className="pt-4 border-t border-slate-100 dark:border-slate-700">
-        <div className="mb-4">
-           <h4 className="text-base font-bold text-slate-800 dark:text-slate-200 mb-1">历史现金流记录</h4>
-          <div className="text-xs text-slate-500 flex items-center flex-wrap gap-3">
-            <span className="flex items-center"><ArrowDown size={14} className="text-blue-500 mr-1"/>本金投入 / 费用 (记为负向)</span>
-            <span className="flex items-center"><ArrowUp size={14} className="text-amber-500 mr-1"/>卖出 / 现金分红 (记为正向)</span>
-          </div>
-        </div>
-        
-        <div className="space-y-4 max-h-[35vh] overflow-y-auto pr-2 pb-2 custom-scrollbar">
-          {localFund.transactions.map((tx, index) => {
-            const meta = getTypeMeta(tx.type, tx.amountRaw);
-            return (
-            <div key={tx.id} className={`flex items-center bg-white dark:bg-slate-900 p-2 sm:p-3 rounded-xl border-y border-r border-l-4 shadow-sm hover:shadow-md transition-all group animate-in fade-in slide-in-from-left-4 duration-300 ${tx.type === 'buy' ? 'border-l-blue-500 border-y-slate-200 border-r-slate-200 dark:border-y-slate-700 dark:border-r-slate-700' : (tx.type === 'sell' || tx.type === 'dividend_cash') ? 'border-l-amber-500 border-y-slate-200 border-r-slate-200 dark:border-y-slate-700 dark:border-r-slate-700' : 'border-l-slate-300 border-y-slate-200 border-r-slate-200 dark:border-slate-700'}`}>
-              
-              <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center text-xs font-bold font-mono mr-3 shrink-0 bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                {index + 1}
-              </div>
-
-              <div className="flex-1 flex flex-col lg:flex-row gap-2 lg:gap-4">
-                 <SmartInput isDate={true} value={tx.date} onChange={(val) => handleUpdateTx(index, 'date', val)} className="w-full lg:w-36 py-2 text-sm bg-slate-50 dark:bg-slate-800/50 border-transparent hover:border-slate-300 focus:bg-white dark:focus:bg-slate-900" />
-                 <div className="flex flex-1 gap-2">
-                   <select 
-                     value={tx.type || (evaluateExpression(tx.amountRaw) < 0 ? 'buy' : 'sell')} 
-                     onChange={(e) => handleUpdateTx(index, 'type', e.target.value)}
-                     className="text-sm border-transparent bg-slate-50 dark:bg-slate-800/50 rounded-lg py-2 px-1 sm:px-2 focus:ring-blue-500 focus:outline-none font-bold text-slate-600 dark:text-slate-300 outline-none hover:bg-slate-100 dark:hover:bg-slate-800"
-                   >
-                      <option value="buy">买入建仓</option>
-                     <option value="sell">卖出提现</option>
-                     <option value="dividend_cash">现金分红</option>
-                     <option value="dividend_reinvest">红利再投</option>
-                     <option value="fee">手续费</option>
-                    </select>
-
-                   <div className="relative flex-1 flex items-center">
-                     <div className="absolute left-3 pointer-events-none">{meta.icon}</div>
-                     <SmartInput 
-                        value={tx.amountRaw} 
-                       onChange={(raw) => handleUpdateTx(index, 'amountRaw', raw)} 
-                       placeholder="输入金额 (绝对值即可)" 
-                       className={`w-full py-2 pl-9 font-mono font-medium text-base sm:text-lg bg-slate-50 dark:bg-slate-800/50 border-transparent hover:border-slate-300 focus:bg-white dark:focus:bg-slate-900 ${meta.color}`} 
-                      />
-                   </div>
-                 </div>
-              </div>
-
-              <button type="button" onClick={() => setLocalFund({...localFund, transactions: localFund.transactions.filter((_, i) => i !== index)})} disabled={localFund.transactions.length <= 1} className="text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 p-2 sm:p-2.5 rounded-lg transition-all disabled:opacity-30 active:scale-90 ml-1 sm:ml-2 sm:opacity-0 group-hover:opacity-100"><Trash2 size={18}/></button>
-            </div>
-          )})}
-
-          <button type="button" onClick={() => setLocalFund({...localFund, transactions:[...localFund.transactions, { id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }]})} className="w-full mt-2 py-3.5 border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-600 rounded-xl flex items-center justify-center text-sm font-bold text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 transition-all bg-slate-50/50 hover:bg-blue-50/50 dark:bg-slate-800/20 dark:hover:bg-blue-900/20 active:scale-[0.99]">
-            <Plus size={18} className="mr-2" /> 继续添加交易记录
-          </button>
-        </div>
-      </div>
-      
-      <div className="flex justify-end space-x-3 pt-6 border-t border-slate-100 dark:border-slate-800 mt-2">
-        <button type="button" onClick={onCancel} className="px-6 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors font-bold text-sm active:scale-95 shadow-sm">取消修改</button>
-        <button type="button" onClick={() => onSave(localFund)} className="px-8 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white rounded-xl flex items-center transition-all font-bold text-sm shadow-md hover:shadow-lg active:scale-95"><Save size={18} className="mr-2"/> 确认保存</button>
-      </div>
-    </div>
-  );
-};
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query } from 'firebase/firestore';
+
+// --- 引入拆分出来的功能 ---
+import { auth, db, appId } from './config/firebase';
+import { ASSET_NAMES, PROXY_NODES } from './config/constants';
+import { evaluateExpression, calculateXIRR, formatMoney, formatPercent, checkIsTradingTime } from './utils/helpers';
+import { AnimatedNumber } from './components/UI/AnimatedNumber';
+import { DonutChart } from './components/UI/DonutChart';
+import { MarketTimeIndicator } from './components/Dashboard/MarketTimeIndicator';
+import { LoginScreen } from './components/Auth/LoginScreen';
+import { ProxySettingsModal } from './components/Settings/ProxySettingsModal';
+import { FundProfileModal } from './components/Fund/FundProfileModal';
+import { FundEditor } from './components/Fund/FundEditor';
+import { PortfolioAnalysisModal } from './components/Portfolio/PortfolioAnalysisModal';
 
 export default function App() {
-  const [user, setUser] = useState(null); 
-  const[authLoading, setAuthLoading] = useState(true);
+  const[user, setUser] = useState(null); 
+  const [authLoading, setAuthLoading] = useState(true);
   const [funds, setFunds] = useState([]); 
   const[settings, setSettings] = useState({ 
     targetAmount: 100000, 
@@ -947,35 +32,39 @@ export default function App() {
     proxyMode: 'custom', 
     customProxyUrl: 'https://my-cors-proxy.wh1637063482.workers.dev/?url={{url}}', 
     dataSource: 'tencent',
-    navDataSource: 'tiantian' 
+    navDataSource: 'tiantian',
+    aiProvider: 'gemini',
+    aiApiKey: '',
+    aiModel: '',
+    ntfyTopic: 'fund_tracker_my_secret_123',
+    cfWorkerUrl: 'https://fund-tracker-worker.wh1637063482.workers.dev', 
+    cfWorkerSecret: 'my_super_password_888'
   });
-  const[theme, setTheme] = useState('light'); 
+  const [theme, setTheme] = useState('light'); 
   
   const [marketData, setMarketData] = useState([]); 
   const[isFetchingMarket, setIsFetchingMarket] = useState(false);
-  const [marketError, setMarketError] = useState('');
+  const[marketError, setMarketError] = useState('');
   const [activeProxyIndex, setActiveProxyIndex] = useState(0); 
   const isFetchingRef = useRef(false); 
-  const[isAutoRefresh, setIsAutoRefresh] = useState(checkIsTradingTime()); 
+  const [isAutoRefresh, setIsAutoRefresh] = useState(checkIsTradingTime()); 
 
-  const[editingFundId, setEditingFundId] = useState(null);
-  const [isProxyModalOpen, setProxyModalOpen] = useState(false); 
-  const [dbError, setDbError] = useState(''); 
+  const [editingFundId, setEditingFundId] = useState(null);
+  const[isProxyModalOpen, setProxyModalOpen] = useState(false); 
+  const[isPortfolioModalOpen, setPortfolioModalOpen] = useState(false);
+  const[dbError, setDbError] = useState(''); 
   const[isDbConnected, setIsDbConnected] = useState(false);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' }); 
-  const [fundTab, setFundTab] = useState('active'); 
+  const[fundTab, setFundTab] = useState('active'); 
   
   const [fundNavs, setFundNavs] = useState({});
-  const [fetchingNavCodes, setFetchingNavCodes] = useState({}); 
+  const[fetchingNavCodes, setFetchingNavCodes] = useState({}); 
   const[isClosingEditor, setIsClosingEditor] = useState(false); 
   
   const [xirrMap, setXirrMap] = useState({});
   const[overallXirr, setOverallXirr] = useState(0);
 
-  // =======================================================
-  // 【新增状态】: 用于管理基金全景弹窗及高级 API 数据
-  // =======================================================
-  const [fundProfiles, setFundProfiles] = useState({});
+  const[fundProfiles, setFundProfiles] = useState({});
   const[viewingProfileCode, setViewingProfileCode] = useState(null);
 
   const INACTIVITY_LIMIT = 10 * 60 * 1000; 
@@ -990,7 +79,7 @@ export default function App() {
     } else {
       document.documentElement.classList.remove('dark');
     }
-  }, [theme]);
+  },[theme]);
 
   useEffect(() => {
     const ultimateFallbackTimer = setTimeout(() => {
@@ -1031,6 +120,32 @@ export default function App() {
     return () => clearTimeout(ultimateFallbackTimer);
   }, [authLoading]);
 
+  // 【新增】同步最新数据到 Cloudflare Worker
+  const handleSyncToWorker = async () => {
+    if (!settings.cfWorkerUrl || !settings.cfWorkerSecret) {
+      alert("⚠️ 请先在设置中配置 Worker URL 和同步密码！");
+      return;
+    }
+    try {
+      const res = await fetch(`${settings.cfWorkerUrl}/api/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          syncSecret: settings.cfWorkerSecret,
+          funds: funds,
+          settings: settings
+        })
+      });
+      if (res.ok) {
+        alert("✅ 成功同步到云端大脑！\n\n您的私人 AI 基金经理已拿到最新账本，将在每个交易日晚上 22:00 准时为您发送巡检报告。");
+      } else {
+        alert("❌ 同步失败: 密钥错误或网络异常 (" + await res.text() + ")");
+      }
+    } catch (e) {
+      alert("❌ 同步异常: " + e.message);
+    }
+  };
+
   const handleSignOut = useCallback(() => {
     if (auth) {
       signOut(auth).then(() => {
@@ -1047,10 +162,10 @@ export default function App() {
         handleSignOut();
       }, INACTIVITY_LIMIT);
     }
-  }, [user, handleSignOut]);
+  },[user, handleSignOut]);
 
   useEffect(() => {
-    const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
+    const events =['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
     const handleActivity = () => resetLogoutTimer();
     
     if (user) {
@@ -1121,10 +236,6 @@ export default function App() {
     return () => { unsubFunds(); unsubSettings(); setIsDbConnected(false); };
   }, [user]);
 
-
-  // =======================================================
-  // 【新增逻辑】: 静默拉取蛋卷深度剖析 API 数据
-  // =======================================================
   const fetchDanjuanProfile = async (code) => {
       if (!code) return null;
       const targetUrl = `https://danjuanfunds.com/djapi/fund/${code}`;
@@ -1153,7 +264,6 @@ export default function App() {
       }
   };
 
-  // 后台自动拉取所有在持基金的高级属性（用于体检和智能徽章）
   useEffect(() => {
      const fetchAllProfiles = async () => {
          const codes =[...new Set(funds.filter(f => f.fundCode && f.mode === 'auto' && !f.isArchived).map(f => f.fundCode))];
@@ -1173,23 +283,20 @@ export default function App() {
      if (funds.length > 0) fetchAllProfiles();
   },[funds, settings.proxyMode, settings.customProxyUrl]); 
 
-  // 点击表格中名字时的弹窗处理函数
   const handleViewProfile = async (code) => {
       if (!code) return;
       setViewingProfileCode(code);
       if (!fundProfiles[code]) {
           const data = await fetchDanjuanProfile(code);
-          if (data) setFundProfiles(prev => ({ ...prev, [code]: data }));
+          if (data) setFundProfiles(prev => ({ ...prev,[code]: data }));
       }
   };
-  // =======================================================
-
 
   const fetchFundNavManually = async (codeToFetch = null) => {
      let codesToQuery =[];
      if (codeToFetch) {
          codesToQuery.push(codeToFetch);
-         setFetchingNavCodes(prev => ({...prev, [codeToFetch]: true}));
+         setFetchingNavCodes(prev => ({...prev,[codeToFetch]: true}));
      } else {
          codesToQuery = funds.filter(f => f.mode === 'auto' && !f.isArchived && f.fundCode).map(f => f.fundCode);
      }
@@ -1311,7 +418,7 @@ export default function App() {
      }
      
      if (codeToFetch) {
-        setFetchingNavCodes(prev => ({...prev, [codeToFetch]: false}));
+        setFetchingNavCodes(prev => ({...prev,[codeToFetch]: false}));
         return fetchSuccess ? newNavs[codeToFetch] : false;
      }
      return fetchSuccess;
@@ -1661,7 +768,6 @@ export default function App() {
   },[preXirrPayloads, globalPreCashFlows]);
 
   const portfolioStats = useMemo(() => {
-    // 增加容错并初始化新增的高级统计字段
     if (!baseFundsData) return { pieData:[], contributionPieData:[], assetAllocationData:[], rankedByXirr: [], rankedByProfit:[], computedFundsWithMetrics:[], alpha: 0 };
 
     const baseFunds = baseFundsData.map(f => ({ ...f, xirr: xirrMap[f.id] || 0 }));
@@ -1695,9 +801,6 @@ export default function App() {
       .map(f => ({ name: f.name, value: f.contribution }))
       .sort((a, b) => b.value - a.value);
 
-    // =======================================================
-    // 【新增逻辑】: 资产配置穿透体检 (Asset Allocation)
-    // =======================================================
     const assetAllocation = {};
     computedFundsWithMetrics.forEach(f => {
         if (f.currentValue <= 0 || f.isArchived) return;
@@ -1708,15 +811,14 @@ export default function App() {
             if (typeTag) category = typeTag.name;
             else if (profile.type_desc) category = profile.type_desc;
         } else if (f.name.includes("债")) {
-            category = "债券型"; // 没拉到数据时的简单文字推测
+            category = "债券型"; 
         }
         assetAllocation[category] = (assetAllocation[category] || 0) + f.currentValue;
     });
     const assetAllocationData = Object.keys(assetAllocation).map(k => ({ name: k, value: assetAllocation[k] })).sort((a, b) => b.value - a.value);
-    // =======================================================
       
     const rankedByXirr =[...computedFundsWithMetrics].filter(f => f.transactions.length > 0).sort((a, b) => b.xirr - a.xirr);
-    const rankedByProfit = [...computedFundsWithMetrics].filter(f => f.transactions.length > 0).sort((a, b) => b.profit - a.profit);
+    const rankedByProfit =[...computedFundsWithMetrics].filter(f => f.transactions.length > 0).sort((a, b) => b.profit - a.profit);
     
     const netTotalInvested = Math.max(0, portfolioTotalCurrentValue - portfolioTotalProfit);
     const safeTargetAmount = Number(settings.targetAmount) || 0;
@@ -1747,14 +849,6 @@ export default function App() {
     baselineValue = Math.max(0, baselineValue);
     const deviationAmount = portfolioTotalCurrentValue - baselineValue;
     
-    if (portfolioTotalProfit < 0 && portfolioTotalInvested > 0) {
-       expectedDailyProfit = (portfolioTotalInvested * (targetAnnualRate / 100)) / 365;
-       if (expectedDailyProfit > 0) {
-           daysToBreakEven = Math.ceil(Math.abs(portfolioTotalProfit) / expectedDailyProfit);
-       }
-    }
-    
-    // 【新增逻辑】: 超额收益率 (Alpha) 计算
     const alpha = overallXirr - (targetAnnualRate / 100);
 
     return { 
@@ -1765,11 +859,11 @@ export default function App() {
       overallSimpleReturn, 
       pieData,
       contributionPieData,
-      assetAllocationData, // 抛出给大类资产饼图
+      assetAllocationData, 
       rankedByXirr, 
       rankedByProfit,
       computedFundsWithMetrics,
-      alpha, // 抛出给基准展示
+      alpha, 
       gap, monthsLeft, requiredMonthly: gap / monthsLeft,
       safeTargetAmount, targetAnnualRate,
       projectedAssets, daysToBreakEven, expectedDailyProfit,
@@ -1824,49 +918,67 @@ export default function App() {
       return funds.find(f => f.id === editingFundId) || null;
     }
     return null;
-  }, [editingFundId, funds]);
+  },[editingFundId, funds]);
 
-  // =======================================================
-  // 【新增逻辑】: 智能加减仓徽章判定（包含债券智能嗅探）
-  // =======================================================
   const renderSmartBadges = (fund) => {
       if (fundTab !== 'active' || fund.mode !== 'auto' || !fund.fundCode) return null;
       const profile = fundProfiles[fund.fundCode];
       if (!profile) return null;
 
-      // 自动嗅探是否为债券型基金
       const isBond = fund.name.includes("债") || (profile.type_desc && profile.type_desc.includes("债"));
+      const derived = profile.fund_derived || {};
       
-      // 债券与股票的动态阈值（股票15%止盈，债券4%止盈；股票5%黄金坑，债券0.5%加仓）
-      const profitThreshold = isBond ? 0.04 : 0.15; 
-      const dropThreshold = isBond ? -0.5 : -5.0;   
+      let rankPercentile = 0.5;
+      if (derived.srank_l1y && derived.srank_l1y.includes('/')) {
+         const parts = derived.srank_l1y.split('/');
+         const pos = parseFloat(parts[0]);
+         const total = parseFloat(parts[1]);
+         if (!isNaN(pos) && !isNaN(total) && total > 0) {
+             rankPercentile = pos / total;
+         }
+      }
 
-      const grl1m = parseFloat(profile.fund_derived?.nav_grl1m || 0);
       const returnRate = fund.totalInvested > 0 ? fund.profit / fund.totalInvested : 0;
+      const grl1m = parseFloat(derived.nav_grl1m || 0);
       const badges =[];
 
-      if (returnRate > profitThreshold) { 
-          // 止盈提示
-          const badgeText = isBond ? "🥚 宜收蛋" : "📈 止盈区";
-          badges.push(<span key="sell" className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-red-100 text-red-600 border border-red-200 dark:bg-red-900/30 dark:border-red-800 dark:text-red-400 leading-none shadow-sm whitespace-nowrap">{badgeText}</span>);
-      } else if (grl1m < dropThreshold) { 
-          // 抄底提示
-          const badgeText = isBond ? "💧 加仓点" : "🔥 黄金坑";
-          badges.push(<span key="buy" className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-green-100 text-green-600 border border-green-200 dark:bg-green-900/30 dark:border-green-800 dark:text-green-400 leading-none shadow-sm whitespace-nowrap">{badgeText}</span>);
+      const isGarbage = rankPercentile > 0.7;
+      const isTopTier = rankPercentile < 0.2;
+
+      if (isGarbage) {
+          badges.push(<span key="warn" className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400 leading-none shadow-sm whitespace-nowrap">⚠️ 弱势换仓</span>);
+      } else {
+          const profitThreshold = isBond ? 0.04 : 0.15; 
+          const dropThreshold = isBond ? -0.5 : (isTopTier ? -3.0 : -5.0); 
+
+          if (returnRate > profitThreshold) { 
+              const badgeText = isBond ? "🥚 宜收蛋" : "📈 止盈区";
+              badges.push(<span key="sell" className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-red-100 text-red-600 border border-red-200 dark:bg-red-900/30 dark:border-red-800 dark:text-red-400 leading-none shadow-sm whitespace-nowrap">{badgeText}</span>);
+          } else if (grl1m < dropThreshold) { 
+              const badgeText = isBond ? "💧 加仓点" : (isTopTier ? "🔥 优质错杀" : "🔥 黄金坑");
+              badges.push(<span key="buy" className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-green-100 text-green-600 border border-green-200 dark:bg-green-900/30 dark:border-green-800 dark:text-green-400 leading-none shadow-sm whitespace-nowrap">{badgeText}</span>);
+          }
       }
       return badges;
   };
-  // =======================================================
 
   return (
     <>
-      {/* 渲染基金详情全景弹窗 */}
       {viewingProfileCode && (
         <FundProfileModal 
-           fundCode={viewingProfileCode}
-           fundName={funds.find(f => f.fundCode === viewingProfileCode)?.name || '详情'}
+           fund={portfolioStats.computedFundsWithMetrics.find(f => f.fundCode === viewingProfileCode)} 
            profile={fundProfiles[viewingProfileCode]}
+           marketData={marketData}
+           settings={settings}
            onClose={() => setViewingProfileCode(null)}
+        />
+      )}
+
+      {isPortfolioModalOpen && (
+        <PortfolioAnalysisModal
+           portfolioStats={portfolioStats}
+           settings={settings}
+           onClose={() => setPortfolioModalOpen(false)}
         />
       )}
 
@@ -1887,6 +999,16 @@ export default function App() {
               </div>
 
               <div className="flex items-center space-x-3 sm:space-x-4">
+                {/* 【新增】同步到 Cloudflare Worker 的按钮 */}
+                <button 
+                  type="button" 
+                  onClick={handleSyncToWorker} 
+                  title="将当前最新账本同步至云端 AI 巡检大脑" 
+                  className="flex items-center text-xs bg-purple-50 text-purple-600 hover:bg-purple-100 dark:bg-purple-900/30 dark:text-purple-400 dark:hover:bg-purple-800/50 px-3 py-1.5 rounded-full font-bold shadow-sm border border-purple-200 dark:border-purple-800 transition-all active:scale-95"
+                >
+                  <Cloud className="w-4 h-4 mr-1.5" /> <span className="hidden sm:inline">上传至云大脑</span>
+                </button>
+
                 <button type="button" onClick={exportData} title="导出数据至本地 JSON" className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 transition-colors hidden sm:block active:scale-90">
                   <Download size={18} />
                 </button>
@@ -1939,7 +1061,7 @@ export default function App() {
                 
                 <div className="flex flex-wrap items-center gap-2.5 text-sm w-full xl:w-auto">
                   <button type="button" onClick={() => setProxyModalOpen(true)} className="text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 flex items-center transition-colors bg-slate-50 hover:bg-slate-100 dark:bg-slate-900/50 dark:hover:bg-slate-800 px-3 py-1.5 rounded-md border border-slate-100 dark:border-slate-700 font-medium active:scale-95">
-                    <Settings size={14} className="mr-1" /> 行情/净值设置
+                    <Settings size={14} className="mr-1" /> 系统设置中心
                   </button>
 
                   <div className="hidden sm:block w-px h-4 bg-slate-300 dark:bg-slate-600 mx-1"></div>
@@ -1993,7 +1115,6 @@ export default function App() {
                 
                 <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden flex flex-col transition-colors duration-500">
                   
-                  {/* 【优化点】：移动端无换行且自适应的紧凑型菜单栏 */}
                   <div className="flex justify-between items-end border-b dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/20 px-3 sm:px-5 pt-4 sm:pt-5 relative overflow-x-auto no-scrollbar">
                     
                     <div className="flex space-x-0 sm:space-x-4 h-full relative shrink-0">
@@ -2047,7 +1168,6 @@ export default function App() {
                                 <div className="flex items-center">
                                   <div className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full mr-2 sm:mr-3 shrink-0 transition-colors duration-500 ${fundTab==='archived'?'bg-amber-500':(fund.profit >= 0 ? 'bg-red-500' : 'bg-green-500')}`}></div>
                                   
-                                  {/* 【修改点】：如果是自动拉取净值的基金，名称可点击，并附加徽章 */}
                                   {fund.mode === 'auto' && fundTab === 'active' ? (
                                     <div className="flex items-center">
                                       <button type="button" onClick={() => handleViewProfile(fund.fundCode)} className="text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 transition-colors duration-300 font-bold whitespace-nowrap underline decoration-dashed decoration-blue-200 dark:decoration-blue-800 underline-offset-4">
@@ -2172,7 +1292,12 @@ export default function App() {
 
               <section className="lg:col-span-4 xl:col-span-3 space-y-6">
                 
-                {/* 【新增】：大类资产配置分析图 */}
+                {/* 【新增入口】一键开启全盘资产体检 */}
+                <button onClick={() => setPortfolioModalOpen(true)} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-xl shadow-lg flex justify-center items-center font-bold text-base transition-all active:scale-95 group">
+                   <Sparkles className="mr-2 group-hover:rotate-12 transition-transform" size={20}/>
+                   一键开启全盘资产 AI 深度体检
+                </button>
+
                 <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-5 sm:p-6 transition-colors duration-500 hover:shadow-md">
                   <h3 className="text-base sm:text-lg font-bold mb-4 sm:mb-5 flex items-center"><PieChart className="mr-2 text-indigo-500"/> 大类资产配置图</h3>
                   <DonutChart data={portfolioStats.assetAllocationData} centerLabel="类别比重" />
@@ -2231,7 +1356,6 @@ export default function App() {
                     </div>
 
                     <div className="pt-5 sm:pt-6 border-t border-slate-100 dark:border-slate-700 space-y-3">
-                      {/* 【新增】：超额收益 (Alpha) 指标显示 */}
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-slate-600 dark:text-slate-400">对比设定基准的超额收益 (Alpha):</span>
                         <span className={`font-mono font-bold tabular-nums text-base bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded shadow-inner ${portfolioStats.alpha >= 0 ? 'text-red-500' : 'text-green-500'}`}>

@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 纯 HTML/CSS 开屏动画保障 */
+#global-splash {
+  position: fixed; inset: 0; z-index: 99999;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background-color: #f8fafc;
+  transition: opacity 0.5s ease-out;
+}
+@media (prefers-color-scheme: dark) {
+  #global-splash { background-color: #0f172a; }
+  #global-splash h1 { color: #ffffff !important; }
+  #global-splash p { color: #94a3b8 !important; }
+}
+@keyframes splash-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(0.95); }
+}
+@keyframes splash-loading-raw {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(200%); }
+  100% { transform: translateX(-100%); }
+}
+
+/* 其他自定义组件样式 */
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+.dark .custom-scrollbar::-webkit-scrollbar-thumb { background: #475569; }
+.sort-icon { transition: transform 0.2s ease; }
+
+@keyframes pulse-fast {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.animate-pulse-fast { animation: pulse-fast 1s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
+@keyframes flash-highlight {
+  0% { background-color: rgba(59, 130, 246, 0.2); }
+  100% { background-color: transparent; }
+}
+.animate-flash { animation: flash-highlight 1s ease-out; }
+
+input[type="date"] { position: relative; }
+input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: 0.6; transition: 0.2s; padding: 4px; border-radius: 4px; }
+input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; background-color: rgba(0,0,0,0.05); }
+.dark input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1) brightness(0.8); }
+.dark input[type="date"]::-webkit-calendar-picker-indicator:hover { background-color: rgba(255,255,255,0.1); }

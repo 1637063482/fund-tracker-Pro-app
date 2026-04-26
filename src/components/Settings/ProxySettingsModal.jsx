@@ -1,0 +1,181 @@
+import React, { useState } from 'react';
+import { Settings, X, Database, PieChart, Cloud, Sparkles, Bell } from 'lucide-react';
+
+export const ProxySettingsModal = ({ settings, onSave, onClose }) => {
+  const [mode, setMode] = useState(settings.proxyMode || 'builtin');
+  const [customUrl, setCustomUrl] = useState(settings.customProxyUrl || '');
+  const [dataSource, setDataSource] = useState(settings.dataSource || 'tencent');
+  const [navDataSource, setNavDataSource] = useState(settings.navDataSource || 'tiantian'); 
+  
+  const [aiProvider, setAiProvider] = useState(settings.aiProvider || 'gemini');
+  
+  const [geminiKey, setGeminiKey] = useState(settings.geminiApiKey || '');
+  const [geminiModel, setGeminiModel] = useState(settings.geminiModel || 'gemini-2.5-pro');
+  
+  const [deepseekKey, setDeepseekKey] = useState(settings.deepseekApiKey || '');
+  const [deepseekModel, setDeepseekModel] = useState(settings.deepseekModel || 'deepseek-chat');
+
+  const [siliconflowKey, setSiliconflowKey] = useState(settings.siliconflowApiKey || '');
+  const[siliconflowModel, setSiliconflowModel] = useState(settings.siliconflowModel || 'deepseek-ai/DeepSeek-V3');
+
+  // 【新增】ntfy 推送主题状态
+  const [ntfyTopic, setNtfyTopic] = useState(settings.ntfyTopic || 'fund_tracker_my_secret_123');
+
+  const[isClosing, setIsClosing] = useState(false);
+
+  const handleClose = () => {
+    setIsClosing(true);
+    setTimeout(onClose, 200); 
+  };
+
+  const handleSave = () => {
+    onSave({ 
+      proxyMode: mode, 
+      customProxyUrl: customUrl, 
+      dataSource, 
+      navDataSource, 
+      aiProvider, 
+      geminiApiKey: geminiKey, 
+      geminiModel: geminiModel,
+      deepseekApiKey: deepseekKey,
+      deepseekModel: deepseekModel,
+      siliconflowApiKey: siliconflowKey,
+      siliconflowModel: siliconflowModel,
+      ntfyTopic: ntfyTopic // 保存推送主题
+    });
+  };
+
+  return (
+    <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity duration-200 ${isClosing ? 'opacity-0' : 'opacity-100'}`}>
+      <div className={`bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all duration-200 ${isClosing ? 'scale-95 translate-y-4' : 'scale-100 translate-y-0'} animate-in fade-in zoom-in-95 slide-in-from-bottom-4`}>
+        
+        <div className="flex justify-between items-center p-6 border-b dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+          <h3 className="text-xl font-bold flex items-center text-slate-800 dark:text-white"><Settings className="mr-2 text-blue-500 transition-transform hover:rotate-90 duration-500" /> 系统全局设置</h3>
+          <button type="button" onClick={handleClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 rounded-full p-1.5 shadow-sm active:scale-90"><X size={20} /></button>
+        </div>
+        
+        <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto custom-scrollbar">
+          
+          {/* AI 诊断设置区 */}
+          <div className="space-y-3 bg-purple-50 dark:bg-purple-900/20 p-4 rounded-xl border border-purple-100 dark:border-purple-800/50">
+             <label className="text-sm font-bold text-purple-800 dark:text-purple-300 flex items-center justify-between">
+               <span className="flex items-center"><Sparkles size={16} className="mr-1.5 text-purple-500"/> AI 大模型引擎配置</span>
+             </label>
+             
+             <div className="flex space-x-2">
+                <select 
+                   value={aiProvider} 
+                   onChange={(e) => setAiProvider(e.target.value)}
+                   className="w-1/2 px-2 py-2 bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-700 rounded-lg text-xs font-bold focus:ring-2 focus:ring-purple-500 outline-none text-slate-800 dark:text-slate-200 cursor-pointer shadow-inner"
+                >
+                   <option value="gemini">Google Gemini</option>
+                   <option value="deepseek">DeepSeek 官方</option>
+                   <option value="siliconflow">硅基流动 (免费版)</option>
+                </select>
+
+                {aiProvider === 'gemini' && (
+                   <input type="text" value={geminiModel} onChange={e => setGeminiModel(e.target.value)} placeholder="gemini-2.5-pro" className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-700 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none font-mono text-slate-800 dark:text-slate-200 shadow-inner" />
+                )}
+                {aiProvider === 'deepseek' && (
+                   <input type="text" value={deepseekModel} onChange={e => setDeepseekModel(e.target.value)} placeholder="deepseek-chat" className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-700 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none font-mono text-slate-800 dark:text-slate-200 shadow-inner" />
+                )}
+                {aiProvider === 'siliconflow' && (
+                   <input type="text" value={siliconflowModel} onChange={e => setSiliconflowModel(e.target.value)} placeholder="deepseek-ai/DeepSeek-V3" className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-700 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none font-mono text-slate-800 dark:text-slate-200 shadow-inner" />
+                )}
+             </div>
+
+             {aiProvider === 'gemini' && (
+                <input type="password" value={geminiKey} onChange={e => setGeminiKey(e.target.value)} placeholder="输入 Google Gemini API Key" className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-700 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none font-mono text-slate-800 dark:text-slate-200 shadow-inner" />
+             )}
+             {aiProvider === 'deepseek' && (
+                <input type="password" value={deepseekKey} onChange={e => setDeepseekKey(e.target.value)} placeholder="输入 DeepSeek 官方 API Key (需充值)" className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-700 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none font-mono text-slate-800 dark:text-slate-200 shadow-inner" />
+             )}
+             {aiProvider === 'siliconflow' && (
+                <input type="password" value={siliconflowKey} onChange={e => setSiliconflowKey(e.target.value)} placeholder="输入 SiliconFlow 免费 API Key" className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-purple-200 dark:border-purple-700 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none font-mono text-slate-800 dark:text-slate-200 shadow-inner" />
+             )}
+
+             <p className="text-xs text-purple-600 dark:text-purple-400 opacity-80 leading-relaxed mt-1">
+               {aiProvider === 'gemini' && "自动开启 Google Search 实时联网检索宏观资讯。"}
+               {aiProvider === 'deepseek' && "注意：DeepSeek 官方 API 需预付费充值余额。"}
+               {aiProvider === 'siliconflow' && "推荐中国用户使用！注册 siliconflow.cn 即可获得完全免费无限制的 DeepSeek-V3 调用权限。"}
+             </p>
+          </div>
+
+          {/* 【新增】ntfy 消息推送配置区 */}
+          <div className="space-y-3 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl border border-blue-100 dark:border-blue-800/50">
+             <label className="text-sm font-bold text-blue-800 dark:text-blue-300 flex items-center justify-between">
+               <span className="flex items-center"><Bell size={16} className="mr-1.5 text-blue-500"/> Ntfy 移动端消息推送配置</span>
+             </label>
+             <input 
+                type="text"
+                value={ntfyTopic} 
+                onChange={e => setNtfyTopic(e.target.value)} 
+                placeholder="输入你的 Ntfy 订阅主题" 
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-700 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-inner font-mono text-slate-800 dark:text-slate-200" 
+             />
+             <p className="text-xs text-blue-600 dark:text-blue-400 opacity-80 leading-relaxed mt-1">
+               配置专属的私密主题。设置后，您可以在生成 AI 报告时一键推送到手机 Ntfy App。未来此主题将作为 Cloudflare Worker 定时推送的接收端。
+             </p>
+          </div>
+
+          <div className="space-y-3">
+            <label className="text-sm font-bold text-slate-800 dark:text-slate-200 flex items-center"><Database size={16} className="mr-1.5 text-indigo-500"/> 实时行情数据源 (大盘/ETF)</label>
+            <div className="grid grid-cols-3 gap-2">
+              {['tencent', 'sina', 'xueqiu'].map((ds) => (
+                <button key={ds} type="button" onClick={() => setDataSource(ds)} className={`p-2.5 border rounded-xl flex items-center justify-center transition-all duration-200 active:scale-95 text-sm font-medium ${dataSource === ds ? 'bg-indigo-50 border-indigo-500 text-indigo-700 dark:bg-indigo-900/30 dark:border-indigo-500 dark:text-indigo-300 shadow-sm' : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-700/50'}`}>
+                  {ds === 'tencent' ? '腾讯' : ds === 'sina' ? '新浪' : '雪球'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-3 pt-2">
+            <label className="text-sm font-bold text-slate-800 dark:text-slate-200 flex items-center"><PieChart size={16} className="mr-1.5 text-blue-500"/> 基金净值数据源 (自动估值)</label>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { id: 'tiantian', label: '天天(盘中)', desc: 'JSONP直连' },
+                { id: 'tiantian_lsjz', label: '天天(历史)', desc: 'Web真净值' },
+                { id: 'sina', label: '新浪财经', desc: '需代理' },
+                { id: 'danjuan', label: '蛋卷基金', desc: '需代理格式佳' }
+              ].map((src) => (
+                <button key={src.id} type="button" onClick={() => setNavDataSource(src.id)} className={`p-2.5 border rounded-xl flex flex-col items-center justify-center transition-all duration-200 active:scale-95 text-sm font-medium ${navDataSource === src.id ? 'bg-blue-50 border-blue-500 text-blue-700 dark:bg-blue-900/30 dark:border-blue-500 dark:text-blue-300 shadow-sm' : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-700/50'}`}>
+                  <span>{src.label}</span>
+                  <span className="text-[10px] font-normal opacity-80 mt-0.5">({src.desc})</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+             <label className="text-sm font-bold text-slate-800 dark:text-slate-200 flex items-center"><Cloud size={16} className="mr-1.5 text-amber-500"/> 跨域代理模式</label>
+            
+            <label className={`flex items-center space-x-3 cursor-pointer p-3 rounded-xl border transition-all duration-200 ${mode === 'builtin' ? 'border-amber-500 bg-amber-50/50 dark:bg-amber-900/20 shadow-sm' : 'border-transparent hover:bg-slate-50 dark:hover:bg-slate-700/50'}`}>
+              <input type="radio" checked={mode === 'builtin'} onChange={() => setMode('builtin')} className="w-4 h-4 text-amber-600 focus:ring-amber-500 transition-colors" />
+              <span className="text-slate-700 dark:text-slate-300 font-medium text-sm">内置公共代理池 (不建议)</span>
+            </label>
+
+            <label className={`flex items-start space-x-3 cursor-pointer p-4 rounded-xl border transition-all duration-200 ${mode === 'custom' ? 'border-amber-500 bg-amber-50/50 dark:bg-amber-900/20 shadow-sm' : 'border-transparent hover:bg-slate-50 dark:hover:bg-slate-700/50'}`}>
+              <input type="radio" checked={mode === 'custom'} onChange={() => setMode('custom')} className="w-4 h-4 text-amber-600 focus:ring-amber-500 mt-1 transition-colors" />
+              <div className="flex-1">
+                <span className="text-slate-700 dark:text-slate-300 font-medium text-sm block mb-2">使用自定义 Web API 代理</span>
+                <input 
+                  value={customUrl} 
+                  onChange={e => setCustomUrl(e.target.value)} 
+                  disabled={mode !== 'custom'}
+                  placeholder="https://your-proxy.workers.dev/?url={{url}}" 
+                  className={`w-full px-3 py-2 border rounded-lg text-sm transition-all duration-300 font-mono ${mode === 'custom' ? 'bg-white dark:bg-slate-900 border-amber-300 dark:border-amber-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 outline-none shadow-inner' : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-400 cursor-not-allowed'}`} 
+                />
+              </div>
+            </label>
+          </div>
+
+        </div>
+        
+        <div className="p-6 border-t dark:border-slate-700 flex justify-end space-x-3 bg-slate-50 dark:bg-slate-800/50 rounded-b-2xl">
+          <button type="button" onClick={handleClose} className="px-5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors font-medium active:scale-95">取消</button>
+          <button type="button" onClick={handleSave} className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-md hover:shadow-lg transition-all active:scale-95">保存设置</button>
+        </div>
+      </div>
+    </div>
+  );
+};
