@@ -1,7 +1,7 @@
 // 格式化现金流数据的辅助函数
 const formatCashFlows = (transactions) => {
   if (!transactions || transactions.length === 0) return "无交易记录";
-  const sorted = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
+  const sorted =[...transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
   return sorted.map(t => {
     let action = '操作';
     if (t.type === 'buy') action = '买入建仓/加仓';
@@ -49,7 +49,7 @@ export const analyzeFundWithAI = async (settings, fund, profile, marketData) => 
   const profit = fund?.profit || 0;
   const profitRate = fund?.totalInvested > 0 ? ((profit / fund.totalInvested) * 100).toFixed(2) : 0;
   const cashFlowStr = formatCashFlows(fund?.transactions);
-  
+  // 【新增】获取当前动态物理日期
   const todayStr = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
   const idleFunds = Number(settings.idleFunds) || 0;
 
@@ -222,5 +222,141 @@ const executeAIRequest = async (provider, apiKey, modelName, prompt) => {
   } catch (error) {
     console.error("AI API Error:", error);
     throw new Error(error.message === "Failed to fetch" ? `网络无法访问 ${provider} 服务，请检查代理节点状态。` : error.message);
+  }
+};
+
+// ============================================================================
+// 【新增】持续交互的对话引擎 (支持上下文记忆与系统账本注入)
+// ============================================================================
+export const chatWithPortfolioAI = async (settings, portfolioStats, chatHistory, newMessage, marketData) => {
+  const provider = settings.aiProvider || 'gemini';
+  
+  let apiKey = '';
+  let targetModel = '';
+  if (provider === 'gemini') {
+      apiKey = settings.geminiApiKey;
+      targetModel = settings.geminiModel || 'gemini-2.5-pro';
+  } else if (provider === 'deepseek') {
+      apiKey = settings.deepseekApiKey;
+      targetModel = settings.deepseekModel || 'deepseek-chat';
+  } else if (provider === 'siliconflow') {
+      apiKey = settings.siliconflowApiKey;
+      targetModel = settings.siliconflowModel || 'deepseek-ai/DeepSeek-V3';
+  }
+
+  if (!apiKey) throw new Error(`请配置 ${provider.toUpperCase()} 的 API Key`);
+
+  const todayStr = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+  const idleFunds = Number(settings.idleFunds) || 0;
+
+  // 1. 组装极其详细的底层账本
+  const activeFundsDetail = portfolioStats.computedFundsWithMetrics
+    .filter(f => f.currentValue > 0 && !f.isArchived)
+    .map(f => {
+       const profitRate = f.totalInvested > 0 ? ((f.profit / f.totalInvested) * 100).toFixed(2) : 0;
+       const xirrRate = (f.xirr * 100).toFixed(2);
+       const cashFlows = formatCashFlows(f.transactions);
+       return `\n- 资产：${f.name} (代码: ${f.fundCode || '未知'})
+  > 当前市值: ${f.currentValue} 元 | 累计盈亏: ${f.profit} 元
+  > 累计投入: ${f.totalInvested} 元 | 净本金: ${f.netInvested} 元
+  > 简单盈亏率: ${profitRate}% | 年化收益率(XIRR): ${xirrRate}% | 持有份额: ${f.shares || 0}
+  > 操作流水:
+    ${cashFlows.split('\n').join('\n    ')}`;
+    }).join('\n');
+
+  // 2. 【关键修复】提取实时大盘数据，直接喂到 AI 嘴里，杜绝瞎编点位
+  const shIndex = marketData?.find(m => m.id === 'sh000001');
+  const szIndex = marketData?.find(m => m.id === 'sz399001');
+  const marketStr = shIndex && szIndex 
+    ? `\n【今日实时大盘行情】\n上证指数: ${shIndex.price}点 (${(shIndex.percent * 100).toFixed(2)}%) | 深证成指: ${szIndex.price}点 (${(szIndex.percent * 100).toFixed(2)}%)` 
+    : '';
+
+  // 3. 组装 System Prompt (加入严厉的防幻觉警告)
+  const systemPrompt = `
+你是我专属的私人量化基金经理和财富副驾驶。今天是 ${todayStr}。
+请根据以下我的【最新全局账本底表】，回答我的提问。
+要求：把我当成小白，直接给出明确的操作建议（加仓/减仓/换车/具体金额），不要讲空泛的理论。
+
+【🚨 严厉警告：反幻觉与数据真实性】
+1. 如果我询问今天的大盘点位，请直接读取下方的【今日实时大盘行情】，绝对不允许自己瞎编！
+2. 如果我询问其他外部资讯（如宏观政策、美股走势、某只基金的具体新闻），你**必须强制调用 Google Search 工具**进行联网检索，绝不允许凭记忆捏造数据！
+${marketStr}
+
+【我的全局财富目标设定】
+总目标金额：${settings.targetAmount || 0} 元 | 设定基准年化：${settings.targetAnnualRate || 5}%
+剩余倒数时间：${portfolioStats.monthsLeft} 个月 | 为达成目标每月需新增收益：${portfolioStats.requiredMonthly.toFixed(2)} 元
+超额收益(Alpha)：${(portfolioStats.alpha * 100).toFixed(2)}% | 偏离基准轨迹：${portfolioStats.deviationAmount >= 0 ? '+' : ''}${portfolioStats.deviationAmount.toFixed(2)} 元
+
+【我的全盘资产快照】
+总投入净本金：${portfolioStats.totalInvested} 元 | 全盘总市值：${portfolioStats.totalCurrentValue} 元 | 累计总盈亏：${portfolioStats.totalProfit} 元
+综合年化(XIRR)：${(portfolioStats.overallXirr * 100).toFixed(2)}% | 预备空闲子弹：${idleFunds} 元
+
+【我的详细持仓与流水】
+${activeFundsDetail}
+`;
+
+  try {
+    let url = '';
+    let body = {};
+    let headers = { 'Content-Type': 'application/json' };
+
+    if (provider === 'gemini') {
+        url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey}`;
+        
+        const geminiMessages = chatHistory.map(msg => ({
+            role: msg.role === 'assistant' ? 'model' : 'user',
+            parts:[{ text: msg.content }]
+        }));
+        
+        geminiMessages.push({ role: 'user', parts:[{ text: `[系统底层账本与大盘数据注入]\n${systemPrompt}\n\n[我的最新提问]\n${newMessage}` }] });
+
+        body = {
+            contents: geminiMessages,
+            tools: [{ googleSearch: {} }],
+            // 降低温度，使其在聊天中也保持金融数据的严谨性
+            generationConfig: { temperature: 0.1, topP: 0.1, maxOutputTokens: 4096 },
+            safetySettings:[
+                { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+                { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+                { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+            ]
+        };
+    } else {
+        url = provider === 'deepseek' ? 'https://api.deepseek.com/chat/completions' : 'https://api.siliconflow.cn/v1/chat/completions';
+        headers['Authorization'] = `Bearer ${apiKey}`;
+        
+        const openaiMessages =[
+            { role: 'system', content: systemPrompt },
+            ...chatHistory.map(msg => ({ role: msg.role, content: msg.content })),
+            { role: 'user', content: newMessage }
+        ];
+
+        body = {
+            model: targetModel,
+            messages: openaiMessages,
+            temperature: 0.1,
+            top_p: 0.1,
+            max_tokens: 4096
+        };
+    }
+
+    const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+    const data = await response.json();
+    
+    if (data.error) throw new Error(data.error.message);
+    
+    if (provider === 'gemini') {
+        return data.candidates[0].content.parts[0].text;
+    } else {
+        const msg = data.choices[0].message;
+        let finalContent = msg.content || '';
+        if (msg.reasoning_content) {
+            const thinkProcess = msg.reasoning_content.replace(/\n/g, '<br/>');
+            finalContent = `### 🧠 AI 深度思考过程\n<div class="text-slate-400 dark:text-slate-500 text-xs opacity-90 border-l-4 border-slate-300 dark:border-slate-600 pl-3 py-2 mb-4 bg-slate-50 dark:bg-slate-900/50 rounded-r-lg">${thinkProcess}</div>\n\n` + finalContent;
+        }
+        return finalContent;
+    }
+  } catch (error) {
+    throw new Error(error.message === "Failed to fetch" ? `网络无法访问，请检查代理` : error.message);
   }
 };

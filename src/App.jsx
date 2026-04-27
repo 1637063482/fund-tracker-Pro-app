@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef, Fragment, useCallback } from 'react';
 import { 
-  Activity, Download, Cloud, CloudOff, RefreshCw, Sun, Moon, LogOut, Settings, Pause, Play, 
+  Activity, Download, CloudOff, RefreshCw, Sun, Moon, LogOut, Settings, Pause, Play, 
   AlertCircle, TrendingUp, TrendingDown, PieChart, Archive, ArrowUpDown, ArrowUp, ArrowDown, 
-  Plus, Edit3, Trash2, Award, Target, CheckCircle2, RefreshCcw, Sparkles, X
+  Plus, Edit3, Trash2, Award, Target, CheckCircle2, RefreshCcw, Sparkles, X, Cloud
 } from 'lucide-react';
 import { SplashScreen } from '@capacitor/splash-screen';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -21,9 +21,12 @@ import { FundProfileModal } from './components/Fund/FundProfileModal';
 import { FundEditor } from './components/Fund/FundEditor';
 import { PortfolioAnalysisModal } from './components/Portfolio/PortfolioAnalysisModal';
 
+// 【新增】引入对话副驾驶组件
+import { PortfolioChat } from './components/Chat/PortfolioChat';
+
 export default function App() {
   const[user, setUser] = useState(null); 
-  const [authLoading, setAuthLoading] = useState(true);
+  const[authLoading, setAuthLoading] = useState(true);
   const [funds, setFunds] = useState([]); 
   const[settings, setSettings] = useState({ 
     targetAmount: 100000, 
@@ -37,12 +40,11 @@ export default function App() {
     aiApiKey: '',
     aiModel: '',
     ntfyTopic: 'fund_tracker_my_secret_123',
-     idleFunds: 0, // 【新增】现有空闲资金
-    // 【新增】Cloudflare Worker 配置
+    idleFunds: 0,
     cfWorkerUrl: 'https://fund-tracker-worker.wh1637063482.workers.dev', 
     cfWorkerSecret: 'my_super_password_888'
   });
-  const [theme, setTheme] = useState('light'); 
+  const[theme, setTheme] = useState('light'); 
   
   const [marketData, setMarketData] = useState([]); 
   const[isFetchingMarket, setIsFetchingMarket] = useState(false);
@@ -51,7 +53,7 @@ export default function App() {
   const isFetchingRef = useRef(false); 
   const [isAutoRefresh, setIsAutoRefresh] = useState(checkIsTradingTime()); 
 
-  const [editingFundId, setEditingFundId] = useState(null);
+  const[editingFundId, setEditingFundId] = useState(null);
   const[isProxyModalOpen, setProxyModalOpen] = useState(false); 
   const[isPortfolioModalOpen, setPortfolioModalOpen] = useState(false);
   const[dbError, setDbError] = useState(''); 
@@ -59,11 +61,11 @@ export default function App() {
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' }); 
   const[fundTab, setFundTab] = useState('active'); 
   
-  const [fundNavs, setFundNavs] = useState({});
+  const[fundNavs, setFundNavs] = useState({});
   const[fetchingNavCodes, setFetchingNavCodes] = useState({}); 
   const[isClosingEditor, setIsClosingEditor] = useState(false); 
   
-  const [xirrMap, setXirrMap] = useState({});
+  const[xirrMap, setXirrMap] = useState({});
   const[overallXirr, setOverallXirr] = useState(0);
 
   const[fundProfiles, setFundProfiles] = useState({});
@@ -83,7 +85,6 @@ export default function App() {
     }
   },[theme]);
 
-  // 修复 1：丝滑接管 Android 开屏与 Web DOM 动画的过渡
   useEffect(() => {
     const ultimateFallbackTimer = setTimeout(() => {
       try {
@@ -92,30 +93,29 @@ export default function App() {
           splash.style.opacity = '0';
           setTimeout(() => splash.remove(), 500);
         }
+        if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
+          SplashScreen.hide().catch(() => {});
+        }
       } catch (e) {}
     }, 5000); 
 
     if (!authLoading) {
-      // 当 React 挂载并完成了权限判断后...
-      
-      // 第 1 步：立刻告诉原生 Android 隐藏它那张静态图片，露出底下的 DOM 呼吸动画
       try {
         if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
           SplashScreen.hide().catch(() => {});
         }
       } catch (e) {}
 
-      // 第 2 步：让底下的 DOM 呼吸动画再展示一小会儿（比如 600ms），然后再渐隐消失
       const MIN_SPLASH_TIME = window.__splashStartTime ? Math.max(0, 1000 - (Date.now() - window.__splashStartTime)) : 600;
       
       setTimeout(() => {
         const splash = document.getElementById('global-splash');
         if (splash) {
-          splash.style.opacity = '0';
+          splash.style.opacity = '0'; 
            setTimeout(() => {
             splash.style.display = 'none';
             splash.remove(); 
-          }, 500); // 500ms 的 CSS 渐隐时间
+          }, 500); 
         }
         clearTimeout(ultimateFallbackTimer); 
       }, MIN_SPLASH_TIME);
@@ -124,7 +124,6 @@ export default function App() {
     return () => clearTimeout(ultimateFallbackTimer);
   },[authLoading]);
 
-  // 【新增】同步最新数据到 Cloudflare Worker
   const handleSyncToWorker = async () => {
     if (!settings.cfWorkerUrl || !settings.cfWorkerSecret) {
       alert("⚠️ 请先在设置中配置 Worker URL 和同步密码！");
@@ -166,7 +165,7 @@ export default function App() {
         handleSignOut();
       }, INACTIVITY_LIMIT);
     }
-  },[user, handleSignOut]);
+  }, [user, handleSignOut]);
 
   useEffect(() => {
     const events =['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
@@ -664,7 +663,6 @@ export default function App() {
     targetRateTimeoutRef.current = setTimeout(() => { handleSaveSettings({ targetAnnualRate: numVal }); }, 800); 
   };
 
-  // 【新增】空闲资金的防抖保存处理
   const idleFundsTimeoutRef = useRef(null);
   const handleIdleFundsChange = (e) => {
     const val = e.target.value;
@@ -697,7 +695,7 @@ export default function App() {
     const baseFundsData = funds.map(f => {
       let totalInvested = 0; 
       let realizedReturns = 0; 
-      let cashFlowsForXirr =[]; 
+      let cashFlowsForXirr = []; 
       
       (f.transactions ||[]).forEach(t => {
         const rawAmt = evaluateExpression(t.amountRaw);
@@ -789,7 +787,7 @@ export default function App() {
   },[preXirrPayloads, globalPreCashFlows]);
 
   const portfolioStats = useMemo(() => {
-    if (!baseFundsData) return { pieData:[], contributionPieData:[], assetAllocationData:[], rankedByXirr: [], rankedByProfit:[], computedFundsWithMetrics:[], alpha: 0 };
+    if (!baseFundsData) return { pieData:[], contributionPieData: [], assetAllocationData:[], rankedByXirr: [], rankedByProfit:[], computedFundsWithMetrics:[], alpha: 0 };
 
     const baseFunds = baseFundsData.map(f => ({ ...f, xirr: xirrMap[f.id] || 0 }));
 
@@ -1358,7 +1356,7 @@ export default function App() {
                       </div>
                       <div>
                         <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 block">总目标金额 (元)</label>
-                        <input
+                        <input 
                           type="number" 
                           value={settings.targetAmount === '' ? '' : settings.targetAmount} 
                           onChange={handleTargetAmountChange}
@@ -1480,6 +1478,9 @@ export default function App() {
               </div>
             </div>
           )}
+           {/* 👇 加上这一块：将悬浮聊天框挂载到全局 */}
+          <PortfolioChat portfolioStats={portfolioStats} settings={settings} marketData={marketData} />
+
         </div>
       )}
     </>
