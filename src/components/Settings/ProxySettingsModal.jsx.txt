@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { Settings, X, Database, PieChart, Cloud, Sparkles } from 'lucide-react';
+import { Settings, X, Database, PieChart, Cloud, Sparkles, Bell } from 'lucide-react';
 
 export const ProxySettingsModal = ({ settings, onSave, onClose }) => {
   const [mode, setMode] = useState(settings.proxyMode || 'builtin');
-  const[customUrl, setCustomUrl] = useState(settings.customProxyUrl || '');
+  const [customUrl, setCustomUrl] = useState(settings.customProxyUrl || '');
   const [dataSource, setDataSource] = useState(settings.dataSource || 'tencent');
   const [navDataSource, setNavDataSource] = useState(settings.navDataSource || 'tiantian'); 
   
@@ -16,7 +16,10 @@ export const ProxySettingsModal = ({ settings, onSave, onClose }) => {
   const [deepseekModel, setDeepseekModel] = useState(settings.deepseekModel || 'deepseek-chat');
 
   const [siliconflowKey, setSiliconflowKey] = useState(settings.siliconflowApiKey || '');
-  const [siliconflowModel, setSiliconflowModel] = useState(settings.siliconflowModel || 'deepseek-ai/DeepSeek-V3');
+  const[siliconflowModel, setSiliconflowModel] = useState(settings.siliconflowModel || 'deepseek-ai/DeepSeek-V3');
+
+  // 【新增】ntfy 推送主题状态
+  const [ntfyTopic, setNtfyTopic] = useState(settings.ntfyTopic || 'fund_tracker_my_secret_123');
 
   const[isClosing, setIsClosing] = useState(false);
 
@@ -37,7 +40,8 @@ export const ProxySettingsModal = ({ settings, onSave, onClose }) => {
       deepseekApiKey: deepseekKey,
       deepseekModel: deepseekModel,
       siliconflowApiKey: siliconflowKey,
-      siliconflowModel: siliconflowModel
+      siliconflowModel: siliconflowModel,
+      ntfyTopic: ntfyTopic // 保存推送主题
     });
   };
 
@@ -93,7 +97,24 @@ export const ProxySettingsModal = ({ settings, onSave, onClose }) => {
              <p className="text-xs text-purple-600 dark:text-purple-400 opacity-80 leading-relaxed mt-1">
                {aiProvider === 'gemini' && "自动开启 Google Search 实时联网检索宏观资讯。"}
                {aiProvider === 'deepseek' && "注意：DeepSeek 官方 API 需预付费充值余额。"}
-               {aiProvider === 'siliconflow' && "注册 siliconflow.cn 获取 Key，国内直连，免费无限制使用最强 DeepSeek-V3 模型。"}
+               {aiProvider === 'siliconflow' && "推荐中国用户使用！注册 siliconflow.cn 即可获得完全免费无限制的 DeepSeek-V3 调用权限。"}
+             </p>
+          </div>
+
+          {/* 【新增】ntfy 消息推送配置区 */}
+          <div className="space-y-3 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl border border-blue-100 dark:border-blue-800/50">
+             <label className="text-sm font-bold text-blue-800 dark:text-blue-300 flex items-center justify-between">
+               <span className="flex items-center"><Bell size={16} className="mr-1.5 text-blue-500"/> Ntfy 移动端消息推送配置</span>
+             </label>
+             <input 
+                type="text"
+                value={ntfyTopic} 
+                onChange={e => setNtfyTopic(e.target.value)} 
+                placeholder="输入你的 Ntfy 订阅主题" 
+                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-700 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-inner font-mono text-slate-800 dark:text-slate-200" 
+             />
+             <p className="text-xs text-blue-600 dark:text-blue-400 opacity-80 leading-relaxed mt-1">
+               配置专属的私密主题。设置后，您可以在生成 AI 报告时一键推送到手机 Ntfy App。未来此主题将作为 Cloudflare Worker 定时推送的接收端。
              </p>
           </div>
 

@@ -37,6 +37,8 @@ export default function App() {
     aiApiKey: '',
     aiModel: '',
     ntfyTopic: 'fund_tracker_my_secret_123',
+     idleFunds: 0, // 【新增】现有空闲资金
+    // 【新增】Cloudflare Worker 配置
     cfWorkerUrl: 'https://fund-tracker-worker.wh1637063482.workers.dev', 
     cfWorkerSecret: 'my_super_password_888'
   });
@@ -81,6 +83,7 @@ export default function App() {
     }
   },[theme]);
 
+  // 修复 1：丝滑接管 Android 开屏与 Web DOM 动画的过渡
   useEffect(() => {
     const ultimateFallbackTimer = setTimeout(() => {
       try {
@@ -89,36 +92,37 @@ export default function App() {
           splash.style.opacity = '0';
           setTimeout(() => splash.remove(), 500);
         }
-        if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
-          SplashScreen.hide().catch(() => {});
-        }
       } catch (e) {}
     }, 5000); 
 
     if (!authLoading) {
+      // 当 React 挂载并完成了权限判断后...
+      
+      // 第 1 步：立刻告诉原生 Android 隐藏它那张静态图片，露出底下的 DOM 呼吸动画
       try {
         if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
           SplashScreen.hide().catch(() => {});
         }
       } catch (e) {}
 
+      // 第 2 步：让底下的 DOM 呼吸动画再展示一小会儿（比如 600ms），然后再渐隐消失
       const MIN_SPLASH_TIME = window.__splashStartTime ? Math.max(0, 1000 - (Date.now() - window.__splashStartTime)) : 600;
       
       setTimeout(() => {
         const splash = document.getElementById('global-splash');
         if (splash) {
-          splash.style.opacity = '0'; 
+          splash.style.opacity = '0';
            setTimeout(() => {
             splash.style.display = 'none';
             splash.remove(); 
-          }, 500); 
+          }, 500); // 500ms 的 CSS 渐隐时间
         }
         clearTimeout(ultimateFallbackTimer); 
       }, MIN_SPLASH_TIME);
     }
 
     return () => clearTimeout(ultimateFallbackTimer);
-  }, [authLoading]);
+  },[authLoading]);
 
   // 【新增】同步最新数据到 Cloudflare Worker
   const handleSyncToWorker = async () => {
@@ -658,6 +662,23 @@ export default function App() {
 
     if (targetRateTimeoutRef.current) clearTimeout(targetRateTimeoutRef.current);
     targetRateTimeoutRef.current = setTimeout(() => { handleSaveSettings({ targetAnnualRate: numVal }); }, 800); 
+  };
+
+  // 【新增】空闲资金的防抖保存处理
+  const idleFundsTimeoutRef = useRef(null);
+  const handleIdleFundsChange = (e) => {
+    const val = e.target.value;
+    const numVal = val === '' ? '' : Number(val);
+    setSettings(prev => ({...prev, idleFunds: numVal}));
+
+    if (idleFundsTimeoutRef.current) clearTimeout(idleFundsTimeoutRef.current);
+    idleFundsTimeoutRef.current = setTimeout(() => { handleSaveSettings({ idleFunds: numVal }); }, 800); 
+  };
+  const handleIdleFundsBlur = (e) => {
+    const val = e.target.value;
+    const numVal = val === '' ? '' : Number(val);
+    if (idleFundsTimeoutRef.current) clearTimeout(idleFundsTimeoutRef.current);
+    handleSaveSettings({ idleFunds: numVal }); 
   };
 
   const exportData = () => {
@@ -1323,9 +1344,21 @@ export default function App() {
                   <h3 className="text-base sm:text-lg font-bold mb-4 sm:mb-5 flex items-center relative z-10"><Target className="mr-2 text-blue-500"/> 财富目标与年化复盘</h3>
                   <div className="space-y-4 relative z-10">
                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* 【新增】空闲资金输入框 */}
+                      <div className="sm:col-span-2 mb-1">
+                        <label className="text-sm font-bold text-indigo-600 dark:text-indigo-400 mb-1 block flex items-center"><Sparkles size={14} className="mr-1"/> 当前子弹 (可用空闲资金)</label>
+                        <input 
+                          type="number" 
+                          value={settings.idleFunds === '' ? '' : settings.idleFunds} 
+                          onChange={handleIdleFundsChange}
+                          onBlur={handleIdleFundsBlur}
+                          placeholder="例如: 10000"
+                          className="w-full px-3 py-2 border border-indigo-200 dark:border-indigo-800 rounded-xl dark:bg-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all duration-300 shadow-sm font-mono text-indigo-700 dark:text-indigo-300 font-bold bg-indigo-50 dark:bg-indigo-900/20" 
+                        />
+                      </div>
                       <div>
                         <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 block">总目标金额 (元)</label>
-                        <input 
+                        <input
                           type="number" 
                           value={settings.targetAmount === '' ? '' : settings.targetAmount} 
                           onChange={handleTargetAmountChange}
