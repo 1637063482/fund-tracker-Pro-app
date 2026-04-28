@@ -356,7 +356,10 @@ ${activeFundsDetail}
             messages: openaiMessages,
             temperature: 0.1,
             top_p: 0.1,
-            max_tokens: 8192
+            max_tokens: 8192,
+            // 显式锁定思考模式
+            thinking: { type: "enabled" },
+            reasoning_effort: "high"
         };
     }
 
@@ -425,7 +428,10 @@ const executeAIRequest = async (provider, apiKey, modelName, prompt) => {
             messages:[{ role: 'user', content: prompt }],
             temperature: 0.1,
             top_p: 0.1,
-            max_tokens: 8192 
+            max_tokens: 8192,
+            // 显式锁定思考模式
+            thinking: { type: "enabled" },
+            reasoning_effort: "high"
         };
     }
 

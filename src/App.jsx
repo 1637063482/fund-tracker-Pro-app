@@ -968,12 +968,16 @@ export default function App() {
       const grl1m = parseFloat(derived.nav_grl1m || 0);
       const badges =[];
 
-      const isGarbage = rankPercentile > 0.7;
+      // 优化量化判定逻辑：排名垫底且亏钱才是真垃圾；排名垫底但不亏钱视为平庸防守资产
+      const isGarbage = rankPercentile > 0.7 && returnRate < 0; 
+      const isMediocre = rankPercentile > 0.7 && returnRate >= 0;
       const isTopTier = rankPercentile < 0.2;
 
       if (isGarbage) {
-          badges.push(<span key="warn" className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400 leading-none shadow-sm whitespace-nowrap">⚠️ 弱势换仓</span>);
-      } else {
+          badges.push(<span key="warn" className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-red-50 text-red-500 border border-red-200 dark:bg-red-900/30 dark:border-red-800 dark:text-red-400 leading-none shadow-sm whitespace-nowrap">⚠️ 弱势止损</span>);
+      } else if (isMediocre) {
+          badges.push(<span key="warn" className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400 leading-none shadow-sm whitespace-nowrap">🥱 表现平庸</span>);
+      } else {  
           const profitThreshold = isBond ? 0.04 : 0.15; 
           const dropThreshold = isBond ? -0.5 : (isTopTier ? -3.0 : -5.0); 
 

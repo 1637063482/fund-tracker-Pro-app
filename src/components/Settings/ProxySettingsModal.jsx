@@ -115,20 +115,20 @@ export const ProxySettingsModal = ({ settings, onSave, onClose }) => {
                  </p>
               </div>
 
-              {/* Ntfy 推送配置 */}
+              {/* 移动端推送配置 */}
               <div className="space-y-3 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl border border-blue-100 dark:border-blue-800/50">
                  <label className="text-sm font-bold text-blue-800 dark:text-blue-300 flex items-center justify-between">
-                   <span className="flex items-center"><Bell size={16} className="mr-1.5 text-blue-500"/> Ntfy 移动端消息推送配置</span>
+                   <span className="flex items-center"><Bell size={16} className="mr-1.5 text-blue-500"/> 移动端消息推送配置 (飞书/钉钉/Ntfy)</span>
                  </label>
                  <input 
                     type="text"
                     value={ntfyTopic} 
                     onChange={e => setNtfyTopic(e.target.value)} 
-                    placeholder="输入你的 Ntfy 订阅主题" 
+                    placeholder="输入 Webhook URL 或 Ntfy 主题" 
                     className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-700 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-inner font-mono text-slate-800 dark:text-slate-200" 
                  />
                  <p className="text-[11px] text-blue-600 dark:text-blue-400 opacity-80 leading-relaxed mt-1">
-                   配置专属的私密主题。设置后，您可以在生成 AI 报告时一键推送到手机 Ntfy App。未来此主题将作为 Cloudflare Worker 定时推送的接收端。
+                   支持飞书/钉钉群机器人 Webhook，或 Ntfy 主题。设置后可实现一键推送与云端定时播报。
                  </p>
               </div>
 
