@@ -41,6 +41,7 @@ export default function App() {
     aiModel: '',
     ntfyTopic: 'fund_tracker_my_secret_123',
     idleFunds: 0,
+    tavilyApiKey: '', // 【新增】Tavily 搜索引擎 API Key
     cfWorkerUrl: 'https://fund-tracker-worker.wh1637063482.workers.dev', 
     cfWorkerSecret: 'my_super_password_888'
   });
@@ -51,7 +52,8 @@ export default function App() {
   const[marketError, setMarketError] = useState('');
   const [activeProxyIndex, setActiveProxyIndex] = useState(0); 
   const isFetchingRef = useRef(false); 
-  const [isAutoRefresh, setIsAutoRefresh] = useState(checkIsTradingTime()); 
+  // 【关键修改1】初始状态默认开启，把控制权完全交给用户
+  const [isAutoRefresh, setIsAutoRefresh] = useState(true); 
 
   const[editingFundId, setEditingFundId] = useState(null);
   const[isProxyModalOpen, setProxyModalOpen] = useState(false); 
@@ -555,12 +557,17 @@ export default function App() {
      }
   },[activeProxyIndex, user, settings.proxyMode, settings.customProxyUrl, settings.dataSource]);
 
-  useEffect(() => {
+   useEffect(() => {
     if (!user) return;
     manualFetch(); 
     
     if (!isAutoRefresh) return; 
-    const intervalId = setInterval(manualFetch, 5000); 
+    const intervalId = setInterval(() => {
+      // 【关键修改2】底层时钟动态拦截：即使用户开着自动刷新，只要当前是休市/节假日，就静默跳过请求，绝不浪费资源！
+      if (checkIsTradingTime()) {
+        manualFetch();
+      }
+    }, 5000); 
     return () => clearInterval(intervalId); 
   },[isAutoRefresh, manualFetch, user]);
 
@@ -997,6 +1004,7 @@ export default function App() {
         <PortfolioAnalysisModal
            portfolioStats={portfolioStats}
            settings={settings}
+           marketData={marketData} // <--- 必须确保有这一行
            onClose={() => setPortfolioModalOpen(false)}
         />
       )}

@@ -1,11 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { MessageSquare, X, Send, RefreshCw, Trash2, Bot, User, Sparkles } from 'lucide-react';
+// 【关键修改1】引入 Globe 图标
+import { MessageSquare, X, Send, RefreshCw, Trash2, Bot, User, Sparkles, Globe } from 'lucide-react';
 import { chatWithPortfolioAI } from '../../utils/ai';
 
 export const PortfolioChat = ({ portfolioStats, settings, marketData }) => {
   const [isOpen, setIsOpen] = useState(false);
+  // 【关键修改2】新增联网搜索的用户开关状态（默认开启）
+  const[useWebSearch, setUseWebSearch] = useState(true);
   const[messages, setMessages] = useState([
-    { role: 'assistant', content: '您好！我是您的私人基金副驾驶。我已经读取了您当前的全部持仓和流水，以及您手握的空闲资金。请问有什么可以帮您？' }
+    { role: 'assistant', content: '您好！我是您的私人基金copilot。我已经读取了您当前的全部持仓和流水，以及您手握的空闲资金。请问有什么可以帮您？' }
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -32,7 +35,8 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData }) => {
     try {
       // 过滤掉第一条欢迎语，只把真实对话发给 AI
       const chatHistory = newMessages.filter((_, idx) => idx > 0 && idx < newMessages.length - 1);
-      const reply = await chatWithPortfolioAI(settings, portfolioStats, chatHistory, userMessage, marketData);
+       // 【关键修改3】将 useWebSearch 状态传给底层引擎
+      const reply = await chatWithPortfolioAI(settings, portfolioStats, chatHistory, userMessage, marketData, useWebSearch);
       setMessages([...newMessages, { role: 'assistant', content: reply }]);
     } catch (e) {
       setMessages([...newMessages, { role: 'assistant', content: `❌ 抱歉，连接大脑失败：${e.message}` }]);
@@ -89,7 +93,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData }) => {
           <div className="bg-gradient-to-r from-indigo-600 to-blue-600 p-4 sm:p-5 flex justify-between items-center text-white shrink-0 shadow-md relative z-10">
             <div className="flex items-center">
               <Sparkles size={22} className="mr-2" />
-              <span className="font-bold text-lg">私人投资副驾驶</span>
+              <span className="font-bold text-lg">私人投资copilot</span>
             </div>
             <div className="flex items-center space-x-2">
               <button onClick={handleClear} title="开启新对话 (防幻觉)" className="p-2 bg-white/10 hover:bg-white/20 rounded-xl transition-colors"><Trash2 size={18} /></button>
@@ -131,7 +135,15 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData }) => {
           {/* 输入区 */}
           <div className="p-3 sm:p-4 bg-white dark:bg-slate-800 border-t border-slate-100 dark:border-slate-700 shrink-0">
             <div className="flex items-end bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-1.5 focus-within:ring-2 focus-within:ring-indigo-500 transition-shadow">
-              <textarea
+            {/* 【关键修改4】在 textarea 左侧新增一个联网开关按钮 */}
+            <button
+              onClick={() => setUseWebSearch(!useWebSearch)}
+              title={useWebSearch ? "联网搜索已开启 (耗时较长，适合查新闻)" : "联网搜索已关闭 (纯本地账本模式，秒回)"}
+              className={`m-1 p-2.5 rounded-xl transition-colors shrink-0 flex items-center justify-center ${useWebSearch ? 'text-indigo-600 bg-indigo-100 hover:bg-indigo-200 dark:bg-indigo-900/40 dark:text-indigo-400' : 'text-slate-400 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700'}`}
+            >
+              <Globe size={20} className={useWebSearch ? '' : 'opacity-50'} />
+            </button>
+            <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -150,7 +162,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData }) => {
               </button>
             </div>
             <div className="text-center mt-2.5 text-xs text-slate-400">
-              Shift + Enter 换行，Enter 发送。您的账本数据已脱敏注入。
+              Shift + Enter 换行，Enter 发送。账本数据已脱敏注入。
             </div>
           </div>
 

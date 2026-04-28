@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { X, Sparkles, RefreshCw, AlertTriangle, PieChart, Send, Check } from 'lucide-react';
 import { analyzePortfolioWithAI } from '../../utils/ai';
 
-export const PortfolioAnalysisModal = ({ portfolioStats, settings, onClose }) => {
+export const PortfolioAnalysisModal = ({ portfolioStats, settings, marketData, onClose }) => {
   const [aiReport, setAiReport] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
@@ -24,7 +24,7 @@ export const PortfolioAnalysisModal = ({ portfolioStats, settings, onClose }) =>
     setAiLoading(true);
     setAiError('');
     try {
-      const report = await analyzePortfolioWithAI(settings, portfolioStats);
+      const report = await analyzePortfolioWithAI(settings, portfolioStats, marketData);
       setAiReport(report);
     } catch (err) {
       setAiError(err.message);
