@@ -21,6 +21,16 @@ import { FundProfileModal } from './components/Fund/FundProfileModal';
 import { FundEditor } from './components/Fund/FundEditor';
 import { PortfolioAnalysisModal } from './components/Portfolio/PortfolioAnalysisModal';
 
+// 提取移除函数（保持在组件外部或内部皆可，内部建议用 useCallback 包裹）
+const removeGlobalSplash = () => {
+  const splash = document.getElementById('global-splash');
+  if (splash) {
+    splash.style.transition = 'opacity 0.5s ease-out';
+    splash.style.opacity = '0';
+    setTimeout(() => splash.remove(), 500);
+  }
+};
+
 // 【新增】引入对话副驾驶组件
 import { PortfolioChat } from './components/Chat/PortfolioChat';
 
@@ -73,58 +83,46 @@ export default function App() {
   const[fundProfiles, setFundProfiles] = useState({});
   const[viewingProfileCode, setViewingProfileCode] = useState(null);
 
-  const INACTIVITY_LIMIT = 10 * 60 * 1000; 
+  const INACTIVITY_LIMIT = 15 * 60 * 1000; 
   const logoutTimerRef = useRef(null);
   const targetAmountTimeoutRef = useRef(null); 
   const targetDateTimeoutRef = useRef(null);
   const targetRateTimeoutRef = useRef(null);
 
-  useEffect(() => {
-    if (theme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
+ 
+// 1. 瞬间隐藏原生 Android 启动页：只需在引擎挂载时执行一次
+useEffect(() => {
+  const hideNativeSplash = async () => {
+    try {
+      if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
+        await SplashScreen.hide();
+      }
+    } catch (e) {
+      console.warn("Native splash hide failed", e);
     }
-  },[theme]);
+  };
+  hideNativeSplash();
+}, []); // <-- 严格使用空依赖数组
 
-  useEffect(() => {
-    const ultimateFallbackTimer = setTimeout(() => {
-      try {
-        const splash = document.getElementById('global-splash');
-        if (splash) {
-          splash.style.opacity = '0';
-          setTimeout(() => splash.remove(), 500);
-        }
-        if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
-          SplashScreen.hide().catch(() => {});
-        }
-      } catch (e) {}
-    }, 5000); 
+// 2. 处理前端 DOM 开屏动画 (global-splash)
+useEffect(() => {
+  const ultimateFallbackTimer = setTimeout(() => {
+    removeGlobalSplash();
+  }, 5000);
 
-    if (!authLoading) {
-      try {
-        if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
-          SplashScreen.hide().catch(() => {});
-        }
-      } catch (e) {}
+  if (!authLoading) {
+    const MIN_SPLASH_TIME = 600; 
+    const timeElapsed = window.__splashStartTime ? (Date.now() - window.__splashStartTime) : 0;
+    const delay = Math.max(0, MIN_SPLASH_TIME - timeElapsed);
 
-      const MIN_SPLASH_TIME = window.__splashStartTime ? Math.max(0, 1000 - (Date.now() - window.__splashStartTime)) : 600;
-      
-      setTimeout(() => {
-        const splash = document.getElementById('global-splash');
-        if (splash) {
-          splash.style.opacity = '0'; 
-           setTimeout(() => {
-            splash.style.display = 'none';
-            splash.remove(); 
-          }, 500); 
-        }
-        clearTimeout(ultimateFallbackTimer); 
-      }, MIN_SPLASH_TIME);
-    }
+    setTimeout(() => {
+      removeGlobalSplash();
+      clearTimeout(ultimateFallbackTimer);
+    }, delay);
+  }
 
-    return () => clearTimeout(ultimateFallbackTimer);
-  },[authLoading]);
+  return () => clearTimeout(ultimateFallbackTimer);
+}, [authLoading]); // <-- 专门监听鉴权状态
 
   const handleSyncToWorker = async () => {
     if (!settings.cfWorkerUrl || !settings.cfWorkerSecret) {
