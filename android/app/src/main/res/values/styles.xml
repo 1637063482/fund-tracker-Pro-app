@@ -5,21 +5,23 @@
         <item name="colorPrimary">@color/colorPrimary</item>
         <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
         <item name="colorAccent">@color/colorAccent</item>
-        <item name="android:windowBackground">@color/white</item>
+        
+        <!-- 【完美过渡核心 1】将 WebView 容器的底层背景也设置为你的前端背景色 -->
+        <item name="android:windowBackground">#f8fafc</item>
     </style>
 
     <!-- 启动页主题：解决 Android 12+ 启动断层问题 -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <!-- 1. 设置原生背景色，需与前端 global-splash 背景色 #f8fafc 严格一致 -->
+        <!-- 【完美过渡核心 2】原生开屏的第一眼背景色 -->
         <item name="windowSplashScreenBackground">#f8fafc</item>
         
-        <!-- 2. 设置启动图标（可选），建议使用应用图标 -->
+        <!-- 设置启动图标（可选） -->
         <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
         
-        <!-- 3. 【关键】指定开屏结束后切换到的主主题 -->
+        <!-- 指定开屏结束后切换到的主主题 -->
         <item name="postSplashScreenTheme">@style/AppTheme</item>
         
-        <!-- 4. 设置动画时长（系统级最小值为 200ms） -->
+        <!-- 设置动画时长 -->
         <item name="windowSplashScreenAnimationDuration">200</item>
     </style>
 </resources>
