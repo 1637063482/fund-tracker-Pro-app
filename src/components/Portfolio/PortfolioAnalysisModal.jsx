@@ -34,24 +34,52 @@ export const PortfolioAnalysisModal = ({ portfolioStats, settings, marketData, o
   };
 
   const handlePushToNtfy = async () => {
-    if (!settings.ntfyTopic) {
-      alert("请先在设置中配置 Ntfy 主题！");
+    const pushToken = settings.ntfyTopic?.trim();
+    if (!pushToken) {
+      alert("请先在设置中配置推送 Webhook 或 Ntfy 主题！");
       return;
     }
     setIsPushing(true);
     try {
-      const topic = encodeURIComponent(settings.ntfyTopic);
-      const title = encodeURIComponent('💼 CIO 级全盘资产诊断报告');
-      const tags = 'briefcase,sparkles';
-      
-      const targetUrl = `https://ntfy.sh/${topic}?title=${title}&tags=${tags}&markdown=yes`;
+      const titleText = '💼 CIO 级全盘资产诊断报告';
 
-      const response = await fetch(targetUrl, {
-        method: 'POST',
-        body: aiReport, 
-      });
-
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (pushToken.startsWith('https://open.feishu.cn') || pushToken.startsWith('https://open.larksuite.com')) {
+        // 飞书通道
+        const res = await fetch(pushToken, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            msg_type: "interactive",
+            card: {
+              config: { wide_screen_mode: true },
+              header: { title: { tag: "plain_text", content: titleText }, template: "purple" },
+              elements:[{ tag: "markdown", content: aiReport }]
+            }
+          })
+        });
+        const resData = await res.json();
+        if (resData.code !== 0) throw new Error(`飞书拦截: ${resData.msg}`);
+      } else if (pushToken.startsWith('https://oapi.dingtalk.com')) {
+        // 钉钉通道
+        const res = await fetch(pushToken, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            msgtype: "markdown",
+            markdown: { title: "资产", text: `### ${titleText}\n\n${aiReport}` }
+          })
+        });
+        const resData = await res.json();
+        if (resData.errcode !== 0) throw new Error(`钉钉拦截: ${resData.errmsg}`);
+      } else {
+        // Ntfy 通道
+        const topic = encodeURIComponent(pushToken);
+        const title = encodeURIComponent(titleText);
+        const tags = 'briefcase,sparkles';
+        const ntfyUrl = `https://ntfy.sh/${topic}?title=${title}&tags=${tags}&markdown=yes`;
+        const response = await fetch(ntfyUrl, { method: 'POST', body: aiReport });
+        if (!response.ok) throw new Error(`Ntfy HTTP ${response.status}`);
+      }
 
       setPushSuccess(true);
       setTimeout(() => setPushSuccess(false), 3000);
@@ -134,7 +162,7 @@ export const PortfolioAnalysisModal = ({ portfolioStats, settings, marketData, o
                      disabled={isPushing || pushSuccess} 
                      className={`px-5 py-2.5 rounded-xl text-sm font-bold flex items-center transition-all shadow-sm ${pushSuccess ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-indigo-600 hover:bg-indigo-700 text-white active:scale-95'}`}
                    >
-                     {pushSuccess ? <><Check size={16} className="mr-1.5"/> 报告已飞送到手机</> : (isPushing ? <><RefreshCw size={16} className="mr-1.5 animate-spin"/> 正在发送...</> : <><Send size={16} className="mr-1.5"/> 一键将报告推送到手机</>)}
+                     {pushSuccess ? <><Check size={16} className="mr-1.5"/> 报告已成功推送</> : (isPushing ? <><RefreshCw size={16} className="mr-1.5 animate-spin"/> 正在发送...</> : <><Send size={16} className="mr-1.5"/> 一键推送到手机</>)}
                    </button>
                  </div>
                </div>

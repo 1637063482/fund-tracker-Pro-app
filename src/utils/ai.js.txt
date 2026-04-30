@@ -17,34 +17,24 @@ const formatCashFlows = (transactions) => {
   }).join('\n');
 };
 
-// Tavily 搜索引擎调用函数 (支持 新闻/通用 双模式切换)
-const fetchTavilySearch = async (apiKey, query, searchType = "news") => {
+// Tavily 搜索引擎调用函数 (DeepSeek 联网必备)
+const fetchTavilySearch = async (apiKey, query) => {
   if (!apiKey) return "";
   try {
-    // 基础参数
-    const bodyPayload = {
-        api_key: apiKey,
-        query: query,
-        search_depth: "advanced",
-        include_answer: false,
-        max_results: 5 
-    };
-    
-    // 🌟 智能开关：如果是新闻模式，加上时效锁；如果是通用模式，放开限制搜全网
-    if (searchType === "news") {
-        bodyPayload.topic = "news";
-        bodyPayload.days = 3;
-    }
-
     const res = await fetch('https://api.tavily.com/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(bodyPayload)
+      body: JSON.stringify({
+        api_key: apiKey,
+        query: query,
+        search_depth: "basic",
+        include_answer: false,
+        max_results: 3 
+      })
     });
-    
     const data = await res.json();
     if (data.results && data.results.length > 0) {
-      return data.results.map(r => `【标题】${r.title}\n【摘要】${r.content}`).join('\n\n');
+      return data.results.map(r => `新闻标题：${r.title}\n内容摘要：${r.content}`).join('\n\n');
     }
     return "";
   } catch (e) {
@@ -99,11 +89,7 @@ export const analyzeFundWithAI = async (settings, fund, profile, marketData) => 
   // 【真实联网检索】
   let searchContext = "";
   if (provider !== 'gemini' && settings.tavilyApiKey) {
-      // 智能判断基金属性，动态生成搜索词
-      const isBondFund = (fund?.name || '').includes('债');
-      const marketFocus = isBondFund ? "中国债券市场 央行公开市场操作 市场利率走势" : "A股走势 宏观经济";
-      const query = `今日 ${marketFocus} ${fund?.name || ''} 最新新闻 利空 利好`;
-      
+      const query = `今天A股美股宏观走势 ${fund?.name || ''} 最新新闻 利好 利空`;
       const searchRes = await fetchTavilySearch(settings.tavilyApiKey, query);
       if (searchRes) {
           searchContext = `\n【实时联网搜索结果 (来自 Tavily Search)】\n以下是刚刚检索到的最新真实互联网资讯，请务必基于这些数据进行判断，绝不允许自己捏造新闻：\n${searchRes}\n`;
@@ -119,7 +105,6 @@ export const analyzeFundWithAI = async (settings, fund, profile, marketData) => 
 2. 请直接读取下方数据作为当前市场基准，绝对不允许凭记忆瞎编点位！${marketEnv}
 3. 宏观资产温度与历史纵深：在回答前，请结合你的最新知识库(如果是Gemini请强制使用Google Search获取最新资讯)。结合 A股、美股、黄金、中美国债收益率等核心资产【近3个月、近半年、近1年】的中长线走势趋势，评估当前处于反弹初期、主升浪还是下跌通道。
 4. 标的雷达：这只基金（${fund?.name}）近期是否有重要新闻，或其所属核心板块近期的政策/行业利好利空。
-5. 【带风控框架的独立裁判】：在评价我的买卖行为时，你拥有绝对的独立批判权，绝不能做只会迎合的“马屁精”。裁判标准请综合考量该资产的【真实绝对盈亏率】与【资金占用效率（排除短期失真年化）】。如果你发现我属于典型的“火场捡钢镚”（为了微小利差牺牲极大流动性或安全性），或者属于被短期高收益蒙蔽了双眼的高位接盘，请用最冷酷的数据戳穿我的幻觉，并建议纠正。只有当我的调仓在风控和收益预期上逻辑严密时，才予以肯定。
 ${searchContext}
 
 【基金基本面】
@@ -147,7 +132,7 @@ ${cashFlowStr}
 ### 💰 【${idleFunds}元】空闲资金利用建议(如果该基金跌出了黄金坑且质量优秀，请明确告诉我从这 ${idleFunds} 元里抽出多少钱来补仓。如果不值得补仓，请直接推荐一只更适合当前大盘的、带有具体6位数代码的替代基金，并告诉我买入多少。)
 `;
 
-  return await executeAIRequest(provider, apiKey, targetModel, prompt, 0.2, 0.2);
+  return await executeAIRequest(provider, apiKey, targetModel, prompt);
 };
 
 // ============================================================================
@@ -191,8 +176,7 @@ export const analyzePortfolioWithAI = async (settings, portfolioStats, marketDat
 
   let searchContext = "";
   if (provider !== 'gemini' && settings.tavilyApiKey) {
-      // 兼顾股债双市的全盘宏观检索词
-      const query = `当前中国央行货币政策 债券市场走势 A股大盘走势 美联储降息预期 宏观经济`;
+      const query = `当前全球宏观经济走势 美联储降息预期 股市 大宗商品 黄金 趋势`;
       const searchRes = await fetchTavilySearch(settings.tavilyApiKey, query);
       if (searchRes) {
           searchContext = `\n【实时联网搜索结果 (来自 Tavily Search)】\n以下是刚刚检索到的最新真实互联网资讯，请务必基于这些数据进行判断，绝不允许自己捏造新闻：\n${searchRes}\n`;
@@ -237,7 +221,7 @@ ${activeFunds}
 3. 绝不允许只给“建议配置债券”这种模糊废话，必须精确到基金名字和配置金额！必须使用市场上真实存在的公募基金。如果不确定具体代码，直接输出“数据不足以推荐代码”。)
 `;
 
-  return await executeAIRequest(provider, apiKey, targetModel, prompt, 0.4, 0.5);
+  return await executeAIRequest(provider, apiKey, targetModel, prompt);
 };
 
 // ============================================================================
@@ -287,8 +271,7 @@ export const chatWithPortfolioAI = async (settings, portfolioStats, chatHistory,
   let searchContext = "";
   // 【关键修改2】只有当 useWebSearch 为 true 时，才调用 Tavily
   if (useWebSearch && provider !== 'gemini' && settings.tavilyApiKey) {
-      // 聊天框开启 "general" (通用模式)，不限制天数和新闻，方便查询金融百科和研报
-      const searchRes = await fetchTavilySearch(settings.tavilyApiKey, newMessage, "general");
+      const searchRes = await fetchTavilySearch(settings.tavilyApiKey, newMessage);
       if (searchRes) {
           searchContext = `\n【实时联网搜索结果 (来自 Tavily Search)】\n针对用户的问题，系统自动在互联网上检索到了以下最新资料，请务必基于这些真实数据进行判断，绝不允许自己捏造新闻：\n${searchRes}\n`;
       }
@@ -303,12 +286,9 @@ export const chatWithPortfolioAI = async (settings, portfolioStats, chatHistory,
 2. 绝不瞎编大盘点位：必须严格读取下方的【今日实时大盘与基准行情】或搜索结果，绝不凭记忆编造。
 3. 绝不推荐虚假代码：推荐任何资产必须是市场上真实存在的，必须附带正确的6位数代码，不知道就明确回答不知道。
 4. 绝不讲废话：不要给我上宏观经济课，不要讲空泛的理论。我只需要直接、量化、精确到金额的“交易指令”。
-5. 严禁目标倒逼风险（反PUA协议）：下方提供的【全局财富目标】只是一个期望值。如果该目标距离较远，你**允许**建议我拿小部分资金配置稳健型权益资产（如红利低波）作为“卫星仓位”进行收益增强；但【绝对禁止】为了帮我填补缺口，而强行逼迫我大比例调仓去博取高弹性、高波动的风险资产！若目标脱离了“固收+”策略的极限，请坦诚建议我“降低目标预期”，而不是教唆我“跨越风险承受能力”。
-6. 尊重【固收为主，适度增强】的风险边界：我是一个稳健型投资者，资产结构以债券型基金为主力，但愿意配置少量中低波动的权益资产来增厚收益。在出具【空闲子弹精准打出方案】时，你可以基于宏观推荐优质的“固收+”或“红利低波/宽基”类资产，但【绝对禁止】为了填补极高的收益目标缺口，而强行教唆我重仓高波动、高风险的赛道型基金！如果我的财富目标脱离实际，请直接客观测算这套稳健策略的真实预期上限，并建议我下调目标，而不是教唆我去火中取栗。
-7. 【独立审查权与固收裁判框架】：你有绝对的权力批评我的操作，但必须基于正确的专业逻辑，禁止盲目赞同。严禁用“大盘在涨你却买债”或“这收益达不到你的总目标”来指责我。严禁将短期失真年化直接外推。你必须像风控官一样，审查我的调仓是否划算。如果你发现我为了极其微小的预期收益（利差），而牺牲了过大的流动性（比如买入超长封闭期）、承担了不合理的信用风险（下沉太深）、或者频繁买卖导致手续费磨损远大于收益，请【毫不留情地严厉痛批我】！如果我的同类换仓在流动性、久期和预期收益之间取得了更好的平衡（性价比更高），请客观认可。不要预设我的操作是对是错，用数据和“不可能三角”来裁判我。
 
-【我的投资偏好与用户画像 (绝对核心锚点)】
-我是一个【稳健偏保守】的投资者。我的核心底仓（大部分资金）是债券型基金，但我【可以承受适度的波动和风险】以换取收益增强（例如配置少量的红利低波、宽基指数或优秀的混合型基金），但我绝对不接受高风险、高弹性的单一赛道重仓。请结合我手里的【${idleFunds}元】空闲子弹，在“固收为主，适度增强”的框架内告诉我具体的资金分配方案。
+【我的投资偏好与用户画像】
+我是一个务实的投资者，需要你像机器一样精准。结合我手里的【${idleFunds}元】空闲子弹，告诉我具体的资金分配方案（买哪只？买多少？卖哪只？卖多少？）。如果我的历史操作存在追高杀跌，请毫不留情地严厉批评。
 
 ${searchContext}
 ${marketStr}
@@ -352,9 +332,9 @@ ${activeFundsDetail}
 
          body = {
             contents: geminiMessages,
+            // 【关键修改3】只有当 useWebSearch 为 true 时，才挂载 Google Search 工具
             tools: useWebSearch ? [{ googleSearch: {} }] :[],
-            // 【优化1】Gemini 聊天温度微调至 0.2，保证严谨的同时让对话更自然流畅
-            generationConfig: { temperature: 0.2, topP: 0.2, maxOutputTokens: 8192 },
+            generationConfig: { temperature: 0.1, topP: 0.1, maxOutputTokens: 8192 },
             safetySettings:[
                 { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
                 { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
@@ -374,10 +354,10 @@ ${activeFundsDetail}
         body = {
             model: targetModel,
             messages: openaiMessages,
-            // 【优化2】DeepSeek 聊天温度微调至 0.2
-            temperature: 0.2,
-            top_p: 0.2,
+            temperature: 0.1,
+            top_p: 0.1,
             max_tokens: 8192,
+            // 显式锁定思考模式
             thinking: { type: "enabled" },
             reasoning_effort: "high"
         };
@@ -421,7 +401,7 @@ ${activeFundsDetail}
 // ============================================================================
 // 5. 底层 HTTP 请求封装
 // ============================================================================
-const executeAIRequest = async (provider, apiKey, modelName, prompt, targetTemp = 0.1, targetTopP = 0.1) => {
+const executeAIRequest = async (provider, apiKey, modelName, prompt) => {
   try {
     let url = '';
     let body = {};
@@ -432,7 +412,7 @@ const executeAIRequest = async (provider, apiKey, modelName, prompt, targetTemp 
         body = {
             contents:[{ parts:[{ text: prompt }] }],
             tools:[{ googleSearch: {} }], 
-            generationConfig: { temperature: targetTemp, topP: targetTopP, maxOutputTokens: 8192 },
+            generationConfig: { temperature: 0.1, topP: 0.1, maxOutputTokens: 8192 },
             safetySettings:[
                 { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
                 { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
@@ -446,9 +426,10 @@ const executeAIRequest = async (provider, apiKey, modelName, prompt, targetTemp 
         body = {
             model: modelName,
             messages:[{ role: 'user', content: prompt }],
-            temperature: targetTemp,
-            top_p: targetTopP,
+            temperature: 0.1,
+            top_p: 0.1,
             max_tokens: 8192,
+            // 显式锁定思考模式
             thinking: { type: "enabled" },
             reasoning_effort: "high"
         };
