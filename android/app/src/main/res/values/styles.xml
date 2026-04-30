@@ -1,27 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 基础应用主题 -->
-    <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar">
+    <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
         <item name="colorPrimary">@color/colorPrimary</item>
         <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
         <item name="colorAccent">@color/colorAccent</item>
-        
-        <!-- 【完美过渡核心 1】将 WebView 容器的底层背景也设置为你的前端背景色 -->
+    </style>
+
+    <!-- 支持昼夜模式切换的主题 -->
+    <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <!-- 【防闪屏核心 1】给透明的 WebView 垫上与你前端开屏一致的底色 -->
         <item name="android:windowBackground">#f8fafc</item>
     </style>
 
-    <!-- 启动页主题：解决 Android 12+ 启动断层问题 -->
+    <!-- 启动页主题 -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <!-- 【完美过渡核心 2】原生开屏的第一眼背景色 -->
-        <item name="windowSplashScreenBackground">#f8fafc</item>
-        
-        <!-- 设置启动图标（可选） -->
-        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
-        
-        <!-- 指定开屏结束后切换到的主主题 -->
-        <item name="postSplashScreenTheme">@style/AppTheme</item>
-        
-        <!-- 设置动画时长 -->
-        <item name="windowSplashScreenAnimationDuration">200</item>
+        <!-- 保持高清全屏图 -->
+        <item name="android:background">@drawable/splash</item>
+        <!-- 隐藏系统自带模糊图标 -->
+        <item name="windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+        <!-- 衔接目标主题 -->
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
+        <!-- 【防闪屏核心 2】将原生底层的过度动画时长置零 -->
+        <item name="windowSplashScreenAnimationDuration">0</item>
     </style>
 </resources>

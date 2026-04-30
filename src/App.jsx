@@ -95,14 +95,15 @@ useEffect(() => {
   const hideNativeSplash = async () => {
     try {
       if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
-        await SplashScreen.hide();
+        // 【防闪屏核心 3】传入 fadeOutDuration: 0，干掉 Capacitor 默认的渐隐，实现“瞬间交接”
+        await SplashScreen.hide({ fadeOutDuration: 0 });
       }
     } catch (e) {
       console.warn("Native splash hide failed", e);
     }
   };
   hideNativeSplash();
-}, []); // <-- 严格使用空依赖数组
+}, []);
 
 // 2. 处理前端 DOM 开屏动画 (global-splash)
 useEffect(() => {
