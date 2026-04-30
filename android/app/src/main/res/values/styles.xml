@@ -1,29 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 基础应用主题 -->
+    <!-- 1. 恢复最原始的基础主题 -->
     <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
         <item name="colorPrimary">@color/colorPrimary</item>
         <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
         <item name="colorAccent">@color/colorAccent</item>
     </style>
 
-    <!-- 支持昼夜模式切换的主题 -->
+    <!-- 2. 恢复昼夜模式支持（彻底修复太阳/月亮切换失效） -->
     <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
-        <!-- 【防闪屏核心 1】给透明的 WebView 垫上与你前端开屏一致的底色 -->
+        <!-- 防闪屏垫背色：无缝衔接前端的 #f8fafc -->
         <item name="android:windowBackground">#f8fafc</item>
     </style>
 
-    <!-- 启动页主题 -->
+    <!-- 3. 恢复原始的高清开屏图配置 -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <!-- 保持高清全屏图 -->
+        <!-- 找回原本的高清全屏图片，解决模糊与丢失问题 -->
         <item name="android:background">@drawable/splash</item>
-        <!-- 隐藏系统自带模糊图标 -->
-        <item name="windowSplashScreenAnimatedIcon">@android:color/transparent</item>
-        <!-- 衔接目标主题 -->
+        <!-- 无缝交接核心：启动后切回 NoActionBar 主题 -->
         <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
-        <!-- 【防闪屏核心 2】将原生底层的过度动画时长置零 -->
-        <item name="windowSplashScreenAnimationDuration">0</item>
     </style>
 </resources>
