@@ -284,15 +284,8 @@ export const chatWithPortfolioAI = async (settings, portfolioStats, chatHistory,
     ? `\n【今日实时大盘与基准行情】\n` + marketData.map(m => `- ${m.name}: ${m.price} (${m.change > 0 ? '+' : ''}${(m.percent * 100).toFixed(2)}%)`).join('\n')
     : '\n【今日实时大盘与基准行情】\n大盘数据未获取。';
 
+  // 【核心升级：废弃前置盲搜，改为 Agent 自主决策调用】
   let searchContext = "";
-  // 【关键修改2】只有当 useWebSearch 为 true 时，才调用 Tavily
-  if (useWebSearch && provider !== 'gemini' && settings.tavilyApiKey) {
-      // 聊天框开启 "general" (通用模式)，不限制天数和新闻，方便查询金融百科和研报
-      const searchRes = await fetchTavilySearch(settings.tavilyApiKey, newMessage, "general");
-      if (searchRes) {
-          searchContext = `\n【实时联网搜索结果 (来自 Tavily Search)】\n针对用户的问题，系统自动在互联网上检索到了以下最新资料，请务必基于这些真实数据进行判断，绝不允许自己捏造新闻：\n${searchRes}\n`;
-      }
-  }
 
   const systemPrompt = `
 你是一个极其严谨、冷酷且只认数据的【量化交易执行引擎】。今天是 ${todayStr}。
@@ -371,24 +364,87 @@ ${activeFundsDetail}
             { role: 'user', content: newMessage }
         ];
 
+        // 识别纯推理模型(如 R1)，这类模型底层不支持 tools 参数
+        const isReasoner = targetModel.toLowerCase().includes('reasoner') || targetModel.toLowerCase().includes('r1');
+
         body = {
             model: targetModel,
             messages: openaiMessages,
-            // 【优化2】DeepSeek 聊天温度微调至 0.2
             temperature: 0.2,
             top_p: 0.2,
             max_tokens: 8192,
-            thinking: { type: "enabled" },
-            reasoning_effort: "high"
+            ...(isReasoner ? {} : { thinking: { type: "enabled" }, reasoning_effort: "high" })
         };
+
+        // 🌟 Agent 注册搜索工具 (仅当非纯推理模型时)
+        if (useWebSearch && settings.tavilyApiKey && !isReasoner) {
+            body.tools = [{
+                type: "function",
+                function: {
+                    name: "tavily_search",
+                    description: "当需要查询具体基金近况、实时宏观经济、股市债市行情等最新外部信息时调用。",
+                    parameters: {
+                        type: "object",
+                        properties: { query: { type: "string", description: "精准的搜索关键词，例如 '019354基金 最新利好利空'" } },
+                        required: ["query"]
+                    }
+                }
+            }];
+        }
     }
 
-    const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-    const data = await response.json();
+    let response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+    let data = await response.json();
     
     if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-    if (data.message && !data.choices) throw new Error(data.message); 
-    
+    if (data.message && !data.choices) throw new Error(data.message);
+
+    // 🌟 拦截解析：如果 AI 决定自主调用搜索工具 (支持并发多重搜索)
+    if (provider !== 'gemini' && data.choices && data.choices[0].message.tool_calls) {
+        const responseMsg = data.choices[0].message;
+        
+        // 1. 将包含 tool_calls 的原话完整压入上下文 (API 强制红线)
+        body.messages.push(responseMsg);
+        
+        // 2. 遍历 AI 发出的所有搜索指令 (例如同时搜大盘和单只基金)
+        for (const toolCall of responseMsg.tool_calls) {
+            if (toolCall.function.name === 'tavily_search') {
+                try {
+                    const args = JSON.parse(toolCall.function.arguments);
+
+                    console.log(`🔥 [系统监控] AI 觉得知识不够，正在自主调用搜索！它自己想出来的搜索词是:【${args.query}】`);
+                    // 执行搜索
+                    const searchRes = await fetchTavilySearch(settings.tavilyApiKey, args.query, "general");
+                    
+                    // 3. 将每一个搜索结果严格按 tool_call_id 压入上下文
+                    body.messages.push({
+                        role: "tool",
+                        tool_call_id: toolCall.id,
+                        name: "tavily_search",
+                        content: searchRes ? `【联网检索结果：${args.query}】\n${searchRes}` : "未检索到相关资讯"
+                    });
+                } catch (e) {
+                    // 防错兜底：如果解析失败，也必须强行回传一个空结果，否则 API 会报错
+                    body.messages.push({
+                        role: "tool",
+                        tool_call_id: toolCall.id,
+                        name: "tavily_search",
+                        content: "搜索工具执行失败，请基于现有知识回答。"
+                    });
+                }
+            }
+        }
+        
+        delete body.tools; // 移除 tools，强制 AI 根据刚搜回来的所有结果进行最终输出
+        
+        // 4. 发起包含所有搜索结果的二次请求
+        response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+        data = await response.json();
+        
+        if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+        if (data.message && !data.choices) throw new Error(data.message);
+    }
+
     if (provider === 'gemini') {
         if (!data.candidates || data.candidates.length === 0) {
             if (data.promptFeedback && data.promptFeedback.blockReason) {

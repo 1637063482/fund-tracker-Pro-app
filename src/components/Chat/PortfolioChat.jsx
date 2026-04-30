@@ -118,15 +118,14 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user }) =>
         </span>
       </button>
 
-      {/* 【全新升级】沉浸式居中遮罩与超大聊天面板 */}
+      {/* 【全新升级】移动端全屏沉浸，PC端优雅悬浮 */}
       <div 
-        className={`fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/60 backdrop-blur-sm transition-all duration-300 ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-        onClick={() => setIsOpen(false)} // 点击遮罩层关闭
+        className={`fixed inset-0 z-50 flex items-center justify-center sm:p-6 bg-slate-900/60 backdrop-blur-sm transition-all duration-300 ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        onClick={() => setIsOpen(false)}
       >
         <div 
-          // 宽度提升至 max-w-3xl (约768px)，高度提升至 85vh，圆角变大
-          className={`w-full max-w-3xl h-[90vh] sm:h-[85vh] bg-white dark:bg-slate-800 rounded-3xl shadow-2xl flex flex-col overflow-hidden transform transition-all duration-300 border border-slate-100 dark:border-slate-700 ${isOpen ? 'scale-100 translate-y-0' : 'scale-95 translate-y-8'}`}
-          onClick={e => e.stopPropagation()} // 阻止点击事件冒泡到遮罩层
+          className={`w-full h-[100dvh] sm:h-[85vh] sm:max-w-3xl bg-white dark:bg-slate-800 sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden transform transition-all duration-300 sm:border border-slate-100 dark:border-slate-700 ${isOpen ? 'scale-100 translate-y-0' : 'sm:scale-95 translate-y-full sm:translate-y-8'}`}
+          onClick={e => e.stopPropagation()}
         >
           
           {/* 头部 */}
@@ -142,14 +141,14 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user }) =>
           </div>
 
           {/* 消息列表区 */}
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 bg-slate-50 dark:bg-slate-900 custom-scrollbar relative">
+          <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-5 bg-slate-50 dark:bg-slate-900 custom-scrollbar relative">
             {messages.map((msg, idx) => (
               <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`flex max-w-[90%] sm:max-w-[85%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                  <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm ${msg.role === 'user' ? 'bg-blue-100 text-blue-600 ml-3' : 'bg-indigo-100 text-indigo-600 mr-3'}`}>
-                    {msg.role === 'user' ? <User size={18} /> : <Bot size={20} />}
+                <div className={`flex max-w-[95%] sm:max-w-[85%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                  <div className={`w-7 h-7 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm mt-0.5 sm:mt-0 ${msg.role === 'user' ? 'bg-blue-100 text-blue-600 ml-2 sm:ml-3' : 'bg-indigo-100 text-indigo-600 mr-2 sm:mr-3'}`}>
+                    {msg.role === 'user' ? <User size={16} className="sm:w-[18px] sm:h-[18px]" /> : <Bot size={18} className="sm:w-[20px] sm:h-[20px]" />}
                   </div>
-                  <div className={`px-5 py-3.5 text-sm sm:text-base shadow-sm ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm' : 'bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl rounded-tl-sm'}`}>
+                  <div className={`px-3.5 py-2.5 sm:px-5 sm:py-3.5 text-[15px] sm:text-base shadow-sm ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm' : 'bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl rounded-tl-sm'}`}>
                     {msg.role === 'user' ? msg.content : renderMarkdown(msg.content)}
                   </div>
                 </div>
