@@ -90,40 +90,55 @@ export default function App() {
   const targetRateTimeoutRef = useRef(null);
 
  
-// 1. 瞬间隐藏原生 Android 启动页：只需在引擎挂载时执行一次
-useEffect(() => {
-  const hideNativeSplash = async () => {
-    try {
-      if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
-        // 【防闪屏核心 3】传入 fadeOutDuration: 0，干掉 Capacitor 默认的渐隐，实现“瞬间交接”
-        await SplashScreen.hide({ fadeOutDuration: 0 });
-      }
-    } catch (e) {
-      console.warn("Native splash hide failed", e);
+// ==========================================
+  // 【核心修复区 1】恢复昼夜模式的 CSS 类名切换驱动
+  // ==========================================
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
     }
-  };
-  hideNativeSplash();
-}, []);
+  }, [theme]);
 
-// 2. 处理前端 DOM 开屏动画 (global-splash)
-useEffect(() => {
-  const ultimateFallbackTimer = setTimeout(() => {
-    removeGlobalSplash();
-  }, 5000);
+  // ==========================================
+  // 【核心修复区 2】瞬间隐藏原生 Android 启动页 (只挂载执行一次)
+  // ==========================================
+  useEffect(() => {
+    const hideNativeSplash = async () => {
+      try {
+        if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
+          // 【防闪屏核心 3】传入 fadeOutDuration: 0，干掉 Capacitor 默认的渐隐，实现“瞬间交接”
+          await SplashScreen.hide({ fadeOutDuration: 0 });
+        }
+      } catch (e) {
+        console.warn("Native splash hide failed", e);
+      }
+    };
+    hideNativeSplash();
+  }, []);
 
-  if (!authLoading) {
-    const MIN_SPLASH_TIME = 600; 
-    const timeElapsed = window.__splashStartTime ? (Date.now() - window.__splashStartTime) : 0;
-    const delay = Math.max(0, MIN_SPLASH_TIME - timeElapsed);
-
-    setTimeout(() => {
+  // ==========================================
+  // 【核心修复区 3】处理前端 DOM 开屏动画 (跟随 authLoading)
+  // ==========================================
+  useEffect(() => {
+    const ultimateFallbackTimer = setTimeout(() => {
       removeGlobalSplash();
-      clearTimeout(ultimateFallbackTimer);
-    }, delay);
-  }
+    }, 5000);
 
-  return () => clearTimeout(ultimateFallbackTimer);
-}, [authLoading]); // <-- 专门监听鉴权状态
+    if (!authLoading) {
+      const MIN_SPLASH_TIME = 600; 
+      const timeElapsed = window.__splashStartTime ? (Date.now() - window.__splashStartTime) : 0;
+      const delay = Math.max(0, MIN_SPLASH_TIME - timeElapsed);
+
+      setTimeout(() => {
+        removeGlobalSplash();
+        clearTimeout(ultimateFallbackTimer);
+      }, delay);
+    }
+
+    return () => clearTimeout(ultimateFallbackTimer);
+  }, [authLoading]);
 
   const handleSyncToWorker = async () => {
     if (!settings.cfWorkerUrl || !settings.cfWorkerSecret) {

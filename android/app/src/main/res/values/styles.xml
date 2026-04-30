@@ -1,31 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
+
 <resources>
-    <!-- 1. 基础应用主题 -->
+
+    <!-- 1. 恢复最原始的基础主题 -->
+
     <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
+
         <item name="colorPrimary">@color/colorPrimary</item>
+
         <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+
         <item name="colorAccent">@color/colorAccent</item>
+
     </style>
 
-    <!-- 2. 彻底释放原生暗黑模式的控制权，规避键盘/越界漏光 -->
+
+
+    <!-- 2. 恢复昼夜模式支持（彻底修复太阳/月亮切换失效） -->
+
     <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
+
         <item name="windowActionBar">false</item>
+
         <item name="windowNoTitle">true</item>
-        <item name="android:background">@null</item>
+
+        <!-- 防闪屏垫背色：无缝衔接前端的 #f8fafc -->
+
+        <item name="android:windowBackground">#f8fafc</item>
+
     </style>
 
-    <!-- 3. 完美的启动页主题 -->
+
+
+    <!-- 3. 恢复原始的高清开屏图配置 -->
+
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <!-- 保持你的高清开屏全屏图 -->
+
+        <!-- 找回原本的高清全屏图片，解决模糊与丢失问题 -->
+
         <item name="android:background">@drawable/splash</item>
-        
-        <!-- 隐藏 Android 12 自带的中心干扰图标，防止双图重叠 -->
-        <item name="windowSplashScreenAnimatedIcon">@android:color/transparent</item>
-        
-        <!-- 启动结束后，平滑移交给正常的无动作栏主题 -->
+
+        <!-- 无缝交接核心：启动后切回 NoActionBar 主题 -->
+
         <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
-        
-        <!-- 抹杀系统级延迟动画，实现与前端 DOM 动画的瞬间无缝交接 -->
-        <item name="windowSplashScreenAnimationDuration">0</item>
+
     </style>
+
 </resources>
