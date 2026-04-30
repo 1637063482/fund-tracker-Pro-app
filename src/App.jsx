@@ -1505,7 +1505,7 @@ export default function App() {
             </div>
           )}
            {/* 👇 加上这一块：将悬浮聊天框挂载到全局 */}
-          <PortfolioChat portfolioStats={portfolioStats} settings={settings} marketData={marketData} />
+          <PortfolioChat portfolioStats={portfolioStats} settings={settings} marketData={marketData} user={user} />
 
         </div>
       )}

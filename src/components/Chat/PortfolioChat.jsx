@@ -2,8 +2,12 @@ import React, { useState, useRef, useEffect } from 'react';
 // 【关键修改1】引入 Globe 图标
 import { MessageSquare, X, Send, RefreshCw, Trash2, Bot, User, Sparkles, Globe } from 'lucide-react';
 import { chatWithPortfolioAI } from '../../utils/ai';
+// 【新增】引入 Firebase 数据库组件
+import { doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { db, appId } from '../../config/firebase';
 
-export const PortfolioChat = ({ portfolioStats, settings, marketData }) => {
+// 【修改】接收 user 参数
+export const PortfolioChat = ({ portfolioStats, settings, marketData, user }) => {
   const [isOpen, setIsOpen] = useState(false);
   // 【关键修改2】新增联网搜索的用户开关状态（默认开启）
   const[useWebSearch, setUseWebSearch] = useState(true);
@@ -23,6 +27,21 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData }) => {
   // 【关键修复】把 isOpen 加入依赖，并在打开聊天框时也触发一次滚动
   useEffect(() => { scrollToBottom(); }, [messages, isLoading, isOpen]);
 
+  // 【新增】组件加载时，实时监听云端聊天记录
+  useEffect(() => {
+    if (!user || !db) return;
+    const chatRef = doc(db, 'artifacts', appId, 'users', user.uid, 'chat', 'history');
+    const unsubscribe = onSnapshot(chatRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.messages && data.messages.length > 0) {
+          setMessages(data.messages);
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, [user]);
+
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
 
@@ -32,14 +51,30 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData }) => {
     setMessages(newMessages);
     setIsLoading(true);
 
+    // 【新增】用户发消息瞬间，立刻同步上云
+    if (user && db) {
+      setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'chat', 'history'), { messages: newMessages }, { merge: true }).catch(e => console.error(e));
+    }
+
     try {
       // 过滤掉第一条欢迎语，只把真实对话发给 AI
       const chatHistory = newMessages.filter((_, idx) => idx > 0 && idx < newMessages.length - 1);
        // 【关键修改3】将 useWebSearch 状态传给底层引擎
       const reply = await chatWithPortfolioAI(settings, portfolioStats, chatHistory, userMessage, marketData, useWebSearch);
-      setMessages([...newMessages, { role: 'assistant', content: reply }]);
+      
+      const finalMessages =[...newMessages, { role: 'assistant', content: reply }];
+      setMessages(finalMessages);
+      
+      // 【新增】AI 回复完毕后，把完整的上下文同步上云
+      if (user && db) {
+        setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'chat', 'history'), { messages: finalMessages }, { merge: true }).catch(e => console.error(e));
+      }
     } catch (e) {
-      setMessages([...newMessages, { role: 'assistant', content: `❌ 抱歉，连接大脑失败：${e.message}` }]);
+      const errorMessages =[...newMessages, { role: 'assistant', content: `❌ 抱歉，连接大脑失败：${e.message}` }];
+      setMessages(errorMessages);
+      if (user && db) {
+        setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'chat', 'history'), { messages: errorMessages }, { merge: true }).catch(e => console.error(e));
+      }
     } finally {
       setIsLoading(false);
     }
@@ -48,7 +83,12 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData }) => {
   // 一键清空记忆，防止幻觉
   const handleClear = () => {
     if (window.confirm("确定要开启新对话吗？这会清空之前的聊天上下文，防止 AI 产生幻觉。")) {
-      setMessages([{ role: 'assistant', content: '记忆已清空。我已经重新加载了您的最新账本底表，我们重新开始吧！' }]);
+      const resetMsg =[{ role: 'assistant', content: '记忆已清空。我已经重新加载了您的最新账本底表，我们重新开始吧！' }];
+      setMessages(resetMsg);
+      // 【新增】同时清空云端记忆
+      if (user && db) {
+        setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'chat', 'history'), { messages: resetMsg }, { merge: true }).catch(e => console.error(e));
+      }
     }
   };
 
