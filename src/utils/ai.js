@@ -17,11 +17,10 @@ const formatCashFlows = (transactions) => {
   }).join('\n');
 };
 
-// Tavily 搜索引擎调用函数 (支持 新闻/通用 双模式切换)
+// 1. Tavily 搜索引擎调用函数 (支持 新闻/通用 双模式切换)
 const fetchTavilySearch = async (apiKey, query, searchType = "news") => {
   if (!apiKey) return "";
   try {
-    // 基础参数
     const bodyPayload = {
         api_key: apiKey,
         query: query,
@@ -29,8 +28,6 @@ const fetchTavilySearch = async (apiKey, query, searchType = "news") => {
         include_answer: false,
         max_results: 5 
     };
-    
-    // 🌟 智能开关：如果是新闻模式，加上时效锁；如果是通用模式，放开限制搜全网
     if (searchType === "news") {
         bodyPayload.topic = "news";
         bodyPayload.days = 3;
@@ -41,7 +38,6 @@ const fetchTavilySearch = async (apiKey, query, searchType = "news") => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(bodyPayload)
     });
-    
     const data = await res.json();
     if (data.results && data.results.length > 0) {
       return data.results.map(r => `【标题】${r.title}\n【摘要】${r.content}`).join('\n\n');
@@ -51,6 +47,36 @@ const fetchTavilySearch = async (apiKey, query, searchType = "news") => {
     console.warn("Tavily 搜索失败:", e);
     return "";
   }
+};
+
+// 2. Exa.ai 搜索引擎 (深度研报与机构博客提取)
+const fetchExaSearch = async (apiKey, query) => {
+  if (!apiKey) return "";
+  try {
+    const res = await fetch('https://api.exa.ai/search', {
+      method: 'POST',
+      headers: { 'accept': 'application/json', 'content-type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ query: query, numResults: 3, useAutoprompt: true, contents: { text: { maxCharacters: 1500 } } })
+    });
+    const data = await res.json();
+    if (data.results && data.results.length > 0) return data.results.map(r => `【深度文献】${r.title}\n【核心提取】${r.text}`).join('\n\n');
+    return "";
+  } catch (e) { console.warn("Exa 搜索失败:", e); return ""; }
+};
+
+// 3. Serper.dev 搜索引擎 (终极兜底 - Google原生)
+const fetchSerperSearch = async (apiKey, query) => {
+  if (!apiKey) return "";
+  try {
+    const res = await fetch('https://google.serper.dev/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-KEY': apiKey },
+      body: JSON.stringify({ q: query, num: 4 })
+    });
+    const data = await res.json();
+    if (data.organic && data.organic.length > 0) return data.organic.map(r => `【网页标题】${r.title}\n【摘要】${r.snippet}`).join('\n\n');
+    return "";
+  } catch (e) { console.warn("Serper 搜索失败:", e); return ""; }
 };
 
 // ============================================================================
@@ -291,7 +317,7 @@ export const chatWithPortfolioAI = async (settings, portfolioStats, chatHistory,
 你是一个极其严谨、冷酷且只认数据的【量化交易执行引擎】。今天是 ${todayStr}。
 你的唯一职责是：基于我提供的【真实账本数据】和外部搜索信息，直接下达操作指令。
 
-【🚨 绝对不可触碰的四条红线（防幻觉强制协议）】
+【🚨 绝对不可触碰的七条红线（防幻觉强制协议）】
 1. 绝不捏造账本数据：你看到的【操作流水】就是全部！绝对不允许凭空捏造“资金即将到期”等任何不存在的事件！公募基金没有到期日！
 2. 绝不瞎编大盘点位：必须严格读取下方的【今日实时大盘与基准行情】或搜索结果，绝不凭记忆编造。
 3. 绝不推荐虚假代码：推荐任何资产必须是市场上真实存在的，必须附带正确的6位数代码，不知道就明确回答不知道。
@@ -376,20 +402,52 @@ ${activeFundsDetail}
             ...(isReasoner ? {} : { thinking: { type: "enabled" }, reasoning_effort: "high" })
         };
 
-        // 🌟 Agent 注册搜索工具 (仅当非纯推理模型时)
-        if (useWebSearch && settings.tavilyApiKey && !isReasoner) {
-            body.tools = [{
+        // 🌟 Agent 矩阵工具池注册 (赋予 AI 根据问题类型自动拔枪的能力)
+        if (useWebSearch && !isReasoner) {
+            body.tools = [];
+            if (settings.tavilyApiKey) {
+                body.tools.push({
+                    type: "function",
+                    function: {
+                        name: "tavily_search",
+                        description: "【快讯引擎】当需要查询实时宏观经济、股市债市突发新闻、快讯、个股/基金当日涨跌原因时调用。",
+                        parameters: { type: "object", properties: { query: { type: "string", description: "例如 '今日 A股 暴跌原因'" } }, required: ["query"] }
+                    }
+                });
+            }
+            if (settings.exaApiKey) {
+                body.tools.push({
+                    type: "function",
+                    function: {
+                        name: "exa_research",
+                        description: "【深度引擎】当需要深挖特定基金经理研报、长文、重大会议定性定调分析、机构看空看多逻辑时调用。",
+                        parameters: { type: "object", properties: { query: { type: "string", description: "例如 '2026年 央行流动性 机构研报分析'" } }, required: ["query"] }
+                    }
+                });
+                // 🌟 新增：赋予 AI 记账权限
+            body.tools.push({
                 type: "function",
                 function: {
-                    name: "tavily_search",
-                    description: "当需要查询具体基金近况、实时宏观经济、股市债市行情等最新外部信息时调用。",
-                    parameters: {
-                        type: "object",
-                        properties: { query: { type: "string", description: "精准的搜索关键词，例如 '019354基金 最新利好利空'" } },
-                        required: ["query"]
+                    name: "update_ledger",
+                    description: "【交易引擎】当用户明确表示已经买入或卖出某只基金，需要系统帮他自动记账时调用此工具。",
+                    parameters: { 
+                        type: "object", 
+                        properties: { 
+                            fundCode: { type: "string", description: "基金的6位数代码" },
+                            fundName: { type: "string", description: "基金的名称" },
+                            amount: { type: "number", description: "操作的绝对值金额（正数）" },
+                            actionType: { 
+    type: "string", 
+    enum: ["buy", "sell", "delete"], 
+    description: "操作类型：买入(buy)、卖出(sell)，或者当用户明确要求撤销、删除某笔记录时使用(delete)" 
+}
+                        }, 
+                        required: ["fundCode", "amount", "actionType"] 
                     }
                 }
-            }];
+            });
+            }
+            if (body.tools.length === 0) delete body.tools;
         }
     }
 
@@ -406,32 +464,51 @@ ${activeFundsDetail}
         // 1. 将包含 tool_calls 的原话完整压入上下文 (API 强制红线)
         body.messages.push(responseMsg);
         
-        // 2. 遍历 AI 发出的所有搜索指令 (例如同时搜大盘和单只基金)
+        // 2. 遍历 AI 发出的所有搜索指令
         for (const toolCall of responseMsg.tool_calls) {
-            if (toolCall.function.name === 'tavily_search') {
+            const toolName = toolCall.function.name;
+            if (toolName === 'tavily_search' || toolName === 'exa_research') {
                 try {
                     const args = JSON.parse(toolCall.function.arguments);
-
-                    console.log(`🔥 [系统监控] AI 觉得知识不够，正在自主调用搜索！它自己想出来的搜索词是:【${args.query}】`);
-                    // 执行搜索
-                    const searchRes = await fetchTavilySearch(settings.tavilyApiKey, args.query, "general");
+                    console.log(`🔥 [Agent 调度] AI 主动激活武器库！使用【${toolName}】，发射检索词:【${args.query}】`);
                     
-                    // 3. 将每一个搜索结果严格按 tool_call_id 压入上下文
+                    let searchRes = "";
+                    if (toolName === 'exa_research') {
+                        searchRes = await fetchExaSearch(settings.exaApiKey, args.query);
+                    } else {
+                        searchRes = await fetchTavilySearch(settings.tavilyApiKey, args.query, "general");
+                    }
+                    
+                    // 🛡️ 终极防线：如果主干武器卡壳(额度耗尽)，由 Serper 盲狙兜底
+                    if (!searchRes && settings.serperApiKey) {
+                        console.log(`⚠️ [Agent 降级] 主节点超时或无数据，触发 Serper 原生兜底！`);
+                        searchRes = await fetchSerperSearch(settings.serperApiKey, args.query);
+                    }
+
+                    // 3. 将结果交还给大模型
                     body.messages.push({
                         role: "tool",
                         tool_call_id: toolCall.id,
-                        name: "tavily_search",
-                        content: searchRes ? `【联网检索结果：${args.query}】\n${searchRes}` : "未检索到相关资讯"
+                        name: toolName,
+                        content: searchRes ? `【矩阵检索返回 (${toolName})】\n${searchRes}` : "未检索到相关资讯，请基于现有知识推理"
                     });
                 } catch (e) {
-                    // 防错兜底：如果解析失败，也必须强行回传一个空结果，否则 API 会报错
+                    // 🚨 探针：把真正的报错原因和 AI 吐出的乱码参数打印到控制台
+                    console.error(`❌ [Agent 崩溃] 武器【${toolName}】卡壳！报错原因:`, e);
+                    console.error(`🩸 罪魁祸首 (AI 原生参数):`, toolCall.function.arguments);
+                    
                     body.messages.push({
                         role: "tool",
                         tool_call_id: toolCall.id,
-                        name: "tavily_search",
-                        content: "搜索工具执行失败，请基于现有知识回答。"
+                        name: toolName,
+                        content: "外部接口执行异常，请忽略。"
                     });
                 }
+            }else if (toolName === 'update_ledger') {
+                // 🌟 核心突破：直接中断 AI 思考链路，将提取出的交易参数抛回给前端 React 组件渲染 UI
+                const args = JSON.parse(toolCall.function.arguments);
+                console.log(`🔥 [Agent 调度] AI 触发自主记账！参数:`, args);
+                return { type: 'ACTION_REQUIRED', payload: args }; 
             }
         }
         

@@ -20,6 +20,8 @@ export const ProxySettingsModal = ({ settings, onSave, onClose }) => {
 
   // 【致命修复】补回之前重构时漏掉的 4 个关键状态声明！
   const[tavilyKey, setTavilyKey] = useState(settings.tavilyApiKey || '');
+  const[exaKey, setExaKey] = useState(settings.exaApiKey || '');       // 🌟 新增
+  const[serperKey, setSerperKey] = useState(settings.serperApiKey || ''); // 🌟 新增
   const[ntfyTopic, setNtfyTopic] = useState(settings.ntfyTopic || 'fund_tracker_my_secret_123');
   const [cfWorkerUrl, setCfWorkerUrl] = useState(settings.cfWorkerUrl || '');
   const [cfWorkerSecret, setCfWorkerSecret] = useState(settings.cfWorkerSecret || '');
@@ -45,6 +47,8 @@ export const ProxySettingsModal = ({ settings, onSave, onClose }) => {
       siliconflowApiKey: siliconflowKey,
       siliconflowModel: siliconflowModel,
       tavilyApiKey: tavilyKey,
+      exaApiKey: exaKey,       // 🌟 新增
+      serperApiKey: serperKey, // 🌟 新增
       ntfyTopic: ntfyTopic,
       cfWorkerUrl: cfWorkerUrl,
       cfWorkerSecret: cfWorkerSecret
@@ -98,20 +102,30 @@ export const ProxySettingsModal = ({ settings, onSave, onClose }) => {
                  </p>
               </div>
 
-              {/* Tavily 联网搜索插件配置 */}
+              {/* 矩阵联网检索配置 (多引擎智能路由) */}
               <div className="space-y-3 bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-xl border border-indigo-100 dark:border-indigo-800/50">
                  <label className="text-sm font-bold text-indigo-800 dark:text-indigo-300 flex items-center justify-between">
-                   <span className="flex items-center"><Cloud size={16} className="mr-1.5 text-indigo-500"/> Tavily 联网搜索插件 (DeepSeek 必备)</span>
+                   <span className="flex items-center"><Cloud size={16} className="mr-1.5 text-indigo-500"/> 🌐 矩阵联网检索配置 (双引擎+兜底)</span>
                  </label>
-                 <input 
-                    type="password"
-                    value={tavilyKey} 
-                    onChange={e => setTavilyKey(e.target.value)} 
-                    placeholder="输入 Tavily API Key (tvly-...)" 
-                    className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-slate-800 dark:text-slate-200 shadow-inner" 
-                 />
+                 <div className="space-y-2">
+                   <input 
+                      type="password" value={exaKey} onChange={e => setExaKey(e.target.value)} 
+                      placeholder="Exa.ai API Key (主节点A: 专攻深度研报与机构博客)" 
+                      className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-700 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-slate-800 dark:text-slate-200 shadow-inner" 
+                   />
+                   <input 
+                      type="password" value={tavilyKey} onChange={e => setTavilyKey(e.target.value)} 
+                      placeholder="Tavily API Key (主节点B: 专攻突发新闻与宏观快讯)" 
+                      className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-700 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-slate-800 dark:text-slate-200 shadow-inner" 
+                   />
+                   <input 
+                      type="password" value={serperKey} onChange={e => setSerperKey(e.target.value)} 
+                      placeholder="Serper.dev API Key (终极兜底: Google 搜索直连)" 
+                      className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-700 rounded-lg text-xs sm:text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-slate-800 dark:text-slate-200 shadow-inner" 
+                   />
+                 </div>
                  <p className="text-[11px] text-indigo-600 dark:text-indigo-400 opacity-80 leading-relaxed mt-1">
-                   由于 DeepSeek 不具备原生搜索能力，填入此 Key 后，系统将在调用 DeepSeek 前自动通过 Tavily 抓取全球最新资讯喂给 AI。注册 tavily.com 每月免费 1000 次搜索。
+                   构建投行级信息漏斗：系统将根据问题性质，自动调用 Exa (查深度) 或 Tavily (查快讯)。当主节点触发频控或宕机时，自动无感降级至 Serper 兜底。
                  </p>
               </div>
 

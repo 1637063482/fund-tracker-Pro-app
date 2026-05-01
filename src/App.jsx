@@ -51,11 +51,37 @@ export default function App() {
     aiModel: '',
     ntfyTopic: 'fund_tracker_my_secret_123',
     idleFunds: 0,
-    tavilyApiKey: '', // 【新增】Tavily 搜索引擎 API Key
-    cfWorkerUrl: 'https://fund-tracker-worker.wh1637063482.workers.dev', 
+    tavilyApiKey: '', 
+    exaApiKey: '',    // 🌟 新增：Exa 搜索引擎 API Key (深度研报)
+    serperApiKey: '', // 🌟 新增：Serper 搜索引擎 API Key (终极兜底)
+    cfWorkerUrl: 'https://fund-tracker-worker.wh1637063482.workers.dev',
     cfWorkerSecret: 'my_super_password_888'
   });
   const[theme, setTheme] = useState('light'); 
+
+  // ==========================================
+  // 🌟 新增：全局法定节假日初始化引擎
+  // ==========================================
+  useEffect(() => {
+    const initHolidayData = async () => {
+      const targetYear = new Date().getFullYear();
+      const cacheKey = `HOLIDAY_CN_${targetYear}`;
+      const cached = localStorage.getItem(cacheKey);
+
+      if (!cached) {
+        try {
+          const res = await fetch(`https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/${targetYear}.json`);
+          if (res.ok) {
+            const data = await res.json();
+            localStorage.setItem(cacheKey, JSON.stringify(data.days || []));
+          }
+        } catch (e) {
+          console.warn("前端日历同步失败", e);
+        }
+      }
+    };
+    initHolidayData();
+  }, []);
   
   const [marketData, setMarketData] = useState([]); 
   const[isFetchingMarket, setIsFetchingMarket] = useState(false);
@@ -1022,7 +1048,8 @@ export default function App() {
         <PortfolioAnalysisModal
            portfolioStats={portfolioStats}
            settings={settings}
-           marketData={marketData} // <--- 必须确保有这一行
+           marketData={marketData} 
+           fundProfiles={fundProfiles} // 🌟 新增：注入全盘基金底层画像数据
            onClose={() => setPortfolioModalOpen(false)}
         />
       )}

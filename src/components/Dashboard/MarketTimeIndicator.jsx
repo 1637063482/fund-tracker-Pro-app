@@ -21,9 +21,35 @@ export const MarketTimeIndicator = () => {
     const hours = date.getHours();
     const mins = date.getMinutes();
     const currentTimeInMinutes = hours * 60 + mins;
+    const targetYear = date.getFullYear();
 
-    if (day === 0 || day === 6) return { status: '休市中', isTrading: false, countdown: null };
+    // 🌟 1. 节假日/周末终极拦截逻辑
+    let isHoliday = (day === 0 || day === 6);
+    
+    if (!isHoliday) {
+      try {
+        const cached = localStorage.getItem(`HOLIDAY_CN_${targetYear}`);
+        if (cached) {
+          const mm = String(date.getMonth() + 1).padStart(2, '0');
+          const dd = String(date.getDate()).padStart(2, '0');
+          const checkDateStr = `${targetYear}-${mm}-${dd}`;
+          
+          const holidayData = JSON.parse(cached);
+          const holiday = holidayData.find(h => h.date === checkDateStr);
+          if (holiday && holiday.isOffDay) {
+            isHoliday = true; // 命中法定休假日（如五一）
+          }
+        }
+      } catch (e) {
+        console.warn("节假日校验失败", e);
+      }
+    }
 
+    if (isHoliday) {
+      return { status: '节假日休市', isTrading: false, countdown: null };
+    }
+
+    // 🌟 2. 正常交易日的时段与倒计时逻辑 (保留你的全部精美UI逻辑)
     if (currentTimeInMinutes < 540) {
        return { status: '未开盘', isTrading: false, countdown: null };
     }
@@ -67,14 +93,14 @@ export const MarketTimeIndicator = () => {
          </div>
          
          <div className={`px-2.5 py-0.5 rounded-full text-xs xl:text-sm flex items-center border transition-colors duration-500 ${isTrading ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'}`}>
-           {isTrading && <div className="w-1.5 h-1.5 xl:w-2 xl:h-2 rounded-full bg-green-500 mr-1.5 shadow-[0_0_6px_rgba(34,197,94,0.6)]"></div>}
+           {isTrading && <div className="w-1.5 h-1.5 xl:w-2 xl:h-2 rounded-full bg-green-500 mr-1.5 shadow-[0_0_6px_rgba(34,197,94,0.6)] animate-pulse"></div>}
            {status}
          </div>
       </div>
       
       {countdown && (
         <div className={`flex items-center px-3 py-1 rounded-md text-xs xl:text-sm font-bold transition-all duration-500 ${urgent ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 shadow-sm' : 'text-amber-600 dark:text-amber-500'}`}>
-          <Bell className="mr-1 w-[14px] h-[14px] xl:w-[18px] xl:h-[18px] text-red-500" />
+          <Bell className={`mr-1 w-[14px] h-[14px] xl:w-[18px] xl:h-[18px] text-red-500 ${urgent ? 'animate-bounce' : ''}`} />
           {countdown}
         </div>
       )}
