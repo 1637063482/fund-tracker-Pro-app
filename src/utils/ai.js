@@ -18,22 +18,22 @@ const formatCashFlows = (transactions) => {
 };
 
 // 1. Tavily 搜索引擎调用函数 (支持 新闻/通用 双模式切换)
-const fetchTavilySearch = async (apiKey, query, searchType = "news") => {
+const fetchTavilySearch = async (apiKey, query, searchType = "news", settings = {}) => {
   if (!apiKey) return "";
   try {
-    const bodyPayload = {
-        api_key: apiKey,
-        query: query,
-        search_depth: "advanced",
-        include_answer: false,
-        max_results: 5 
-    };
-    if (searchType === "news") {
-        bodyPayload.topic = "news";
-        bodyPayload.days = 3;
+    const targetUrl = 'https://api.tavily.com/search';
+    const bodyPayload = { api_key: apiKey, query, search_depth: "advanced", max_results: 5 };
+    if (searchType === "news") { bodyPayload.topic = "news"; bodyPayload.days = 3; }
+
+    // 🌟 判定是否走代理
+    let fetchUrl = targetUrl;
+    if (settings.proxyMode === 'custom' && settings.customProxyUrl) {
+        fetchUrl = settings.customProxyUrl.includes('{{url}}') 
+            ? settings.customProxyUrl.replace('{{url}}', encodeURIComponent(targetUrl))
+            : settings.customProxyUrl + targetUrl;
     }
 
-    const res = await fetch('https://api.tavily.com/search', {
+    const res = await fetch(fetchUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(bodyPayload)
@@ -50,13 +50,21 @@ const fetchTavilySearch = async (apiKey, query, searchType = "news") => {
 };
 
 // 2. Exa.ai 搜索引擎 (深度研报与机构博客提取)
-const fetchExaSearch = async (apiKey, query) => {
+const fetchExaSearch = async (apiKey, query, settings = {}) => {
   if (!apiKey) return "";
   try {
-    const res = await fetch('https://api.exa.ai/search', {
+    const targetUrl = 'https://api.exa.ai/search';
+    let fetchUrl = targetUrl;
+    if (settings.proxyMode === 'custom' && settings.customProxyUrl) {
+        fetchUrl = settings.customProxyUrl.includes('{{url}}') 
+            ? settings.customProxyUrl.replace('{{url}}', encodeURIComponent(targetUrl))
+            : settings.customProxyUrl + targetUrl;
+    }
+
+    const res = await fetch(fetchUrl, {
       method: 'POST',
       headers: { 'accept': 'application/json', 'content-type': 'application/json', 'x-api-key': apiKey },
-      body: JSON.stringify({ query: query, numResults: 3, useAutoprompt: true, contents: { text: { maxCharacters: 1500 } } })
+      body: JSON.stringify({ query, numResults: 3, useAutoprompt: true, contents: { text: { maxCharacters: 1500 } } })
     });
     const data = await res.json();
     if (data.results && data.results.length > 0) return data.results.map(r => `【深度文献】${r.title}\n【核心提取】${r.text}`).join('\n\n');
@@ -474,9 +482,9 @@ ${activeFundsDetail}
                     
                     let searchRes = "";
                     if (toolName === 'exa_research') {
-                        searchRes = await fetchExaSearch(settings.exaApiKey, args.query);
+                        searchRes = await fetchExaSearch(settings.exaApiKey, args.query, settings); // 🌟 传入 settings
                     } else {
-                        searchRes = await fetchTavilySearch(settings.tavilyApiKey, args.query, "general");
+                        searchRes = await fetchTavilySearch(settings.tavilyApiKey, args.query, "general", settings); // 🌟 传入 settings
                     }
                     
                     // 🛡️ 终极防线：如果主干武器卡壳(额度耗尽)，由 Serper 盲狙兜底
