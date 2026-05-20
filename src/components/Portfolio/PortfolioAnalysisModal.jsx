@@ -5,9 +5,9 @@ import { calculatePortfolioXRay } from '../../utils/helpers';
 
 export const PortfolioAnalysisModal = ({ portfolioStats, settings, marketData, fundProfiles, onClose }) => {
   const [aiReport, setAiReport] = useState(null);
-  const [aiLoading, setAiLoading] = useState(false);
+  const[aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
-  const [isClosing, setIsClosing] = useState(false);
+  const[isClosing, setIsClosing] = useState(false);
 
   const [isPushing, setIsPushing] = useState(false);
   const [pushSuccess, setPushSuccess] = useState(false);
@@ -15,24 +15,35 @@ export const PortfolioAnalysisModal = ({ portfolioStats, settings, marketData, f
   // 控制 X-Ray 引擎是否启动的开关
   const [isXRayEnabled, setIsXRayEnabled] = useState(false);
   const [liveXRayProfiles, setLiveXRayProfiles] = useState({});
-  const [isXRayScanning, setIsXRayScanning] = useState(false);
+  const[isXRayScanning, setIsXRayScanning] = useState(false);
 
-  useEffect(() => {
+ useEffect(() => {
     if (!isXRayEnabled) return;
 
     const fetchRealTimeHoldings = async () => {
       setIsXRayScanning(true);
-      const activeFunds = portfolioStats?.computedFundsWithMetrics?.filter(f => f.currentValue > 0 && !f.isArchived && f.fundCode) || [];
+      const activeFunds = portfolioStats?.computedFundsWithMetrics?.filter(f => f.currentValue > 0 && !f.isArchived && f.fundCode) ||[];
       const newProfiles = {};
 
-      await Promise.all(activeFunds.map(async (fund) => {
+      // 🛡️ 串行请求：防止高频并发轰炸目标站
+      for (const fund of activeFunds) {
         try {
           const targetUrl = `https://danjuanfunds.com/djapi/fund/${fund.fundCode}`;
           let fetchUrl = settings.proxyMode === 'custom' && settings.customProxyUrl
               ? (settings.customProxyUrl.includes('{{url}}') ? settings.customProxyUrl.replace('{{url}}', encodeURIComponent(targetUrl)) : settings.customProxyUrl + targetUrl)
               : `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
 
-          const res = await fetch(fetchUrl);
+          // ⏱️ 设置 6 秒超时防卡死
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+          // 🚨 核心修复：加上 cache: 'no-store'，强行穿透 PWA 的 Service Worker 缓存层！
+          const res = await fetch(fetchUrl, { 
+            signal: controller.signal,
+            cache: 'no-store' 
+          });
+          clearTimeout(timeoutId);
+
           const data = await res.json();
           let actualData = settings.proxyMode === 'custom' ? data : JSON.parse(data.contents);
           
@@ -44,14 +55,23 @@ export const PortfolioAnalysisModal = ({ portfolioStats, settings, marketData, f
               const emTargetUrl = `https://fundmobapi.eastmoney.com/FundMNewApi/FundMNInverstPosition?FCODE=${fund.fundCode}&deviceid=${fakeDeviceId}&plat=Android&product=EFund&version=6.6.8`;
               let emFetchUrl = settings.customProxyUrl.includes('{{url}}') ? settings.customProxyUrl.replace('{{url}}', encodeURIComponent(emTargetUrl)) : settings.customProxyUrl + emTargetUrl;
 
-              const emRes = await fetch(emFetchUrl);
+              const emController = new AbortController();
+              const emTimeoutId = setTimeout(() => emController.abort(), 6000);
+
+              // 🚨 同样加上 cache: 'no-store'
+              const emRes = await fetch(emFetchUrl, { 
+                signal: emController.signal,
+                cache: 'no-store'
+              });
+              clearTimeout(emTimeoutId);
+
               if (emRes.ok) {
                   const emData = await emRes.json();
                   if (emData?.Datas && !emData.ErrCode) {
-                      const stock_list = (emData.Datas.fundStocks || []).map(s => ({
+                      const stock_list = (emData.Datas.fundStocks ||[]).map(s => ({
                           name: s.GPJC, symbol: s.GPDM, percent: s.JZBL
                       }));
-                      const bond_list = (emData.Datas.fundbonds || []).map(b => ({
+                      const bond_list = (emData.Datas.fundbonds ||[]).map(b => ({
                           name: b.ZQJC, symbol: b.ZQDM, percent: b.JZBL
                       }));
 
@@ -65,10 +85,14 @@ export const PortfolioAnalysisModal = ({ portfolioStats, settings, marketData, f
           if (actualData?.data) {
              newProfiles[fund.fundCode] = actualData.data; 
           }
+
+          // 优雅休眠 400ms，绕过反爬机制
+          await new Promise(resolve => setTimeout(resolve, 400));
+
         } catch (e) {
-          console.debug(`[X-Ray 静默] ${fund.fundCode} 穿透失败`);
+          console.debug(`[X-Ray 静默] ${fund.fundCode} 穿透失败 (${e.name === 'AbortError' ? '连接超时' : e.message})`);
         }
-      }));
+      }
 
       setLiveXRayProfiles(newProfiles);
       setIsXRayScanning(false);
@@ -79,11 +103,11 @@ export const PortfolioAnalysisModal = ({ portfolioStats, settings, marketData, f
 
   const { aggregatedHoldings, warnings } = useMemo(() => {
     return calculatePortfolioXRay(
-      portfolioStats?.computedFundsWithMetrics || [], 
+      portfolioStats?.computedFundsWithMetrics ||[], 
       liveXRayProfiles, 
       portfolioStats?.totalCurrentValue || 0
     );
-  }, [portfolioStats, liveXRayProfiles]);
+  },[portfolioStats, liveXRayProfiles]);
 
   const handleClose = () => {
     setIsClosing(true);

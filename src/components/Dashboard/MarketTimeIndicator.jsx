@@ -86,7 +86,7 @@ export const MarketTimeIndicator = () => {
 
   return (
     <div className="flex flex-col sm:flex-row sm:items-center text-sm font-medium transform-gpu" style={{ willChange: 'transform' }}>
-      <div className="flex items-center space-x-3 mb-2 sm:mb-0 sm:mr-4">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2 sm:mb-0 sm:mr-4">
          <div className="flex items-center text-slate-700 dark:text-slate-300">
            <Clock className="mr-1.5 text-slate-500 w-[18px] h-[18px] xl:w-[24px] xl:h-[24px]" />
            <span className="font-mono tabular-nums tracking-wide text-base sm:text-lg xl:text-2xl">{timeObj.toLocaleDateString().replace(/\//g, '-')} {formatTime(timeObj)}</span>

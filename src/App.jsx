@@ -1151,7 +1151,7 @@ export default function App() {
               
               {marketError && <div className="text-amber-500 text-sm mb-4 flex items-center animate-in fade-in slide-in-from-top-2 duration-300"><AlertCircle size={14} className="mr-1"/>{marketError}</div>}
               
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 sm:gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
                 {marketData.length === 0 ? (
                     Array(5).fill(0).map((_, i) => (
                       <div key={'skel'+i} className="bg-slate-50 dark:bg-slate-900 p-4 sm:p-5 rounded-xl border border-slate-100 dark:border-slate-700 animate-pulse">

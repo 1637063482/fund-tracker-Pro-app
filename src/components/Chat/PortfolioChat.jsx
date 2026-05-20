@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 // 【关键修改1】引入 Globe 图标
 import { MessageSquare, X, Send, RefreshCw, Trash2, Bot, User, Sparkles, Globe } from 'lucide-react';
 import { chatWithPortfolioAI } from '../../utils/ai';
@@ -6,16 +6,43 @@ import { chatWithPortfolioAI } from '../../utils/ai';
 import { doc, setDoc, onSnapshot, getDocs, collection, query, where, updateDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 
+// 【性能优化核心】将 Markdown 渲染器移出组件，避免每次渲染重复创建函数和执行正则
+const renderMarkdown = (text) => {
+  return text.split('\n').map((line, idx) => {
+    if (!line.trim()) return <div key={idx} className="h-1"></div>;
+    
+    // 1. 处理 H3 标题
+    if (line.startsWith('### ')) {
+      return <h4 key={idx} className="font-bold text-indigo-700 dark:text-indigo-300 mt-2 mb-1 text-[13px]">{line.replace('### ', '')}</h4>;
+    }
+    
+    let formattedLine = line;
+
+    // 2. 🌟 核心修复：处理 Markdown 图片标签 ![alt](url)
+    formattedLine = formattedLine.replace(
+      /!\[([^\]]*)\]\(([^)]+)\)/g, 
+      // 🌟 UI升级：将 w-full 换成 max-w-full h-auto，强制图片随容器等比缩放，绝对禁止撑破边框！
+      '<img src="$2" alt="$1" class="max-w-full h-auto object-contain rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 my-3 bg-white" loading="lazy" />'
+    );
+
+    // 3. 处理加粗
+    formattedLine = formattedLine.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    
+    // 🌟 UI升级：加上 max-w-full 和 overflow-x-auto，如果出现超大表格，只在气泡内部局部滑动，不影响整体页面
+    return <div key={idx} className="mb-0.5 text-slate-700 dark:text-slate-300 leading-relaxed break-words max-w-full overflow-x-auto custom-scrollbar" dangerouslySetInnerHTML={{ __html: formattedLine }} />;
+  });
+};
+
 // 【修改】接收 user 参数
 export const PortfolioChat = ({ portfolioStats, settings, marketData, user }) => {
   const [isOpen, setIsOpen] = useState(false);
   // 【关键修改2】新增联网搜索的用户开关状态（默认开启）
-  const[useWebSearch, setUseWebSearch] = useState(true);
+  const [useWebSearch, setUseWebSearch] = useState(true);
   const [pendingAction, setPendingAction] = useState(null); // 🌟 新增：拦截 AI 的操作指令
-  const[messages, setMessages] = useState([
+  const [messages, setMessages] = useState([
     { role: 'assistant', content: '您好！我是您的私人基金copilot。我已经读取了您当前的全部持仓和流水，以及您手握的空闲资金。请问有什么可以帮您？' }
   ]);
-  const [input, setInput] = useState('');
+  const[input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef(null);
 
@@ -47,8 +74,8 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user }) =>
     if (!input.trim() || isLoading) return;
 
     const userMessage = input.trim();
-    setInput('');
-    const newMessages =[...messages, { role: 'user', content: userMessage }];
+    setInput(''); // 瞬间清空输入框，响应迅速
+    const newMessages = [...messages, { role: 'user', content: userMessage }];
     setMessages(newMessages);
     setIsLoading(true);
 
@@ -60,7 +87,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user }) =>
     try {
       // 过滤掉第一条欢迎语，只把真实对话发给 AI
       const chatHistory = newMessages.filter((_, idx) => idx > 0 && idx < newMessages.length - 1);
-       // 【关键修改3】将 useWebSearch 状态传给底层引擎
+      // 【关键修改3】将 useWebSearch 状态传给底层引擎
       const reply = await chatWithPortfolioAI(settings, portfolioStats, chatHistory, userMessage, marketData, useWebSearch);
       
       let finalMessages;
@@ -70,7 +97,9 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user }) =>
           finalMessages =[...newMessages, { 
               role: 'assistant', 
               content: `已为您生成【${reply.payload.actionType === 'buy' ? '买入' : '卖出'}】调仓指令，请核对后确认执行：`,
-              isAction: true // 标记这是一条包含操作卡的特殊消息
+              isAction: true,
+              actionData: reply.payload, // 🌟 永久固化当前的操作数据
+              actionStatus: 'pending'    // 🌟 设置初始状态为“待处理”
           }];
       } else {
           finalMessages =[...newMessages, { role: 'assistant', content: reply }];
@@ -92,8 +121,8 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user }) =>
     }
   };
 
-  // 🌟 终极执行引擎：AI 交易单入账 + 实时净值抓取 + 份额自动换算 + 撤销回滚
-  const handleConfirmAction = async () => {
+  // 🌟 使用 useCallback 缓存函数，配合 useMemo 提升性能
+  const handleConfirmAction = useCallback(async () => {
     if (!user || !db || !pendingAction) return;
     setIsLoading(true);
     try {
@@ -114,7 +143,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user }) =>
           
           const fundDoc = querySnapshot.docs[0];
           const fundData = fundDoc.data();
-          const transactions = fundData.transactions || [];
+          const transactions = fundData.transactions ||[];
           
           // 寻找最近一笔金额匹配的记录（从后往前找）
           const targetIndex = transactions.slice().reverse().findIndex(t => Number(t.amountRaw) === parsedAmount);
@@ -151,7 +180,25 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user }) =>
               await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'general'), { idleFunds: newIdle }, { merge: true });
           }
 
-          setMessages(prev => [...prev, { role: 'assistant', content: `✅ 撤销成功！已为您删除了那笔 ${parsedAmount} 元的【${targetTx.type === 'buy' ? '买入' : '卖出'}】记录，资金和份额已回滚。` }]);
+          // 🌟 核心修复：补齐撤销分支的“冻结卡片”与“云端同步”逻辑，消除漏网之鱼！
+          setMessages(prev => {
+              // 1. 将当前的撤销卡片状态更新为已完成，防止按钮再次被点击
+              const updatedMessages = prev.map(m => 
+                  m.isAction && m.actionStatus === 'pending' ? { ...m, actionStatus: 'completed' } : m
+              );
+              // 2. 拼接成功提示文本
+              const finalMsgs = [...updatedMessages, { 
+                  role: 'assistant', 
+                  content: `✅ 撤销成功！已为您删除了那笔 ${parsedAmount} 元的【${targetTx.type === 'buy' ? '买入' : '卖出'}】记录，资金和份额已回滚。` 
+              }];
+              
+              // 3. 将新状态火速同步上云
+              if (user && db) {
+                  setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'chat', 'history'), { messages: finalMsgs }, { merge: true }).catch(e => console.error(e));
+              }
+              return finalMsgs;
+          });
+          
           setPendingAction(null);
           return; // 删除逻辑结束，直接返回
       }
@@ -240,23 +287,48 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user }) =>
           await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'general'), { idleFunds: newIdle }, { merge: true });
       }
 
-      setMessages(prev => [...prev, { 
-          role: 'assistant', 
-          content: `✅ 交易入账成功！\n- **方向**：${actionType === 'buy' ? '买入建仓' : '卖出减仓'} ${parsedAmount} 元\n- **折算**：按实时净值 ${currentNav} 折算约 **${sharesDelta} 份**\n\n系统底座数据已更新，您可以关闭聊天框查看最新图表。` 
-      }]);
+      // 🌟 核心修复：不销毁卡片，而是将其状态冻结为 completed
+      setMessages(prev => {
+          // 1. 将待处理的卡片状态更新为已完成
+          const updatedMessages = prev.map(m => 
+              m.isAction && m.actionStatus === 'pending' ? { ...m, actionStatus: 'completed' } : m
+          );
+          // 2. 追加成功提示
+          const finalMsgs = [...updatedMessages, { 
+              role: 'assistant', 
+              content: `✅ 交易入账成功！\n- **方向**：${actionType === 'buy' ? '买入建仓' : '卖出减仓'} ${parsedAmount} 元\n- **折算**：按实时净值 ${currentNav} 折算约 **${sharesDelta} 份**\n\n系统底座数据已更新，您可以关闭聊天框查看最新图表。` 
+          }];
+          
+          if (user && db) {
+              setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'chat', 'history'), { messages: finalMsgs }, { merge: true }).catch(e => console.error(e));
+          }
+          return finalMsgs;
+      });
+      
       setPendingAction(null);
     } catch (e) {
       setMessages(prev => [...prev, { role: 'assistant', content: `❌ 写入账本失败: ${e.message}` }]);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [user, pendingAction, settings]); // 依赖项
 
-  // 🌟 补充缺失的取消交易函数
-  const handleCancelAction = () => {
+  // 🌟 补充缺失的取消交易函数，加入 useCallback
+  const handleCancelAction = useCallback(() => {
+      // 🌟 取消时，将状态冻结为 cancelled
+      setMessages(prev => {
+          const updatedMessages = prev.map(m => 
+              m.isAction && m.actionStatus === 'pending' ? { ...m, actionStatus: 'cancelled' } : m
+          );
+          const finalMsgs = [...updatedMessages, { role: 'assistant', content: '⛔ 操作已取消。账本未做任何修改。' }];
+          
+          if (user && db) {
+              setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'chat', 'history'), { messages: finalMsgs }, { merge: true }).catch(e => console.error(e));
+          }
+          return finalMsgs;
+      });
       setPendingAction(null);
-      setMessages(prev => [...prev, { role: 'assistant', content: '⛔ 操作已取消。账本未做任何修改。' }]);
-  };
+  }, [user]); // 添加 user 依赖
 
   // 一键清空记忆，防止幻觉
   const handleClear = () => {
@@ -270,17 +342,76 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user }) =>
     }
   };
 
-  // 优雅渲染 Markdown
-  const renderMarkdown = (text) => {
-    return text.split('\n').map((line, idx) => {
-      if (!line.trim()) return <div key={idx} className="h-1"></div>;
-      if (line.startsWith('### ')) {
-        return <h4 key={idx} className="font-bold text-indigo-700 dark:text-indigo-300 mt-2 mb-1 text-[13px]">{line.replace('### ', '')}</h4>;
-      }
-      let formattedLine = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-      return <div key={idx} className="mb-0.5 text-slate-700 dark:text-slate-300 leading-relaxed break-words" dangerouslySetInnerHTML={{ __html: formattedLine }} />;
-    });
-  };
+  // 【核心性能修复】使用 useMemo 阻断打字时触发的无效历史消息渲染
+  const renderedMessages = useMemo(() => {
+    return messages.map((msg, idx) => (
+      <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+        <div className={`flex max-w-[95%] sm:max-w-[85%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+          <div className={`w-7 h-7 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm mt-0.5 sm:mt-0 ${msg.role === 'user' ? 'bg-blue-100 text-blue-600 ml-2 sm:ml-3' : 'bg-indigo-100 text-indigo-600 mr-2 sm:mr-3'}`}>
+            {msg.role === 'user' ? <User size={16} className="sm:w-[18px] sm:h-[18px]" /> : <Bot size={18} className="sm:w-[20px] sm:h-[20px]" />}
+          </div>
+          <div className={`px-3.5 py-2.5 sm:px-5 sm:py-3.5 text-[15px] sm:text-base shadow-sm ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm' : 'bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl rounded-tl-sm'}`}>
+            {msg.role === 'user' ? msg.content : renderMarkdown(msg.content)}
+            {msg.isAction && msg.actionData && (
+                <div className={`mt-3 border rounded-xl p-4 shadow-sm select-none transition-all duration-500 ${
+                    msg.actionStatus === 'completed' ? 'bg-green-50/50 dark:bg-green-900/10 border-green-200 dark:border-green-800/50 opacity-90' :
+                    msg.actionStatus === 'cancelled' ? 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 opacity-60 grayscale' :
+                    'bg-indigo-50 dark:bg-slate-900 border-indigo-200 dark:border-indigo-700'
+                }`}>
+                    <div className="flex justify-between items-center mb-3">
+                        <span className={`font-bold flex items-center ${
+                            msg.actionStatus === 'completed' ? 'text-green-700 dark:text-green-400' :
+                            msg.actionStatus === 'cancelled' ? 'text-slate-500 dark:text-slate-400' :
+                            'text-slate-800 dark:text-slate-200'
+                        }`}>
+                            {msg.actionStatus === 'completed' ? '✅ 调仓已执行' :
+                             msg.actionStatus === 'cancelled' ? '⛔ 调仓已撤销' :
+                             '🤖 AI 自动化调仓单'}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                            msg.actionStatus === 'completed' ? 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' :
+                            msg.actionStatus === 'cancelled' ? 'bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400' :
+                            (msg.actionData.actionType === 'buy' ? 'bg-red-100 text-red-600 dark:bg-red-900/30' :
+                             msg.actionData.actionType === 'sell' ? 'bg-green-100 text-green-600 dark:bg-green-900/30' :
+                             'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300')
+                        }`}>
+                            {msg.actionData.actionType === 'buy' ? '买入' : msg.actionData.actionType === 'sell' ? '卖出' : '撤销记录'}
+                        </span>
+                    </div>
+                    
+                    <div className={`text-sm space-y-1 font-mono ${
+                        msg.actionStatus === 'completed' ? 'text-green-800/70 dark:text-green-200/70' :
+                        msg.actionStatus === 'cancelled' ? 'text-slate-500 dark:text-slate-400' :
+                        'text-slate-600 dark:text-slate-400'
+                    }`}>
+                        <div>标的代码：<span className={msg.actionStatus === 'pending' ? 'font-bold text-indigo-600 dark:text-indigo-400' : ''}>{msg.actionData.fundCode}</span></div>
+                        <div>标的名称：{msg.actionData.fundName || '未知匹配'}</div>
+                        <div>目标金额：<span className={msg.actionStatus === 'pending' ? 'font-bold text-slate-800 dark:text-slate-200' : ''}>{msg.actionData.amount} 元</span></div>
+                        
+                        {msg.actionStatus === 'pending' && (
+                            <div className={`text-[11px] mt-3 p-2 rounded ${msg.actionData.actionType === 'delete' ? 'text-amber-600 bg-amber-50 dark:bg-amber-900/30' : 'text-indigo-500 bg-indigo-100/50 dark:bg-indigo-900/30'}`}>
+                              {msg.actionData.actionType === 'delete' 
+                                ? '⚠️ 点击确认后，系统将寻找最近一笔匹配金额的记录进行剔除，并自动回滚资金与份额。' 
+                                : '⚡ 点击确认后，系统将自动抓取该基金实时净值并为您换算成精确份额入账。'}
+                            </div>
+                        )}
+                    </div>
+
+                    {msg.actionStatus === 'pending' && (
+                        <div className="flex space-x-3 mt-4">
+                            <button onClick={handleCancelAction} className="flex-1 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">驳回修改</button>
+                            <button onClick={handleConfirmAction} className={`flex-1 py-1.5 rounded-lg text-white text-sm font-medium shadow-md transition-colors ${msg.actionData.actionType === 'delete' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
+                                {msg.actionData.actionType === 'delete' ? '确认撤销该记录' : '确认并自动换算'}
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
+          </div>
+        </div>
+      </div>
+    ));
+  },[messages, pendingAction, handleCancelAction, handleConfirmAction]);
 
   return (
     <>
@@ -302,7 +433,8 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user }) =>
         onClick={() => setIsOpen(false)}
       >
         <div 
-          className={`w-full h-[100dvh] sm:h-[85vh] sm:max-w-3xl bg-white dark:bg-slate-800 sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden transform transition-all duration-300 sm:border border-slate-100 dark:border-slate-700 ${isOpen ? 'scale-100 translate-y-0' : 'sm:scale-95 translate-y-full sm:translate-y-8'}`}
+          // 🌟 UI升级：高度从 85vh 提升到 90vh，宽度从 max-w-3xl 提升到 max-w-5xl (最高可达1024px，极其宽敞)
+          className={`w-full h-[100dvh] sm:h-[95vh] sm:max-w-7xl bg-white dark:bg-slate-800 sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden transform transition-all duration-300 sm:border border-slate-100 dark:border-slate-700 ${isOpen ? 'scale-100 translate-y-0' : 'sm:scale-95 translate-y-full sm:translate-y-8'}`}
           onClick={e => e.stopPropagation()}
         >
           
@@ -320,53 +452,10 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user }) =>
 
           {/* 消息列表区 */}
           <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-5 bg-slate-50 dark:bg-slate-900 custom-scrollbar relative">
-            {messages.map((msg, idx) => (
-              <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`flex max-w-[95%] sm:max-w-[85%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                  <div className={`w-7 h-7 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm mt-0.5 sm:mt-0 ${msg.role === 'user' ? 'bg-blue-100 text-blue-600 ml-2 sm:ml-3' : 'bg-indigo-100 text-indigo-600 mr-2 sm:mr-3'}`}>
-                    {msg.role === 'user' ? <User size={16} className="sm:w-[18px] sm:h-[18px]" /> : <Bot size={18} className="sm:w-[20px] sm:h-[20px]" />}
-                  </div>
-                  <div className={`px-3.5 py-2.5 sm:px-5 sm:py-3.5 text-[15px] sm:text-base shadow-sm ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm' : 'bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl rounded-tl-sm'}`}>
-                    {msg.role === 'user' ? msg.content : renderMarkdown(msg.content)}
-                    {msg.isAction && pendingAction && (
-                        <div className="mt-3 bg-indigo-50 dark:bg-slate-900 border border-indigo-200 dark:border-indigo-700 rounded-xl p-4 shadow-sm select-none">
-                            {/* 【修改右上角的标签颜色】 */}
-                            <div className="flex justify-between items-center mb-2">
-                                <span className="font-bold text-slate-800 dark:text-slate-200">🤖 AI 自动化调仓单</span>
-                                <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                                    pendingAction.actionType === 'buy' ? 'bg-red-100 text-red-600' : 
-                                    pendingAction.actionType === 'sell' ? 'bg-green-100 text-green-600' : 
-                                    'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300'
-                                }`}>
-                                    {pendingAction.actionType === 'buy' ? '买入' : pendingAction.actionType === 'sell' ? '卖出' : '撤销记录'}
-                                </span>
-                            </div>
-                            
-                            <div className="text-sm text-slate-600 dark:text-slate-400 space-y-1 mb-4 font-mono">
-                                <div>标的代码：<span className="font-bold text-indigo-600 dark:text-indigo-400">{pendingAction.fundCode}</span></div>
-                                <div>标的名称：{pendingAction.fundName || '未知匹配'}</div>
-                                <div>目标金额：<span className="font-bold text-slate-800 dark:text-slate-200">{pendingAction.amount} 元</span></div>
-                                
-                                {/* 【根据操作类型动态提示】 */}
-                                <div className={`text-[11px] mt-2 p-1.5 rounded ${pendingAction.actionType === 'delete' ? 'text-amber-600 bg-amber-50 dark:bg-amber-900/30' : 'text-indigo-500 bg-indigo-100/50 dark:bg-indigo-900/30'}`}>
-                                  {pendingAction.actionType === 'delete' 
-                                    ? '⚠️ 点击确认后，系统将寻找最近一笔匹配金额的记录进行剔除，并自动回滚资金与份额。' 
-                                    : '⚡ 点击确认后，系统将自动抓取该基金实时净值并为您换算成精确份额入账。'}
-                                </div>
-                            </div>
+            
+            {/* 🌟 这里直接使用我们缓存好的渲染列表 */}
+            {renderedMessages}
 
-                            <div className="flex space-x-3">
-                                <button onClick={handleCancelAction} className="flex-1 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">驳回修改</button>
-                                <button onClick={handleConfirmAction} className={`flex-1 py-1.5 rounded-lg text-white text-sm font-medium shadow-md transition-colors ${pendingAction.actionType === 'delete' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
-                                    {pendingAction.actionType === 'delete' ? '确认撤销该记录' : '确认并自动换算'}
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
             {isLoading && (
               <div className="flex justify-start">
                 <div className="flex flex-row max-w-[80%]">
