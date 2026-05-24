@@ -123,59 +123,55 @@ export const extractFundHoldings = (profile) => {
   return holdings.sort((a, b) => b.percent - a.percent);
 };
 
-// 2. 全盘穿透合并与集中度熔断核算
-export const calculatePortfolioXRay = (activeFunds, fundProfiles, portfolioTotalValue) => {
-  // 防御性拦截：如果没有持仓或总市值为 0，直接返回空
+// ============================================================================
+// 🔍 机构级 FOF 穿透雷达引擎 (Dual-Core X-Ray)
+// ============================================================================
+
+// 删掉之前的硬编码常量配置！
+
+// 🌟 FOF 双核重构版：直接接收云端传来的 fofDictionary
+export const calculatePortfolioXRay = (activeFunds, fofDictionary, portfolioTotalValue) => {
+  let trueEquityTotalValue = 0; 
+  const sectorMap = {};         
+
   if (!activeFunds || activeFunds.length === 0 || portfolioTotalValue <= 0) {
-    return { aggregatedHoldings: [], warnings: [] };
+    return { aggregatedHoldings: [], warnings: [], trueEquityTotalValue: 0, equityExposureRate: 0 };
   }
 
-  const holdingMap = {};
-
   activeFunds.forEach(fund => {
-    // 只要有市值、未归档、且有基金代码，就强制拉去穿透！
     if (fund.currentValue <= 0 || fund.isArchived || !fund.fundCode) return;
 
-    const profile = fundProfiles[fund.fundCode];
-    if (!profile) return; // 尚未抓取到详情的暂不统计
+    // 🌟 核心：直接使用传进来的动态字典
+    const dictConfig = fofDictionary[fund.fundCode];
+    if (!dictConfig || dictConfig.equityRatio <= 0) return;
 
-    const holdings = extractFundHoldings(profile);
+    const fundEquityValue = fund.currentValue * dictConfig.equityRatio;
+    trueEquityTotalValue += fundEquityValue;
 
-    holdings.forEach(h => {
-      // 🧮 核心算法：该标的在你全盘中的绝对暴露金额
-      const valueInFund = fund.currentValue * (h.percent / 100);
-      const key = h.symbol || h.name; // 优先用代码聚合，防止同名异码
-
-      if (!holdingMap[key]) {
-        holdingMap[key] = {
-          name: h.name,
-          symbol: h.symbol,
-          type: h.type,
-          totalValue: 0,
-          funds: [] // 追溯标记：记录是你手里的哪几只基金买了它
-        };
-      }
-
-      holdingMap[key].totalValue += valueInFund;
-      holdingMap[key].funds.push({
-        fundName: fund.name,
-        fundCode: fund.fundCode,
-        value: valueInFund,
-        fundWeight: h.percent // 在单只基金内的原始权重
-      });
-    });
+    if (dictConfig.sectors) {
+        Object.entries(dictConfig.sectors).forEach(([sectorName, ratio]) => {
+          const sectorValue = fundEquityValue * ratio;
+          if (!sectorMap[sectorName]) sectorMap[sectorName] = 0;
+          sectorMap[sectorName] += sectorValue;
+        });
+    }
   });
 
-  // 转换为数组，计算全局权重，并按绝对暴露金额降序
-  const aggregatedHoldings = Object.values(holdingMap)
-    .map(h => ({
-      ...h,
-      globalPercent: (h.totalValue / portfolioTotalValue) * 100
+  if (trueEquityTotalValue === 0) {
+    return { aggregatedHoldings: [], warnings: [], trueEquityTotalValue: 0, equityExposureRate: 0 };
+  }
+
+  const aggregatedHoldings = Object.entries(sectorMap)
+    .map(([name, value]) => ({
+      name, symbol: name, type: 'sector', value: value,
+      globalPercent: (value / trueEquityTotalValue) * 100 
     }))
-    .sort((a, b) => b.totalValue - a.totalValue);
+    .sort((a, b) => b.globalPercent - a.globalPercent);
 
-  // 🚨 集中度熔断预警：单一底层资产全局暴露度 >= 5% (基于你稳健保守的偏好设定)
-  const warnings = aggregatedHoldings.filter(h => h.globalPercent >= 5);
+  const warnings = aggregatedHoldings.filter(h => h.globalPercent >= 30);
 
-  return { aggregatedHoldings, warnings };
+  return { 
+    aggregatedHoldings, warnings, trueEquityTotalValue,
+    equityExposureRate: (trueEquityTotalValue / portfolioTotalValue) * 100 
+  };
 };

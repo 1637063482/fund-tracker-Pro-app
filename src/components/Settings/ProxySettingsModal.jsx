@@ -6,26 +6,19 @@ export const ProxySettingsModal = ({ settings, onSave, onClose }) => {
   const [customUrl, setCustomUrl] = useState(settings.customProxyUrl || '');
   const [dataSource, setDataSource] = useState(settings.dataSource || 'tencent');
   const[navDataSource, setNavDataSource] = useState(settings.navDataSource || 'tiantian'); 
-  
   const[aiProvider, setAiProvider] = useState(settings.aiProvider || 'gemini');
-  
   const [geminiKey, setGeminiKey] = useState(settings.geminiApiKey || '');
   const[geminiModel, setGeminiModel] = useState(settings.geminiModel || 'gemini-2.5-pro');
-  
   const [deepseekKey, setDeepseekKey] = useState(settings.deepseekApiKey || '');
   const [deepseekModel, setDeepseekModel] = useState(settings.deepseekModel || 'deepseek-v4-pro');
-
   const[siliconflowKey, setSiliconflowKey] = useState(settings.siliconflowApiKey || '');
   const[siliconflowModel, setSiliconflowModel] = useState(settings.siliconflowModel || 'deepseek-ai/DeepSeek-V3');
-
-  // 【致命修复】补回之前重构时漏掉的 4 个关键状态声明！
   const[tavilyKey, setTavilyKey] = useState(settings.tavilyApiKey || '');
   const[exaKey, setExaKey] = useState(settings.exaApiKey || '');       // 🌟 新增
   const[serperKey, setSerperKey] = useState(settings.serperApiKey || ''); // 🌟 新增
   const[ntfyTopic, setNtfyTopic] = useState(settings.ntfyTopic || 'fund_tracker_my_secret_123');
   const [cfWorkerUrl, setCfWorkerUrl] = useState(settings.cfWorkerUrl || '');
   const [cfWorkerSecret, setCfWorkerSecret] = useState(settings.cfWorkerSecret || '');
-
   const [isClosing, setIsClosing] = useState(false);
 
   const handleClose = () => {

@@ -6,7 +6,8 @@ import {
 } from 'lucide-react';
 import { SplashScreen } from '@capacitor/splash-screen';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, query } from 'firebase/firestore';
+// 注意检查 firebase/firestore 导入中是否有 addDoc (如果没有请补上)
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, addDoc } from 'firebase/firestore';
 
 // --- 引入拆分出来的功能 ---
 import { auth, db, appId } from './config/firebase';
@@ -20,6 +21,8 @@ import { ProxySettingsModal } from './components/Settings/ProxySettingsModal';
 import { FundProfileModal } from './components/Fund/FundProfileModal';
 import { FundEditor } from './components/Fund/FundEditor';
 import { PortfolioAnalysisModal } from './components/Portfolio/PortfolioAnalysisModal';
+import { TodoListCard } from './components/Dashboard/TodoListCard';
+
 
 // 提取移除函数（保持在组件外部或内部皆可，内部建议用 useCallback 包裹）
 const removeGlobalSplash = () => {
@@ -38,6 +41,41 @@ export default function App() {
   const[user, setUser] = useState(null); 
   const[authLoading, setAuthLoading] = useState(true);
   const [funds, setFunds] = useState([]); 
+  const [todos, setTodos] = useState([]);
+
+  // 监听待办事项数据库
+  useEffect(() => {
+    if (!user || !db) return;
+    const todosRef = collection(db, 'artifacts', appId, 'users', user.uid, 'todos');
+    const unsubTodos = onSnapshot(query(todosRef), (snapshot) => {
+      const data = [];
+      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
+      setTodos(data);
+    });
+    return () => unsubTodos();
+  }, [user]);
+
+  const handleAddTodo = async (todoData) => {
+    if (!user || !db) return;
+    const todosRef = collection(db, 'artifacts', appId, 'users', user.uid, 'todos');
+    await addDoc(todosRef, todoData);
+  };
+
+  const handleToggleTodo = async (id, isCompleted) => {
+    if (!user || !db) return;
+    const todoRef = doc(db, 'artifacts', appId, 'users', user.uid, 'todos', id);
+    await setDoc(todoRef, { isCompleted }, { merge: true });
+  };
+
+  const handleDeleteTodo = async (id) => {
+    if (!user || !db) return;
+    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'todos', id));
+  };
+  const handleUpdateTodo = async (id, newData) => {
+    if (!user || !db) return;
+    const todoRef = doc(db, 'artifacts', appId, 'users', user.uid, 'todos', id);
+    await setDoc(todoRef, newData, { merge: true });
+  };
   const[settings, setSettings] = useState({ 
     targetAmount: 100000, 
     targetDate: '2030-12-31', 
@@ -178,9 +216,12 @@ export default function App() {
         body: JSON.stringify({
           syncSecret: settings.cfWorkerSecret,
           funds: funds,
-          settings: settings
+          settings: settings,
+          // 🌟 核心升级：把前端算好的绝对精确的统计数据和真实 XIRR 一起发给云大脑！
+          portfolioStats: portfolioStats 
         })
       });
+        
       if (res.ok) {
         alert("✅ 成功同步到云端大脑！\n\n您的私人 AI 基金经理已拿到最新账本，将在每个交易日晚上 22:00 准时为您发送巡检报告。");
       } else {
@@ -1359,9 +1400,19 @@ export default function App() {
                       ))}
                     </div>
                   </div>
-                </div>
-              </section>
+                </div> {/* 结束：两个榜单的 grid 容器 */}
 
+                {/* 🌟 新增：待办事项卡片 (它依然属于左侧大的 section 内部) */}
+                <TodoListCard 
+                  todos={todos} 
+                  onAddTodo={handleAddTodo} 
+                  onToggleTodo={handleToggleTodo} 
+                  onDeleteTodo={handleDeleteTodo} 
+                />
+
+              </section> {/* 结束：左侧占宽度的 section */}
+
+              {/* 开始：右侧占宽度的 section */}
               <section className="lg:col-span-4 xl:col-span-3 space-y-6">
                 
                 {/* 【新增入口】一键开启全盘资产体检 */}
@@ -1532,7 +1583,16 @@ export default function App() {
             </div>
           )}
            {/* 👇 加上这一块：将悬浮聊天框挂载到全局 */}
-          <PortfolioChat portfolioStats={portfolioStats} settings={settings} marketData={marketData} user={user} />
+          <PortfolioChat 
+             portfolioStats={portfolioStats} 
+             settings={settings} 
+             marketData={marketData} 
+             user={user} 
+             onAddTodo={handleAddTodo} 
+             onUpdateTodo={handleUpdateTodo} 
+             onDeleteTodo={handleDeleteTodo} 
+             todos={todos} 
+          />
 
         </div>
       )}
