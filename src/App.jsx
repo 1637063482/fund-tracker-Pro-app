@@ -24,13 +24,20 @@ import { PortfolioAnalysisModal } from './components/Portfolio/PortfolioAnalysis
 import { TodoListCard } from './components/Dashboard/TodoListCard';
 
 
-// 提取移除函数（保持在组件外部或内部皆可，内部建议用 useCallback 包裹）
+// 提取移除函数（强化版：防止 iOS 渲染树残留导致的白屏穿透）
 const removeGlobalSplash = () => {
   const splash = document.getElementById('global-splash');
   if (splash) {
+    // 第一道防线：瞬间剥夺它的触摸权限，防止用户在渐隐的 0.5 秒内长按屏幕
+    splash.style.pointerEvents = 'none'; 
     splash.style.transition = 'opacity 0.5s ease-out';
     splash.style.opacity = '0';
-    setTimeout(() => splash.remove(), 500);
+    
+    setTimeout(() => {
+      // 第二道防线：先彻底破坏它的显示层级，再从 DOM 树拔除
+      splash.style.display = 'none';
+      splash.remove();
+    }, 500);
   }
 };
 

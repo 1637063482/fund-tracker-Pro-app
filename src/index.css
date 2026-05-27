@@ -48,3 +48,29 @@ input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; opacity
 input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; background-color: rgba(0,0,0,0.05); }
 .dark input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1) brightness(0.8); }
 .dark input[type="date"]::-webkit-calendar-picker-indicator:hover { background-color: rgba(255,255,255,0.1); }
+
+/* ==========================================
+   移动端防白屏与长按穿透核心补丁 
+   ========================================== */
+
+/* 1. 禁用系统默认的长按弹出菜单（防图片/链接乱弹），并默认禁止全局文字被选中，防止长按时触发 iOS 渲染崩溃 */
+body {
+  -webkit-touch-callout: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+/* 2. 仅给必需的元素（输入框、聊天气泡、代码块等）单独开放选中与复制权限 */
+input, 
+textarea, 
+.custom-scrollbar,
+.selectable-text {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
+/* 3. 开屏层被隐藏后，绝对禁止它响应任何触摸事件，防止幽灵遮挡 */
+#global-splash[style*="opacity: 0"] {
+  pointer-events: none !important;
+  display: none !important;
+}

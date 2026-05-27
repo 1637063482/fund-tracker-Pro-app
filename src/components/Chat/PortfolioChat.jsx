@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 // 【关键修改1】引入 Globe 图标
-import { MessageSquare, X, Send, RefreshCw, Trash2, Bot, User, Sparkles, Globe, Target, Brain, Activity } from 'lucide-react';
+import { MessageSquare, X, Send, RefreshCw, Trash2, Bot, User, Sparkles, Globe, Target, Brain, Activity, Paperclip, Edit, Check } from 'lucide-react';
 import { chatWithPortfolioAI } from '../../utils/ai';
+import { extractDataFromImage } from '../../services/fileParser'; // 🌟 新增：引入独立解析器
 // 【新增】引入 Firebase 数据库组件
 import { doc, setDoc, onSnapshot, getDocs, collection, query, where, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
@@ -52,6 +53,27 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   const [enableMacroRadar, setEnableMacroRadar] = useState(false); 
   const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
 
+  // 🌟 核心新增：附件与预览状态
+  const [attachment, setAttachment] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const fileInputRef = useRef(null);
+  // 🌟 新增：OCR 视觉引擎切换状态 (默认 gemini)
+  const [ocrEngine, setOcrEngine] = useState('gemini');
+
+  const handleFileChange = (e) => {
+      const file = e.target.files[0];
+      if (file) {
+          setAttachment(file);
+          setPreviewUrl(URL.createObjectURL(file));
+      }
+  };
+
+  const removeAttachment = () => {
+      setAttachment(null);
+      setPreviewUrl(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   // 🌟 新增：周五例行巡检黄条的显示状态
   const [showInspectionBanner, setShowInspectionBanner] = useState(false);
 
@@ -78,6 +100,26 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
           await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'ai_memos', memoId));
       } catch (error) {
           alert(`删除失败: ${error.message}`);
+      }
+  };
+
+  // 🌟 新增：备忘录编辑状态
+  const [editingMemoId, setEditingMemoId] = useState(null);
+  const [editMemoForm, setEditMemoForm] = useState({ decisionType: '', coreLogic: '' });
+
+  // 🌟 新增：保存人工修改的备忘录
+  const handleSaveMemoEdit = async (memoId) => {
+      if (!editMemoForm.coreLogic.trim()) return;
+      try {
+          const memoRef = doc(db, 'artifacts', appId, 'users', user.uid, 'ai_memos', memoId);
+          await updateDoc(memoRef, {
+              decisionType: editMemoForm.decisionType,
+              coreLogic: editMemoForm.coreLogic.trim(),
+              updatedAt: new Date().toISOString()
+          });
+          setEditingMemoId(null); // 退出编辑模式
+      } catch (error) {
+          alert(`保存修改失败: ${error.message}`);
       }
   };
 
@@ -109,14 +151,24 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   const [isLoading, setIsLoading] = useState(false);
    const messagesEndRef = useRef(null);
 
-  // 自动滚动到底部
-  const scrollToBottom = () => {
-    if (isOpen) {
+  // 🌟 修复：精准控制滚动时机，防止确认卡片时画面乱跳
+  const prevMsgLengthRef = useRef(messages.length);
+  const prevIsOpenRef = useRef(isOpen);
+
+  useEffect(() => {
+    // 场景 1：聊天框刚刚被打开
+    if (isOpen && !prevIsOpenRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  };
-  // 【关键修复】把 isOpen 加入依赖，并在打开聊天框时也触发一次滚动
-  useEffect(() => { scrollToBottom(); }, [messages, isLoading, isOpen]);
+    // 场景 2：消息数组的“长度”增加了（发送了新消息或AI回复了新消息）
+    else if (isOpen && messages.length > prevMsgLengthRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+
+    // 更新历史记录
+    prevMsgLengthRef.current = messages.length;
+    prevIsOpenRef.current = isOpen;
+  }, [messages.length, isOpen]); // 🚨 核心：依赖项换成 messages.length，彻底剔除 isLoading 和整体 messages 对象
 
   // 【新增】组件加载时，实时监听云端聊天记录
   useEffect(() => {
@@ -134,15 +186,55 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   }, [user]);
 
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+    // 🌟 修改：允许不打字只发图片
+    if ((!input.trim() && !attachment) || isLoading) return;
     const userMessage = input.trim();
     setInput('');
-    const newMessages = [...messages, { role: 'user', content: userMessage }];
+    
+    // 生成用户消息
+    const newMessages = [...messages, { role: 'user', content: userMessage || '请帮我分析这张图片中的数据。' }];
     setMessages(newMessages);
     setIsLoading(true);
 
     if (user && db) {
       setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'chat', 'history'), { messages: newMessages }, { merge: true }).catch(e => console.error(e));
+    }
+
+    // 🌟 核心拦截层：如果有附件，先走 OCR/解析，不调用 AI
+    if (attachment) {
+        try {
+            // 🌟 新增：将当前选择的引擎传给底层解析器
+            const extractedText = await extractDataFromImage(attachment, settings, ocrEngine);
+            
+            const actionCard = {
+                cardId: `act_${Date.now()}_ocr`,
+                type: 'ACTION_REQUIRED',
+                toolType: 'data_confirmation',
+                status: 'pending',
+                extractedText: extractedText,
+                originalMessage: userMessage,
+                previewUrl: previewUrl
+            };
+            
+            const finalMessages = [...newMessages, { 
+                role: 'assistant', 
+                content: `我已经为您解析了上传的文件。为确保交易决策基于**绝对真实的数据**，请您先核对以下提取内容，确认无误后再交由大脑进行深度分析：`,
+                isAction: true,
+                actions: [actionCard]
+            }];
+            
+            setMessages(finalMessages);
+            removeAttachment(); // 发送后清空附件
+            
+            if (user && db) {
+                setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'chat', 'history'), { messages: finalMessages }, { merge: true }).catch(e => console.error(e));
+            }
+        } catch (e) {
+            setMessages([...newMessages, { role: 'assistant', content: `❌ 文件解析失败: ${e.message}` }]);
+        } finally {
+            setIsLoading(false);
+        }
+        return; // 🚨 阻断！在这里停止执行，等待用户确认卡片
     }
 
     try {
@@ -198,6 +290,43 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
     
     try {
         if (typeof onAddTodo !== 'function') throw new Error("前端传参丢失：onAddTodo 未定义");
+
+        // 🌟🌟 核心架构升级：如果是数据确认卡片，说明用户已核对数据，向 AI 发起请求
+        if (action.toolType === 'data_confirmation') {
+            // 1. 改变卡片状态为已完成
+            setMessages(prev => prev.map(m => {
+                if (m.isAction && m.actions) return { ...m, actions: m.actions.map(a => a.cardId === action.cardId ? { ...a, status: 'completed' } : a) };
+                return m;
+            }));
+
+            // 2. 组装极具杀伤力的 Ground Truth Prompt
+            const activeMarketData = enableMacroRadar ? "FETCH_NOW" : "【纯净模式】";
+            const stitchedPrompt = `【系统强制注入：用户上传并已人工核对无误的 Ground Truth 真实底层数据】\n<verified_data>\n${formData.extractedText}\n</verified_data>\n\n【用户的原始指令】：${action.originalMessage || '请深度分析上述数据并给出具体建议。'}`;
+            
+            // 3. 剥离掉包含卡片的系统历史，提供纯净上下文
+            const chatHistory = messages.filter(m => !m.isAction && m.role !== 'system');
+            
+            // 4. 调用无须任何修改的 ai.js！
+            const reply = await chatWithPortfolioAI(settings, portfolioStats, chatHistory, stitchedPrompt, activeMarketData, useWebSearch, todos, memos);
+            
+            // 5. 将 AI 的深度分析结果追加回聊天框
+            setMessages(prev => {
+                const finalMessages = [...prev];
+                if (typeof reply === 'object' && reply.type === 'ACTION_REQUIRED') {
+                    const actionsWithStatus = reply.payload.map((act, idx) => ({
+                        ...act, cardId: `act_${Date.now()}_${idx}`, status: 'pending'
+                    }));
+                    finalMessages.push({ role: 'assistant', content: reply.text, isAction: true, actions: actionsWithStatus });
+                } else {
+                    finalMessages.push({ role: 'assistant', content: reply });
+                }
+                if (user && db) setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'chat', 'history'), { messages: finalMessages }, { merge: true }).catch(e=>e);
+                return finalMessages;
+            });
+            
+            setIsLoading(false);
+            return; // 🚨 拦截结束，绝不往下执行普通的写入逻辑
+        }
 
         // 🌟 新增：处理备忘录写入
         if (action.toolType === 'memo') {
@@ -377,7 +506,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
     } finally {
         setIsLoading(false);
     }
-  }, [user, settings, onAddTodo]); 
+ }, [user, settings, onAddTodo, onUpdateTodo, onDeleteTodo, enableMacroRadar, useWebSearch, portfolioStats, todos, memos, messages]);
 
   // 精准取消函数
   const handleCancelAction = useCallback((action) => {
@@ -527,9 +656,53 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
           </div>
 
           {/* 输入区 */}
-          <div className="p-3 sm:p-4 bg-white dark:bg-slate-800 border-t border-slate-100 dark:border-slate-700 shrink-0">
+          <div className="p-3 sm:p-4 bg-white dark:bg-slate-800 border-t border-slate-100 dark:border-slate-700 shrink-0 relative">
+            
+            {/* 🌟 新增：OCR 引擎切换开关 (仅在选择了附件时显示，保持界面清爽) */}
+            {attachment && (
+                <div className="absolute -top-[90px] left-6 flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm animate-in fade-in">
+                    <button 
+                        onClick={() => setOcrEngine('gemini')}
+                        className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${ocrEngine === 'gemini' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'}`}
+                    >
+                        <Sparkles size={12} className="inline mr-1 mb-0.5"/> Gemini 视觉
+                    </button>
+                </div>
+            )}
+
+            {/* 🌟 核心新增 4：附件预览区 */}
+            {previewUrl && (
+                <div className="absolute -top-16 left-6 p-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg flex items-center animate-in fade-in slide-in-from-bottom-2">
+                    <img src={previewUrl} alt="预览" className="h-12 w-12 object-cover rounded-lg mr-2" />
+                    <div className="flex flex-col mr-2 text-xs">
+                        <span className="font-bold text-slate-700 dark:text-slate-200 truncate max-w-[100px]">{attachment?.name}</span>
+                        <span className="text-slate-400">{ocrEngine === 'gemini' ? 'Gemini 待命' : 'Deepseek 待命'}</span>
+                    </div>
+                    <button onClick={removeAttachment} className="p-1 bg-slate-100 hover:bg-red-100 text-slate-500 hover:text-red-500 dark:bg-slate-700 dark:hover:bg-red-900/30 rounded-full transition-colors">
+                        <X size={14} />
+                    </button>
+                </div>
+            )}
+
+            
             <div className="flex items-end bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-1.5 focus-within:ring-2 focus-within:ring-indigo-500 transition-shadow">
             
+            {/* 🌟 核心新增 5：隐藏的 File Input 与触发按钮 */}
+            <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileChange} 
+                className="hidden" 
+                accept="image/*,application/pdf" 
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              title="上传走势截图或研报"
+              className="m-1 p-2.5 rounded-xl transition-colors shrink-0 flex items-center justify-center text-slate-500 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-400"
+            >
+              <Paperclip size={20} />
+            </button>
+
             {/* 🌟 核心新增 3：宏观雷达开关按钮 */}
             <button
               onClick={() => setEnableMacroRadar(!enableMacroRadar)}
@@ -605,26 +778,83 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
                       memos.map(memo => (
                           <div key={memo.id} className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-purple-100 dark:border-purple-800/30 shadow-sm relative group transition-all hover:shadow-md">
                               
-                              <button 
-                                onClick={() => handleDeleteMemo(memo.id)} 
-                                title="抹除此记忆"
-                                className="absolute top-3 right-3 text-slate-300 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-50 hover:bg-red-50 dark:bg-slate-900 dark:hover:bg-red-900/30 p-1.5 rounded-lg"
-                              >
-                                  <Trash2 size={16}/>
-                              </button>
+                              {/* 🌟 判断是否处于编辑模式 */}
+                              {editingMemoId === memo.id ? (
+                                  <div className="space-y-3">
+                                      <div className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                                          {memo.targetName} <span className="text-slate-400 font-mono text-xs font-normal">({memo.target})</span>
+                                      </div>
+                                      
+                                      <select 
+                                          value={editMemoForm.decisionType}
+                                          onChange={(e) => setEditMemoForm({...editMemoForm, decisionType: e.target.value})}
+                                          className="w-full p-2 text-xs border border-purple-200 dark:border-purple-700 rounded-lg bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-bold outline-none focus:ring-2 focus:ring-purple-500"
+                                      >
+                                          <option value="BUY_STRATEGY">BUY_STRATEGY (战略看多/底仓)</option>
+                                          <option value="WATCH_GRID">WATCH_GRID (网格震荡/波段)</option>
+                                          <option value="HOLD_STRATEGY">HOLD_STRATEGY (持有观望)</option>
+                                          <option value="BLACK_LIST">BLACK_LIST (黑名单/不碰)</option>
+                                          <option value="GLOBAL_MACRO">GLOBAL_MACRO (宏观大盘定调)</option>
+                                      </select>
 
-                              <div className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-1 pr-8">
-                                  {memo.targetName} <span className="text-slate-400 font-mono text-xs font-normal">({memo.target})</span>
-                              </div>
-                              <div className="text-xs text-purple-600 dark:text-purple-400 font-bold mb-2 inline-block bg-purple-50 dark:bg-purple-900/30 px-2 py-0.5 rounded">
-                                  定调方向: {memo.decisionType}
-                              </div>
-                              <div className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed bg-slate-50 dark:bg-slate-900/50 p-2.5 rounded-lg border border-slate-100 dark:border-slate-700/50">
-                                  {memo.coreLogic}
-                              </div>
-                              <div className="text-[10px] text-slate-400 mt-3 text-right">
-                                  最后觉醒于: {new Date(memo.updatedAt).toLocaleString('zh-CN')}
-                              </div>
+                                      <textarea 
+                                          value={editMemoForm.coreLogic}
+                                          onChange={(e) => setEditMemoForm({...editMemoForm, coreLogic: e.target.value})}
+                                          className="w-full p-2.5 text-sm text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg outline-none focus:ring-2 focus:ring-purple-500 min-h-[100px] custom-scrollbar"
+                                      />
+
+                                      <div className="flex justify-end space-x-2 pt-1">
+                                          <button 
+                                              onClick={() => setEditingMemoId(null)}
+                                              className="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-md transition-colors"
+                                          >
+                                              取消
+                                          </button>
+                                          <button 
+                                              onClick={() => handleSaveMemoEdit(memo.id)}
+                                              className="flex items-center px-3 py-1.5 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-md shadow-sm transition-colors"
+                                          >
+                                              <Check size={14} className="mr-1" /> 保存修改
+                                          </button>
+                                      </div>
+                                  </div>
+                              ) : (
+                                  <>
+                                      {/* 默认的只读展示模式 */}
+                                      <div className="absolute top-3 right-3 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                          <button 
+                                              onClick={() => {
+                                                  setEditingMemoId(memo.id);
+                                                  setEditMemoForm({ decisionType: memo.decisionType, coreLogic: memo.coreLogic });
+                                              }} 
+                                              title="人工修改记忆"
+                                              className="text-slate-400 hover:text-blue-500 bg-slate-50 hover:bg-blue-50 dark:bg-slate-900 dark:hover:bg-blue-900/30 p-1.5 rounded-lg transition-colors"
+                                          >
+                                              <Edit size={16}/>
+                                          </button>
+                                          <button 
+                                              onClick={() => handleDeleteMemo(memo.id)} 
+                                              title="抹除此记忆"
+                                              className="text-slate-400 hover:text-red-500 bg-slate-50 hover:bg-red-50 dark:bg-slate-900 dark:hover:bg-red-900/30 p-1.5 rounded-lg transition-colors"
+                                          >
+                                              <Trash2 size={16}/>
+                                          </button>
+                                      </div>
+
+                                      <div className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-1 pr-16">
+                                          {memo.targetName} <span className="text-slate-400 font-mono text-xs font-normal">({memo.target})</span>
+                                      </div>
+                                      <div className="text-xs text-purple-600 dark:text-purple-400 font-bold mb-2 inline-block bg-purple-50 dark:bg-purple-900/30 px-2 py-0.5 rounded">
+                                          定调方向: {memo.decisionType}
+                                      </div>
+                                      <div className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed bg-slate-50 dark:bg-slate-900/50 p-2.5 rounded-lg border border-slate-100 dark:border-slate-700/50">
+                                          {memo.coreLogic}
+                                      </div>
+                                      <div className="text-[10px] text-slate-400 mt-3 text-right">
+                                          最后修改于: {new Date(memo.updatedAt).toLocaleString('zh-CN')}
+                                      </div>
+                                  </>
+                              )}
                           </div>
                       ))
                   )}
@@ -640,11 +870,12 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
 };
 
 // 🌟 支持多实例并发与“原计划反查”的优化版 ActionCard
-const ActionCard = ({ action, onConfirm, onCancel, todos = [] }) => { // 🌟 优化1：增加 todos 传参
+const ActionCard = ({ action, onConfirm, onCancel, todos = [] }) => {
     const [form, setForm] = useState({
         date: action.date || new Date().toISOString().split('T')[0],
         feeInput: '',
-        shares: ''
+        shares: '',
+        extractedText: action.extractedText || '' // 🌟 新增：承载可编辑的解析结果
     });
     const [feeMode, setFeeMode] = useState('rate');
     
@@ -653,8 +884,9 @@ const ActionCard = ({ action, onConfirm, onCancel, todos = [] }) => { // 🌟 �
 
     // 🌟 优化2：核心反查逻辑。如果是修改/删除，去本地待办列表里找到原计划的数据
     let targetTodo = null;
-    if (action.toolType === 'todo' && action.todoId) {
-        targetTodo = todos.find(t => t.id === action.todoId);
+    const actualId = action.id || action.todoId; // 兼容前后端不同的命名
+    if (action.toolType === 'todo' && actualId) {
+        targetTodo = todos.find(t => String(t.id) === String(actualId));
     }
 
     const handleConfirmClick = () => {
@@ -663,7 +895,7 @@ const ActionCard = ({ action, onConfirm, onCancel, todos = [] }) => { // 🌟 �
         if (!isNaN(inputVal) && inputVal > 0) {
             finalFeeAmount = feeMode === 'rate' ? rawAmount * (inputVal / 100) : inputVal;
         }
-        onConfirm(action, { date: form.date, fee: finalFeeAmount, shares: form.shares });
+        onConfirm(action, { date: form.date, fee: finalFeeAmount, shares: form.shares, extractedText: form.extractedText });
     };
 
     return (
@@ -675,24 +907,25 @@ const ActionCard = ({ action, onConfirm, onCancel, todos = [] }) => { // 🌟 �
             <div className="flex justify-between items-center mb-3">
                         <span className={`font-bold flex items-center ${action.status === 'completed' ? 'text-green-700 dark:text-green-400' : action.status === 'cancelled' ? 'text-slate-500 dark:text-slate-400' : 'text-slate-800 dark:text-slate-200'}`}>
                             {action.status === 'completed'
-                                ? (action.toolType === 'memo' ? '✅ 记忆已存入大脑' : action.toolType === 'fof_dict' ? '✅ 底层穿透已入库' : '✅ 调仓/计划已处理')
+                                ? (action.toolType === 'data_confirmation' ? '✅ 数据已核验并传输' : action.toolType === 'memo' ? '✅ 记忆已存入大脑' : action.toolType === 'fof_dict' ? '✅ 底层穿透已入库' : '✅ 调仓/计划已处理')
                                 : action.status === 'cancelled'
                                 ? '⛔ 操作已撤销'
-                                : (action.toolType === 'memo' ? '🧠 AI 战略备忘录' : action.toolType === 'fof_dict' ? '🧬 FOF 资产穿透' : action.toolType === 'todo' ? '📅 AI 交易计划单' : '🤖 AI 自动化单据')}
+                                : (action.toolType === 'data_confirmation' ? '👀 智算眼：数据解析核验' : action.toolType === 'memo' ? '🧠 AI 战略备忘录' : action.toolType === 'fof_dict' ? '🧬 FOF 资产穿透' : action.toolType === 'todo' ? '📅 AI 交易计划单' : '🤖 AI 自动化单据')}
                         </span>
 
                         <span className={`px-2 py-0.5 rounded text-xs font-bold ${
                             action.status === 'completed' ? 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' :
                             action.status === 'cancelled' ? 'bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400' :
-                            (action.toolType === 'memo' ? 'bg-purple-100 text-purple-600 dark:bg-purple-900/30' :
-                            action.toolType === 'fof_dict' ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30' : // 🌟 为 X-Ray 字典分配科技蓝色标签
+                            (action.toolType === 'data_confirmation' ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30' : // 🌟 为验证卡片增加蓝绿色徽章
+                            action.toolType === 'memo' ? 'bg-purple-100 text-purple-600 dark:bg-purple-900/30' :action.toolType === 'fof_dict' ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30' : // 🌟 为 X-Ray 字典分配科技蓝色标签
                             (action.manageType === 'delete' || action.actionType === 'delete') ? 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400' :
                             (action.manageType === 'update' || action.actionType === 'update') ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30' :
                             (action.tradeDirection === 'buy' || action.actionType === 'buy') ? 'bg-red-100 text-red-600 dark:bg-red-900/30' :
                             (action.tradeDirection === 'sell' || action.actionType === 'sell') ? 'bg-green-100 text-green-600 dark:bg-green-900/30' :
                             'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300')
                         }`}>
-                            {action.toolType === 'memo' ? '战略定调' :
+                            {action.toolType === 'data_confirmation' ? 'Human-in-Loop' :
+                             action.toolType === 'memo' ? '战略定调' :
                              action.toolType === 'fof_dict' ? 'X-Ray 字典' : // 🌟 右上角小徽章文字
                              (action.manageType === 'delete' || action.actionType === 'delete') ? '计划废除' :
                              (action.manageType === 'update' || action.actionType === 'update') ? '计划顺延' :
@@ -770,6 +1003,25 @@ const ActionCard = ({ action, onConfirm, onCancel, todos = [] }) => { // 🌟 �
                    </div>
                 )}
 
+                {/* 👁️ 5. 数据解析核验专属显示 */}
+                {action.toolType === 'data_confirmation' && (
+                    <div className="mt-2 space-y-2">
+                        <div className="text-xs text-amber-600 dark:text-amber-500 font-bold mb-1.5 flex items-center">
+                            <Activity size={14} className="mr-1"/> 
+                            涉及真实资金决策，请务必核对下方 OCR 提取的内容，您可直接修改修正：
+                        </div>
+                        {action.previewUrl && (
+                            <img src={action.previewUrl} alt="原始图片" className="max-h-32 object-contain rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm mb-2 opacity-90"/>
+                        )}
+                        <textarea
+                            disabled={action.status !== 'pending'}
+                            value={form.extractedText}
+                            onChange={e => setForm({...form, extractedText: e.target.value})}
+                            className={`w-full p-3 text-[13px] leading-relaxed font-mono bg-white dark:bg-slate-950 border border-teal-200 dark:border-teal-800/60 rounded-xl outline-none custom-scrollbar transition-all ${action.status === 'pending' ? 'focus:ring-2 focus:ring-teal-500 min-h-[160px]' : 'min-h-[80px] text-slate-500'}`}
+                        />
+                    </div>
+                )}
+
                 {/* 仅记账单处于 pending 时，才渲染具体的交易表单 */}
                 {isPending && action.toolType === 'ledger' && action.actionType !== 'delete' && (
                     <div className="mt-3 p-3 bg-white/50 dark:bg-slate-950/30 rounded-lg border border-indigo-100 dark:border-indigo-800/50 space-y-2.5">
@@ -799,12 +1051,14 @@ const ActionCard = ({ action, onConfirm, onCancel, todos = [] }) => { // 🌟 �
                 <div className="flex space-x-3 mt-4">
                     <button onClick={() => onCancel(action)} className="flex-1 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">驳回修改</button>
                     <button onClick={handleConfirmClick} className={`flex-1 py-1.5 rounded-lg text-white text-sm font-medium shadow-md transition-colors ${
+                        action.toolType === 'data_confirmation' ? 'bg-teal-600 hover:bg-teal-700' :
                         action.toolType === 'memo' ? 'bg-purple-600 hover:bg-purple-700' : 
                         action.toolType === 'fof_dict' ? 'bg-blue-600 hover:bg-blue-700' : 
                         action.toolType === 'todo' ? (action.manageType === 'delete' ? 'bg-red-500 hover:bg-red-600' : 'bg-amber-500 hover:bg-amber-600') : 
                         (action.actionType === 'delete' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700')
                     }`}>
-                        {action.toolType === 'memo' ? '确认写入长期记忆' : 
+                        {action.toolType === 'data_confirmation' ? '✅ 数据无误，请求深度分析' :
+                         action.toolType === 'memo' ? '确认写入长期记忆' : 
                          action.toolType === 'fof_dict' ? '确认写入云端字典' :
                          action.toolType === 'todo' ? (action.manageType === 'delete' ? '确认废除此计划' : action.manageType === 'update' ? '确认顺延/更新计划' : '确认加入待办') : 
                          (action.actionType === 'delete' ? '确认撤销记录' : '确认并入账')}
