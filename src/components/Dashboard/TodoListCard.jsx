@@ -56,16 +56,16 @@ export const TodoListCard = ({ todos, onAddTodo, onToggleTodo, onDeleteTodo }) =
       <div className="flex-1 min-w-0">
         {todo.type === 'ai_plan' ? (
           <div className="flex flex-col">
-            <div className="flex items-center space-x-2 mb-1.5">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-1.5">
               <PriorityBadge priority={todo.priority} isCompleted={todo.isCompleted} />
-              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${todo.actionType === 'buy' ? 'bg-red-100 text-red-600' : todo.actionType === 'sell' ? 'bg-green-100 text-green-600' : 'bg-indigo-100 text-indigo-600'}`}>
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${todo.actionType === 'buy' ? 'bg-red-100 text-red-600' : todo.actionType === 'sell' ? 'bg-green-100 text-green-600' : 'bg-indigo-100 text-indigo-600'}`}>
                 {todo.actionType === 'buy' ? '计划买入' : todo.actionType === 'sell' ? '计划卖出' : '持续观察'}
               </span>
-              <span className={`font-bold text-sm truncate ${todo.isCompleted ? 'line-through text-slate-400' : 'text-slate-800 dark:text-slate-200'}`}>
+              <span className={`font-bold text-sm ${todo.isCompleted ? 'line-through text-slate-400' : 'text-slate-800 dark:text-slate-200'}`}>
                 {todo.fundName} ({todo.fundCode})
               </span>
             </div>
-            <p className={`text-xs leading-relaxed ${todo.isCompleted ? 'text-slate-400' : 'text-slate-600 dark:text-slate-400'}`}>
+            <p className={`text-xs leading-relaxed break-words ${todo.isCompleted ? 'text-slate-400' : 'text-slate-600 dark:text-slate-400'}`}>
               <Target size={12} className="inline mr-1 text-amber-500 shrink-0" />
               条件: <span className={!todo.isCompleted && todo.priority==='high' ? 'font-bold text-red-600 dark:text-red-400' : ''}>{todo.condition}</span> {todo.amount ? `| 预备金额: ${todo.amount}元` : ''}
             </p>
@@ -77,14 +77,14 @@ export const TodoListCard = ({ todos, onAddTodo, onToggleTodo, onDeleteTodo }) =
           </div>
         )}
       </div>
-      <button onClick={() => onDeleteTodo(todo.id)} className="opacity-0 group-hover:opacity-100 ml-2 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all">
+      <button onClick={() => onDeleteTodo(todo.id)} className="opacity-100 md:opacity-0 md:group-hover:opacity-100 ml-2 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all touch-target shrink-0">
         <Trash2 size={16} />
       </button>
     </div>
   );
 
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden mt-6 transition-colors duration-500 flex flex-col h-[650px]">
+    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden mt-6 transition-colors duration-500 flex flex-col h-[550px] md:h-[650px]">
       <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 shrink-0">
         <h3 className="text-base sm:text-lg font-bold flex items-center text-slate-800 dark:text-white">
           <Clock className="mr-2 text-indigo-500" /> 交易计划与待办事项
@@ -105,16 +105,17 @@ export const TodoListCard = ({ todos, onAddTodo, onToggleTodo, onDeleteTodo }) =
         </form>
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
+      {/* 移动端统一滚动，桌面端左右分栏独立滚动 */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar md:overflow-hidden md:flex md:flex-row">
         {/* 左栏：待办 */}
-        <div className="flex-1 flex flex-col border-r border-slate-100 dark:border-slate-700 w-1/2">
+        <div className="flex flex-col border-b md:border-b-0 md:border-r border-slate-100 dark:border-slate-700 w-full md:w-1/2 md:flex-1 md:overflow-hidden">
           <div className="px-4 py-2 bg-slate-50 dark:bg-slate-800/80 text-xs font-bold text-slate-500 border-b border-slate-100 dark:border-slate-700 shrink-0 flex justify-between items-center">
             <span>⏳ 进行中 ({pendingTodos.length})</span>
-            <span className="text-[10px] bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded text-slate-600 dark:text-slate-300">高优先级置顶</span>
+            <span className="text-[10px] bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded text-slate-600 dark:text-slate-300 hidden sm:inline">高优先级置顶</span>
           </div>
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2 bg-slate-50/30 dark:bg-slate-900/20">
+          <div className="md:flex-1 md:overflow-y-auto custom-scrollbar p-3 space-y-2 bg-slate-50/30 dark:bg-slate-900/20">
             {pendingTodos.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-70">
+              <div className="flex flex-col items-center justify-center text-slate-400 opacity-70 py-8">
                 <AlertCircle size={32} className="mb-2" />
                 <span className="text-sm">暂无待办计划</span>
               </div>
@@ -123,13 +124,13 @@ export const TodoListCard = ({ todos, onAddTodo, onToggleTodo, onDeleteTodo }) =
         </div>
 
         {/* 右栏：已完成 */}
-        <div className="flex-1 flex flex-col w-1/2">
+        <div className="flex flex-col w-full md:w-1/2 md:flex-1 md:overflow-hidden">
           <div className="px-4 py-2 bg-slate-50 dark:bg-slate-800/80 text-xs font-bold text-slate-500 border-b border-slate-100 dark:border-slate-700 shrink-0">
             ✅ 已完成 ({completedTodos.length})
           </div>
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2 bg-slate-50/10 dark:bg-slate-900/10">
+          <div className="md:flex-1 md:overflow-y-auto custom-scrollbar p-3 space-y-2 bg-slate-50/10 dark:bg-slate-900/10">
             {completedTodos.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-slate-400 opacity-50 text-sm">空空如也</div>
+              <div className="flex items-center justify-center text-slate-400 opacity-50 text-sm py-8">空空如也</div>
             ) : completedTodos.map(renderTodoItem)}
           </div>
         </div>

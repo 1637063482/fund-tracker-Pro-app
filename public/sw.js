@@ -1,4 +1,4 @@
-const CACHE_NAME = 'fund-tracker-v3';
+const CACHE_NAME = 'fund-tracker-v4';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -32,13 +32,24 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Network-First for HTML navigation: ensures fresh index.html after updates
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          const cloned = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, cloned));
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // Cache-First for static assets (JS/CSS/images have hashed filenames)
   event.respondWith(
     caches.match(event.request).then((response) => {
-      return response || fetch(event.request).catch(() => {
-        if (event.request.mode === 'navigate') {
-          return caches.match('/index.html');
-        }
-      });
+      return response || fetch(event.request);
     })
   );
 });

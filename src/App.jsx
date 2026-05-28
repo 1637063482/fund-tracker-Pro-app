@@ -4,15 +4,16 @@ import {
   AlertCircle, TrendingUp, TrendingDown, PieChart, Archive, ArrowUpDown, ArrowUp, ArrowDown, 
   Plus, Edit3, Trash2, Award, Target, CheckCircle2, RefreshCcw, Sparkles, X, Cloud
 } from 'lucide-react';
-import { SplashScreen } from '@capacitor/splash-screen';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 // 注意检查 firebase/firestore 导入中是否有 addDoc (如果没有请补上)
 import { collection, doc, setDoc, deleteDoc, onSnapshot, query, addDoc } from 'firebase/firestore';
 
 // --- 引入拆分出来的功能 ---
 import { auth, db, appId } from './config/firebase';
-import { ASSET_NAMES, PROXY_NODES } from './config/constants';
+import { PROXY_NODES } from './config/constants';
 import { evaluateExpression, calculateXIRR, formatMoney, formatPercent, checkIsTradingTime } from './utils/helpers';
+import { fetchFundNavService } from './services/navFetcher';
+import { fetchMarketService } from './services/marketFetcher';
 import { AnimatedNumber } from './components/UI/AnimatedNumber';
 import { DonutChart } from './components/UI/DonutChart';
 import { MarketTimeIndicator } from './components/Dashboard/MarketTimeIndicator';
@@ -22,22 +23,34 @@ import { FundProfileModal } from './components/Fund/FundProfileModal';
 import { FundEditor } from './components/Fund/FundEditor';
 import { PortfolioAnalysisModal } from './components/Portfolio/PortfolioAnalysisModal';
 import { TodoListCard } from './components/Dashboard/TodoListCard';
+import { SmartBadges } from './components/Fund/SmartBadges';
+import { useBaseFundsData } from './hooks/useBaseFundsData';
+import { usePortfolioStats } from './hooks/usePortfolioStats';
 
 
-// 提取移除函数（强化版：防止 iOS 渲染树残留导致的白屏穿透）
+// 提取移除函数（核打击版：绝对防止移动端放大镜图层穿透）
 const removeGlobalSplash = () => {
   const splash = document.getElementById('global-splash');
   if (splash) {
-    // 第一道防线：瞬间剥夺它的触摸权限，防止用户在渐隐的 0.5 秒内长按屏幕
-    splash.style.pointerEvents = 'none'; 
-    splash.style.transition = 'opacity 0.5s ease-out';
+    // 1. 瞬间将其踢出 Z 轴的最底层，并剥夺触摸权限
+    splash.style.zIndex = '-99999';
+    splash.style.pointerEvents = 'none';
+    
+    // 2. 瞬间破坏它的物理几何尺寸，让系统放大镜彻底失去抓取目标
+    splash.style.width = '1px';
+    splash.style.height = '1px';
+    splash.style.overflow = 'hidden';
+    
+    // 3. 将其移出屏幕可视区域外
+    splash.style.transform = 'translate(-9999px, -9999px)';
     splash.style.opacity = '0';
     
+    // 4. 毫不留情地从 DOM 树拔除（缩短到 50ms）
     setTimeout(() => {
-      // 第二道防线：先彻底破坏它的显示层级，再从 DOM 树拔除
-      splash.style.display = 'none';
-      splash.remove();
-    }, 500);
+      if (splash.parentNode) {
+        splash.parentNode.removeChild(splash);
+      }
+    }, 50);
   }
 };
 
@@ -93,7 +106,6 @@ export default function App() {
     navDataSource: 'tiantian',
     aiProvider: 'gemini',
     aiApiKey: '',
-    aiModel: '',
     ntfyTopic: 'fund_tracker_my_secret_123',
     idleFunds: 0,
     tavilyApiKey: '', 
@@ -171,23 +183,6 @@ export default function App() {
       document.documentElement.classList.remove('dark');
     }
   }, [theme]);
-
-  // ==========================================
-  // 【核心修复区 2】瞬间隐藏原生 Android 启动页 (只挂载执行一次)
-  // ==========================================
-  useEffect(() => {
-    const hideNativeSplash = async () => {
-      try {
-        if (typeof SplashScreen !== 'undefined' && SplashScreen.hide) {
-          // 【防闪屏核心 3】传入 fadeOutDuration: 0，干掉 Capacitor 默认的渐隐，实现“瞬间交接”
-          await SplashScreen.hide({ fadeOutDuration: 0 });
-        }
-      } catch (e) {
-        console.warn("Native splash hide failed", e);
-      }
-    };
-    hideNativeSplash();
-  }, []);
 
   // ==========================================
   // 【核心修复区 3】处理前端 DOM 开屏动画 (跟随 authLoading)
@@ -386,135 +381,10 @@ export default function App() {
   };
 
   const fetchFundNavManually = async (codeToFetch = null) => {
-     let codesToQuery =[];
-     if (codeToFetch) {
-         codesToQuery.push(codeToFetch);
-         setFetchingNavCodes(prev => ({...prev,[codeToFetch]: true}));
-     } else {
-         codesToQuery = funds.filter(f => f.mode === 'auto' && !f.isArchived && f.fundCode).map(f => f.fundCode);
-     }
-     
-     if (codesToQuery.length === 0) return false;
-     codesToQuery =[...new Set(codesToQuery)];
-     const newNavs = { ...fundNavs };
-     let hasChanges = false;
-     let fetchSuccess = false;
-     let currentDataSource = settings.navDataSource || 'tiantian';
-
-     const fetchViaProxy = async (targetUrl) => {
-        let fetchUrl = '';
-        if (settings.proxyMode === 'custom' && settings.customProxyUrl) {
-            fetchUrl = settings.customProxyUrl.includes('{{url}}') 
-                ? settings.customProxyUrl.replace('{{url}}', encodeURIComponent(targetUrl))
-                : settings.customProxyUrl + targetUrl;
-        } else {
-            fetchUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
-        }
-        return await fetch(fetchUrl);
-     };
-
-     for (let code of codesToQuery) {
-        try {
-           const fundObj = funds.find(f => f.fundCode === code);
-           const fallbackName = fundNavs[code]?.name || fundObj?.name || '未知名称';
-
-           if (currentDataSource === 'tiantian') {
-               const result = await new Promise((resolve, reject) => {
-                  const script = document.createElement('script');
-                  script.referrerPolicy = "no-referrer"; 
-                  script.charset = "utf-8"; 
-                  const timer = setTimeout(() => { script.remove(); reject(new Error('Timeout')); }, 8000);
-                  
-                  script.src = `https://fundgz.1234567.com.cn/js/${code}.js?rt=${Date.now()}`;
-                  
-                  script.onload = () => {
-                     clearTimeout(timer);
-                     script.remove();
-                     resolve(); 
-                  };
-                  script.onerror = () => { clearTimeout(timer); script.remove(); reject(new Error('加载失败')); };
-                  
-                  const originalCallback = window.jsonpgz;
-                  window.jsonpgz = (data) => {
-                     if (data && data.fundcode === code) {
-                         const actualNav = parseFloat(data.dwjz);
-                         if (!isNaN(actualNav)) {
-                             const dateStr = data.gztime ? data.gztime.substring(5, 16) : (data.jzrq || '');
-                             resolve({ nav: actualNav, name: data.name, source: '天天(盘中估值)', date: dateStr });
-                         } else {
-                             reject(new Error('无实际净值数据'));
-                         }
-                     }
-                     if (originalCallback) originalCallback(data);
-                  };
-                  
-                  document.head.appendChild(script);
-               });
-
-               if (result && !isNaN(result.nav)) {
-                   newNavs[code] = { nav: result.nav, name: result.name, source: result.source, date: result.date };
-                   hasChanges = true;
-                   fetchSuccess = true;
-               }
-           } else if (currentDataSource === 'sina') {
-               const targetUrl = `https://hq.sinajs.cn/list=f_${code}`;
-               const res = await fetchViaProxy(targetUrl);
-               
-               const buffer = await res.arrayBuffer();
-               const decoder = new TextDecoder('gbk');
-               const text = decoder.decode(buffer);
-               const match = text.match(new RegExp(`hq_str_f_${code}="([^"]*)";`));
-               if (match && match[1]) {
-                  const parts = match[1].split(',');
-                  const currentNav = parseFloat(parts[1]); 
-                  
-                  if (!isNaN(currentNav)) {
-                     const dateStr = parts[4] ? parts[4].substring(5) : ''; 
-                     newNavs[code] = { nav: currentNav, name: parts[0], source: '新浪财经', date: dateStr };
-                     hasChanges = true;
-                     fetchSuccess = true;
-                  }
-               }
-           } else if (currentDataSource === 'tiantian_lsjz') {
-               const targetUrl = `http://api.fund.eastmoney.com/f10/lsjz?fundCode=${code}&pageIndex=1&pageSize=1`;
-               const res = await fetchViaProxy(targetUrl);
-               const data = await res.json();
-               const navStr = data?.Data?.LSJZList?.[0]?.DWJZ;
-               if (navStr) {
-                   const nav = parseFloat(navStr);
-                   if (!isNaN(nav)) {
-                       const dateStr = data?.Data?.LSJZList?.[0]?.FSRQ?.substring(5) || '';
-                       newNavs[code] = { nav, name: fallbackName, source: '天天(Web历史)', date: dateStr };
-                       hasChanges = true; fetchSuccess = true;
-                   }
-               }
-           } else if (currentDataSource === 'danjuan') {
-               const targetUrl = `https://danjuanfunds.com/djapi/fund/${code}`;
-               const res = await fetchViaProxy(targetUrl);
-               const data = await res.json();
-               const nav = parseFloat(data?.data?.fund_derived?.unit_nav);
-               const name = data?.data?.fd_name || fallbackName;
-               if (!isNaN(nav)) {
-                   const dateStr = data?.data?.fund_derived?.end_date?.substring(5) || '';
-                   newNavs[code] = { nav, name, source: '蛋卷基金', date: dateStr };
-                   hasChanges = true; fetchSuccess = true;
-               }
-           }
-
-        } catch(e) {
-           console.warn(`拉取基金 ${code} 净值失败 (${currentDataSource}):`, e);
-        }
-     }
-
-    if (hasChanges) {
-         setFundNavs(newNavs);
-     }
-     
-     if (codeToFetch) {
-        setFetchingNavCodes(prev => ({...prev,[codeToFetch]: false}));
-        return fetchSuccess ? newNavs[codeToFetch] : false;
-     }
-     return fetchSuccess;
+    return fetchFundNavService({
+      codeToFetch, funds, fundNavs, settings,
+      setFundNavs, setFetchingNavCodes
+    });
   };
 
   useEffect(() => {
@@ -523,109 +393,11 @@ export default function App() {
   },[user, funds, settings.proxyMode, settings.customProxyUrl, settings.navDataSource]);
 
   const fetchMarketAPI = async () => {
-    if (!user) return; 
-    
-    let targetUrl = '';
-    let dataSourceStr = settings.dataSource || 'tencent';
-    
-    const shCode = '000001';
-    const szCode = '399001';
-    const cyCode = '399006';
-    const bond10 = '511260';
-    const bond30 = '511090';
-
-    if (dataSourceStr === 'tencent') {
-        const codes = `sh${shCode},sz${szCode},sz${cyCode},sh${bond10},sh${bond30}`;
-        targetUrl = `https://qt.gtimg.cn/q=${codes}`;
-    } else if (dataSourceStr === 'sina') {
-        const codes = `sh${shCode},sz${szCode},sz${cyCode},sh${bond10},sh${bond30}`;
-        targetUrl = `https://hq.sinajs.cn/list=${codes}`;
-    } else if (dataSourceStr === 'xueqiu') {
-        const codes = `SH${shCode},SZ${szCode},SZ${cyCode},SH${bond10},SH${bond30}`;
-        targetUrl = `https://stock.xueqiu.com/v5/stock/realtime/quotec.json?symbol=${codes}`;
-    }
-
-    let textData = '';
-    let isJsonResp = false;
-
-    if (settings.proxyMode === 'custom' && settings.customProxyUrl) {
-       let fetchUrl = settings.customProxyUrl.includes('{{url}}') 
-           ? settings.customProxyUrl.replace('{{url}}', encodeURIComponent(targetUrl))
-           : settings.customProxyUrl + targetUrl;
-       const r = await fetch(fetchUrl);
-       if (dataSourceStr === 'xueqiu') {
-          textData = await r.json();
-          isJsonResp = true;
-       } else {
-          textData = await r.text();
-       }
-    } else {
-       const node = PROXY_NODES[activeProxyIndex];
-       if (dataSourceStr === 'xueqiu') {
-         const r = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`);
-         const d = await r.json();
-         textData = JSON.parse(d.contents);
-         isJsonResp = true;
-       } else {
-         textData = await node.fetcher(targetUrl);
-       }
-    }
-
-    if (textData) {
-      let parsedData =[];
-      if (dataSourceStr === 'xueqiu' && isJsonResp && textData.data) {
-         parsedData = textData.data.map(item => {
-           let codeRaw = item.symbol.toLowerCase();
-           return {
-              id: codeRaw,
-              name: ASSET_NAMES[codeRaw] || '未知资产',
-              price: parseFloat(item.current),
-              change: parseFloat(item.chg),
-              percent: parseFloat(item.percent) / 100
-           };
-         });
-      } else if (typeof textData === 'string') {
-        const blocks = textData.split(';').filter(b => b.includes('='));
-        parsedData = blocks.map(block => {
-          if (dataSourceStr === 'tencent' && block.includes('v_')) {
-              const codeMatch = block.match(/v_([a-z0-9]+)=/);
-              if (!codeMatch) return null;
-              const code = codeMatch[1];
-              const vals = block.split('"')[1]?.split('~');
-              if (!vals || vals.length < 33) return null;
-              return {
-                id: code, name: ASSET_NAMES[code] || vals[1],
-                price: parseFloat(vals[3]), change: parseFloat(vals[31]), percent: parseFloat(vals[32]) / 100
-              };
-          } else if (dataSourceStr === 'sina' && block.includes('hq_str_')) {
-              const codeMatch = block.match(/hq_str_([a-z0-9]+)=/);
-              if (!codeMatch) return null;
-              const code = codeMatch[1];
-              const vals = block.split('"')[1]?.split(',');
-              if (!vals || vals.length < 4) return null;
-               const currentPrice = parseFloat(vals[3]);
-              const prevClose = parseFloat(vals[2]);
-              const change = currentPrice - prevClose;
-              const percent = prevClose !== 0 ? change / prevClose : 0;
-              return {
-                id: code, name: ASSET_NAMES[code] || '未知资产',
-                price: currentPrice, change: change, percent: percent
-              };
-          }
-          return null;
-        }).filter(Boolean);
-      }
-      
-      if (parsedData.length > 0) {
-          const order = Object.keys(ASSET_NAMES);
-          parsedData.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
-
-          setMarketData(parsedData);
-          setMarketError('');
-          return true;
-      }
-    }
-    throw new Error("Invalid data format or empty response");
+    if (!user) return;
+    return fetchMarketService({
+      settings, activeProxyIndex,
+      setMarketData, setMarketError
+    });
   };
 
   const manualFetch = useCallback(async () => {
@@ -784,73 +556,7 @@ export default function App() {
     linkElement.click();
   };
 
-  const { baseFundsData, preXirrPayloads, globalPreCashFlows } = useMemo(() => {
-    const globalPreCashFlows =[];
-    
-    const baseFundsData = funds.map(f => {
-      let totalInvested = 0; 
-      let realizedReturns = 0; 
-      let cashFlowsForXirr = []; 
-      
-      (f.transactions ||[]).forEach(t => {
-        const rawAmt = evaluateExpression(t.amountRaw);
-        const inferredType = t.type || (rawAmt < 0 ? 'buy' : 'sell');
-        
-        let amt = Math.round(Math.abs(rawAmt) * 100) / 100;
-        
-        if (inferredType === 'buy' || inferredType === 'fee') {
-            totalInvested += amt;
-            cashFlowsForXirr.push({ date: t.date, amount: -amt }); 
-            globalPreCashFlows.push({ date: t.date, amount: -amt });
-        } else if (inferredType === 'sell' || inferredType === 'dividend_cash') {
-            realizedReturns += amt;
-            cashFlowsForXirr.push({ date: t.date, amount: amt }); 
-            globalPreCashFlows.push({ date: t.date, amount: amt });
-        } else if (inferredType === 'dividend_reinvest') {
-        }
-      });
-      
-      let currentVal = 0;
-      if (f.isArchived) {
-          currentVal = 0;
-      } else if (f.mode === 'auto') {
-          const navObj = fundNavs[f.fundCode];
-          const nav = navObj ? navObj.nav : (f.lastNav || 0);
-          currentVal = (Number(f.shares) || 0) * nav;
-          if (currentVal === 0 && f.currentValueRaw) {
-             const oldVal = evaluateExpression(f.currentValueRaw);
-             if (!isNaN(oldVal)) currentVal = oldVal;
-          }
-      } else {
-          currentVal = evaluateExpression(f.currentValueRaw) || 0;
-      }
-
-      currentVal = Math.round(currentVal * 100) / 100;
-
-      if (currentVal > 0) {
-        cashFlowsForXirr.push({ date: new Date().toISOString().split('T')[0], amount: currentVal });
-      }
-
-      const profit = currentVal + realizedReturns - totalInvested;
-      const simpleReturn = totalInvested === 0 ? 0 : profit / totalInvested;
-      const netInvested = Math.max(0, totalInvested - realizedReturns);
-      return { ...f, xirr: xirrMap[f.id] || 0, profit, simpleReturn, totalInvested, netInvested, currentValue: currentVal, _flows: cashFlowsForXirr };
-    });
-
-    const totalCurrentValue = baseFundsData.reduce((sum, f) => sum + f.currentValue, 0);
-    const finalTotalCurrentValue = Math.round(totalCurrentValue * 100) / 100;
-    
-    if (finalTotalCurrentValue > 0) {
-      globalPreCashFlows.push({ 
-        date: new Date().toISOString().split('T')[0], 
-        amount: finalTotalCurrentValue,
-        isTerminal: true 
-      });
-    }
-
-    const preXirrPayloads = baseFundsData.map(f => ({ id: f.id, flows: f._flows }));
-    return { baseFundsData, preXirrPayloads, globalPreCashFlows };
-  },[funds, fundNavs, xirrMap]);
+  const { baseFundsData, preXirrPayloads, globalPreCashFlows } = useBaseFundsData(funds, fundNavs, xirrMap);
 
   useEffect(() => {
     let isCancelled = false;
@@ -881,109 +587,7 @@ export default function App() {
     return () => { isCancelled = true; };
   },[preXirrPayloads, globalPreCashFlows]);
 
-  const portfolioStats = useMemo(() => {
-    if (!baseFundsData) return { pieData:[], contributionPieData: [], assetAllocationData:[], rankedByXirr: [], rankedByProfit:[], computedFundsWithMetrics:[], alpha: 0 };
-
-    const baseFunds = baseFundsData.map(f => ({ ...f, xirr: xirrMap[f.id] || 0 }));
-
-    const portfolioTotalCurrentValue = baseFunds.reduce((sum, f) => sum + f.currentValue, 0);
-    const portfolioTotalInvested = baseFunds.reduce((sum, f) => sum + f.totalInvested, 0);
-    const portfolioTotalProfit = baseFunds.reduce((sum, f) => sum + f.profit, 0); 
-    const overallSimpleReturn = portfolioTotalInvested === 0 ? 0 : portfolioTotalProfit / portfolioTotalInvested;
-
-    const computedFundsWithMetrics = baseFunds.map(f => {
-      const holdingWeight = portfolioTotalCurrentValue === 0 ? 0 : (f.currentValue / portfolioTotalCurrentValue);
-      let profitWeight = 0;
-     
-      if (portfolioTotalProfit > 0 && f.profit > 0) {
-        profitWeight = f.profit / portfolioTotalProfit;
-      } else if (portfolioTotalProfit < 0 && f.profit < 0) {
-        profitWeight = f.profit / portfolioTotalProfit;
-      }
-      const contribution = portfolioTotalInvested === 0 ? 0 : f.profit / portfolioTotalInvested;
-
-      return { ...f, holdingWeight, profitWeight, contribution };
-    });
-
-    const pieData = computedFundsWithMetrics
-      .filter(f => f.currentValue > 0 && !f.isArchived)
-      .map(f => ({ name: f.name, value: f.currentValue }))
-      .sort((a, b) => b.value - a.value);
-      
-    const contributionPieData = computedFundsWithMetrics
-      .filter(f => f.contribution > 0)
-      .map(f => ({ name: f.name, value: f.contribution }))
-      .sort((a, b) => b.value - a.value);
-
-    const assetAllocation = {};
-    computedFundsWithMetrics.forEach(f => {
-        if (f.currentValue <= 0 || f.isArchived) return;
-        const profile = fundProfiles[f.fundCode];
-        let category = "其他偏股/未分类"; 
-        if (profile && profile.op_fund && profile.op_fund.fund_tags) {
-            const typeTag = profile.op_fund.fund_tags.find(t => t.category === "1"); 
-            if (typeTag) category = typeTag.name;
-            else if (profile.type_desc) category = profile.type_desc;
-        } else if (f.name.includes("债")) {
-            category = "债券型"; 
-        }
-        assetAllocation[category] = (assetAllocation[category] || 0) + f.currentValue;
-    });
-    const assetAllocationData = Object.keys(assetAllocation).map(k => ({ name: k, value: assetAllocation[k] })).sort((a, b) => b.value - a.value);
-      
-    const rankedByXirr =[...computedFundsWithMetrics].filter(f => f.transactions.length > 0).sort((a, b) => b.xirr - a.xirr);
-    const rankedByProfit =[...computedFundsWithMetrics].filter(f => f.transactions.length > 0).sort((a, b) => b.profit - a.profit);
-    
-    const netTotalInvested = Math.max(0, portfolioTotalCurrentValue - portfolioTotalProfit);
-    const safeTargetAmount = Number(settings.targetAmount) || 0;
-    const gap = Math.max(0, safeTargetAmount - portfolioTotalProfit); 
-    const today = new Date();
-    const target = new Date(settings.targetDate);
-    const monthsLeft = Math.max(1, (target.getFullYear() - today.getFullYear()) * 12 + target.getMonth() - today.getMonth());
-    let projectedAssets = portfolioTotalCurrentValue;
-    if (overallXirr > 0 && monthsLeft > 0) {
-       projectedAssets = portfolioTotalCurrentValue * Math.pow(1 + overallXirr, monthsLeft / 12);
-    }
-
-    const targetAnnualRate = Number(settings.targetAnnualRate) || 5;
-    let expectedDailyProfit = 0;
-    let daysToBreakEven = null;
-    let baselineValue = 0;
-    
-    globalPreCashFlows.forEach(cf => {
-       if (cf.amount < 0) {
-           const days = (new Date() - new Date(cf.date)) / (1000 * 60 * 60 * 24);
-           const years = Math.max(0, days / 365);
-           baselineValue += Math.abs(cf.amount) * Math.pow(1 + (targetAnnualRate / 100), years); 
-       } else if (cf.amount > 0 && !cf.isTerminal) { 
-           baselineValue -= cf.amount;
-       }
-    });
-    
-    baselineValue = Math.max(0, baselineValue);
-    const deviationAmount = portfolioTotalCurrentValue - baselineValue;
-    
-    const alpha = overallXirr - (targetAnnualRate / 100);
-
-    return { 
-      totalInvested: netTotalInvested, 
-      totalCurrentValue: Math.round(portfolioTotalCurrentValue * 100) / 100,
-      overallXirr, 
-      totalProfit: Math.round(portfolioTotalProfit * 100) / 100, 
-      overallSimpleReturn, 
-      pieData,
-      contributionPieData,
-      assetAllocationData, 
-      rankedByXirr, 
-      rankedByProfit,
-      computedFundsWithMetrics,
-      alpha, 
-      gap, monthsLeft, requiredMonthly: gap / monthsLeft,
-      safeTargetAmount, targetAnnualRate,
-      projectedAssets, daysToBreakEven, expectedDailyProfit,
-      baselineValue, deviationAmount
-    };
-  },[baseFundsData, settings, overallXirr, globalPreCashFlows, xirrMap, fundProfiles]);
+  const portfolioStats = usePortfolioStats(baseFundsData, settings, overallXirr, globalPreCashFlows, xirrMap, fundProfiles);
 
   const sortedFunds = useMemo(() => {
     if (!portfolioStats.computedFundsWithMetrics) return[];
@@ -1034,52 +638,6 @@ export default function App() {
     return null;
   },[editingFundId, funds]);
 
-  const renderSmartBadges = (fund) => {
-      if (fundTab !== 'active' || fund.mode !== 'auto' || !fund.fundCode) return null;
-      const profile = fundProfiles[fund.fundCode];
-      if (!profile) return null;
-
-      const isBond = fund.name.includes("债") || (profile.type_desc && profile.type_desc.includes("债"));
-      const derived = profile.fund_derived || {};
-      
-      let rankPercentile = 0.5;
-      if (derived.srank_l1y && derived.srank_l1y.includes('/')) {
-         const parts = derived.srank_l1y.split('/');
-         const pos = parseFloat(parts[0]);
-         const total = parseFloat(parts[1]);
-         if (!isNaN(pos) && !isNaN(total) && total > 0) {
-             rankPercentile = pos / total;
-         }
-      }
-
-      const returnRate = fund.totalInvested > 0 ? fund.profit / fund.totalInvested : 0;
-      const grl1m = parseFloat(derived.nav_grl1m || 0);
-      const badges =[];
-
-      // 优化量化判定逻辑：排名垫底且亏钱才是真垃圾；排名垫底但不亏钱视为平庸防守资产
-      const isGarbage = rankPercentile > 0.7 && returnRate < 0; 
-      const isMediocre = rankPercentile > 0.7 && returnRate >= 0;
-      const isTopTier = rankPercentile < 0.2;
-
-      if (isGarbage) {
-          badges.push(<span key="warn" className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-red-50 text-red-500 border border-red-200 dark:bg-red-900/30 dark:border-red-800 dark:text-red-400 leading-none shadow-sm whitespace-nowrap">⚠️ 弱势止损</span>);
-      } else if (isMediocre) {
-          badges.push(<span key="warn" className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400 leading-none shadow-sm whitespace-nowrap">🥱 表现平庸</span>);
-      } else {  
-          const profitThreshold = isBond ? 0.04 : 0.15; 
-          const dropThreshold = isBond ? -0.5 : (isTopTier ? -3.0 : -5.0); 
-
-          if (returnRate > profitThreshold) { 
-              const badgeText = isBond ? "🥚 宜收蛋" : "📈 止盈区";
-              badges.push(<span key="sell" className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-red-100 text-red-600 border border-red-200 dark:bg-red-900/30 dark:border-red-800 dark:text-red-400 leading-none shadow-sm whitespace-nowrap">{badgeText}</span>);
-          } else if (grl1m < dropThreshold) { 
-              const badgeText = isBond ? "💧 加仓点" : (isTopTier ? "🔥 优质错杀" : "🔥 黄金坑");
-              badges.push(<span key="buy" className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-green-100 text-green-600 border border-green-200 dark:bg-green-900/30 dark:border-green-800 dark:text-green-400 leading-none shadow-sm whitespace-nowrap">{badgeText}</span>);
-          }
-      }
-      return badges;
-  };
-
   return (
     <>
       {viewingProfileCode && (
@@ -1109,7 +667,7 @@ export default function App() {
       {!authLoading && user && (
         <div className="min-h-screen text-slate-800 dark:text-slate-200 pb-10 relative animate-in fade-in duration-700 bg-slate-50 dark:bg-slate-900">
           
-          <header className="bg-white/90 dark:bg-slate-800/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-700 sticky top-0 z-30 shadow-sm transition-colors duration-500">
+          <header className="bg-white/90 dark:bg-slate-800/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-700 sticky top-0 z-30 shadow-sm transition-colors duration-500 safe-top">
             <div className="max-w-[1600px] mx-auto px-4 h-16 flex items-center justify-between">
               <div className="flex items-center space-x-2 group cursor-pointer">
                 <Activity className="text-blue-600 dark:text-blue-400 transform transition-transform duration-500 group-hover:rotate-180" size={28} />
@@ -1255,7 +813,7 @@ export default function App() {
                   </div>
 
                   <div className="overflow-x-auto relative">
-                    <table className="w-full text-center min-w-[800px]">
+                    <table className="w-full text-center min-w-[600px]">
                       <thead>
                         <tr className="bg-slate-50 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 text-sm sm:text-base xl:text-lg border-b dark:border-slate-700 uppercase tracking-wider select-none">
                           <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-left whitespace-nowrap" onClick={() => requestSort('name')}>
@@ -1265,17 +823,17 @@ export default function App() {
                             <div className="flex items-center justify-center">{fundTab === 'active' ? '现持仓总值' : '清仓时市值'} {getSortIcon('currentValue')}</div>
                           </th>
                           {fundTab === 'active' && (
-                            <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors w-32 sm:w-40 text-center whitespace-nowrap" onClick={() => requestSort('holdingWeight')}>
+                            <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors w-32 sm:w-40 text-center whitespace-nowrap hidden md:table-cell" onClick={() => requestSort('holdingWeight')}>
                               <div className="flex items-center justify-center">持仓占比 {getSortIcon('holdingWeight')}</div>
                             </th>
                           )}
                           <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors w-32 sm:w-40 text-center whitespace-nowrap" onClick={() => requestSort('profit')}>
                             <div className="flex items-center justify-center">总计盈亏 {getSortIcon('profit')}</div>
                           </th>
-                          <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-center whitespace-nowrap" onClick={() => requestSort('xirr')}>
+                          <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-center whitespace-nowrap hidden sm:table-cell" onClick={() => requestSort('xirr')}>
                             <div className="flex items-center justify-center">年化(XIRR) {getSortIcon('xirr')}</div>
                           </th>
-                          <th className="p-4 sm:p-5 font-bold text-center whitespace-nowrap">操作</th>
+                          <th className="p-4 sm:p-5 font-bold text-center whitespace-nowrap touch-visible-actions">操作</th>
                         </tr>
                       </thead>
                       
@@ -1293,7 +851,7 @@ export default function App() {
                                       <button type="button" onClick={() => handleViewProfile(fund.fundCode)} className="text-slate-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 transition-colors duration-300 font-bold whitespace-nowrap underline decoration-dashed decoration-blue-200 dark:decoration-blue-800 underline-offset-4">
                                         {fund.name}
                                       </button>
-                                      {renderSmartBadges(fund)}
+                                      <SmartBadges fund={fund} fundTab={fundTab} fundProfiles={fundProfiles} />
                                     </div>
                                   ) : (
                                     <span className={`transition-all duration-300 whitespace-nowrap ${fundTab==='archived' ? 'line-through text-slate-500' : ''}`}>{fund.name}</span>
@@ -1322,7 +880,7 @@ export default function App() {
                               <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100 whitespace-nowrap">净本金: {formatMoney(fund.netInvested)}</div>
                             </td>
                             {fundTab === 'active' && (
-                              <td className="p-4 sm:p-5 text-center whitespace-nowrap">
+                              <td className="p-4 sm:p-5 text-center whitespace-nowrap hidden md:table-cell">
                                 <div className="font-mono text-slate-700 dark:text-slate-300 text-base sm:text-lg xl:text-xl whitespace-nowrap"><AnimatedNumber value={fund.holdingWeight} formatter={formatPercent} /></div>
                                 <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full mt-2 overflow-hidden mx-auto max-w-[120px] flex justify-start shadow-inner">
                                   <div className="bg-gradient-to-r from-blue-400 to-indigo-500 h-full rounded-full transition-all duration-1000 ease-out" style={{width: `${Math.min(100, fund.holdingWeight * 100)}%`}}></div>
@@ -1333,15 +891,15 @@ export default function App() {
                                <div className={`font-mono font-medium text-base sm:text-lg xl:text-xl transition-colors duration-500 whitespace-nowrap ${fund.profit >= 0 ? 'text-red-500' : 'text-green-500'}`}><AnimatedNumber value={fund.profit} /></div>
                               <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100 whitespace-nowrap">占比: {formatPercent(fund.profitWeight)}</div>
                             </td>
-                            <td className={`p-4 sm:p-5 text-center font-mono font-bold text-base sm:text-lg xl:text-xl transition-colors duration-500 whitespace-nowrap ${fund.xirr >= 0 ? 'text-red-500' : 'text-green-500'}`}>
+                            <td className={`p-4 sm:p-5 text-center font-mono font-bold text-base sm:text-lg xl:text-xl transition-colors duration-500 whitespace-nowrap hidden sm:table-cell ${fund.xirr >= 0 ? 'text-red-500' : 'text-green-500'}`}>
                               <AnimatedNumber value={fund.xirr} formatter={formatPercent} />
                             </td>
-                            <td className="p-4 sm:p-5 text-center whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                            <td className="p-4 sm:p-5 text-center whitespace-nowrap touch-visible-actions opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity duration-200">
                               <div className="flex justify-center items-center">
-                                <button type="button" onClick={() => setEditingFundId(fund.id)} className="text-slate-400 hover:text-blue-600 mx-0.5 sm:mx-1 p-2 rounded-lg hover:bg-blue-50 dark:hover:bg-slate-700 transition-all active:scale-90 shadow-sm whitespace-nowrap" title="编辑这笔投资">
+                                <button type="button" onClick={() => setEditingFundId(fund.id)} className="text-slate-400 hover:text-blue-600 mx-0.5 sm:mx-1 p-2 rounded-lg hover:bg-blue-50 dark:hover:bg-slate-700 transition-all active:scale-90 shadow-sm whitespace-nowrap touch-target" title="编辑这笔投资">
                                   <Edit3 size={18}/>
                                 </button>
-                                <button type="button" onClick={() => handleDeleteFund(fund.id)} className="text-slate-400 hover:text-red-600 mx-0.5 sm:mx-1 p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 transition-all active:scale-90 shadow-sm whitespace-nowrap" title="永久删除">
+                                <button type="button" onClick={() => handleDeleteFund(fund.id)} className="text-slate-400 hover:text-red-600 mx-0.5 sm:mx-1 p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 transition-all active:scale-90 shadow-sm whitespace-nowrap touch-target" title="永久删除">
                                    <Trash2 size={18}/>
                                 </button>
                               </div>
@@ -1353,16 +911,16 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 relative pt-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 relative pt-2">
                   {[
                     { label: '投资总净本金', val: portfolioStats.totalInvested, color: '' },
                     { label: '全盘持仓总值', val: portfolioStats.totalCurrentValue, color: 'text-blue-600 dark:text-blue-400' },
                     { label: '全盘累计盈亏', val: portfolioStats.totalProfit, color: portfolioStats.totalProfit>=0?'text-red-500':'text-green-500' },
                     { label: '综合年化(XIRR)', val: portfolioStats.overallXirr, color: portfolioStats.overallXirr>=0?'text-red-500':'text-green-500', isPercent: true }
                   ].map((item, idx) => (
-                    <div key={idx} className="bg-white dark:bg-slate-800 p-4 sm:p-6 xl:p-8 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm relative overflow-hidden z-10 transition-colors duration-500 hover:shadow-md hover:-translate-y-0.5">
-                      <div className="text-xs sm:text-sm xl:text-base font-bold text-slate-500 mb-1.5 sm:mb-2 relative z-10">{item.label}</div>
-                      <div className={`text-lg sm:text-xl xl:text-3xl font-bold font-mono tabular-nums relative z-10 ${item.color} truncate transition-colors duration-500`} title={item.val}>
+                    <div key={idx} className="bg-white dark:bg-slate-800 p-3 sm:p-4 xl:p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm relative overflow-hidden z-10 transition-colors duration-500 hover:shadow-md hover:-translate-y-0.5">
+                      <div className="text-fluid-stat-sm font-bold text-slate-500 mb-1 sm:mb-1.5 relative z-10">{item.label}</div>
+                      <div className={`text-fluid-stat font-bold font-mono relative z-10 ${item.color} transition-colors duration-500`}>
                           <AnimatedNumber value={item.val} formatter={item.isPercent ? formatPercent : formatMoney} />
                       </div>
                       {idx === 3 && <div className="absolute -right-2 -bottom-2 text-slate-100 dark:text-slate-700/50 transform-gpu"><Award size={90} className="w-[60px] h-[60px] sm:w-[80px] sm:h-[80px] xl:w-[100px] xl:h-[100px] transform rotate-12"/></div>}
@@ -1492,7 +1050,8 @@ export default function App() {
                            value={settings.targetAnnualRate} 
                            onChange={handleTargetRateChange} 
                            placeholder="例如: 5"
-                           className="w-full px-3 py-2 font-bold text-blue-600 dark:text-blue-400 bg-slate-50 border rounded-xl dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all duration-300 shadow-inner" 
+                           step="0.1"
+                           className="w-full px-3 py-2 font-bold text-blue-600 dark:text-blue-400 bg-slate-50 border rounded-xl dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all duration-300 shadow-inner"
                         />
                       </div>
                     </div>

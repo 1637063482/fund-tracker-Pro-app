@@ -1,39 +1,17 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-// 【关键修改1】引入 Globe 图标
 import { MessageSquare, X, Send, RefreshCw, Trash2, Bot, User, Sparkles, Globe, Target, Brain, Activity, Paperclip, Edit, Check } from 'lucide-react';
 import { chatWithPortfolioAI } from '../../utils/ai';
-import { extractDataFromImage } from '../../services/fileParser'; // 🌟 新增：引入独立解析器
-// 【新增】引入 Firebase 数据库组件
-import { doc, setDoc, onSnapshot, getDocs, collection, query, where, updateDoc, deleteDoc } from 'firebase/firestore';
+import { extractDataFromImage } from '../../services/fileParser';
+import { renderMarkdown } from '../../utils/renderMarkdown';
+import { ActionCard } from './ActionCard';
+import { dispatchAction } from './actionHandlers';
+import { doc, setDoc, onSnapshot, collection, query, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 
-// 【性能优化核心】将 Markdown 渲染器移出组件，避免每次渲染重复创建函数和执行正则
-const renderMarkdown = (text) => {
-  return text.split('\n').map((line, idx) => {
-    if (!line.trim()) return <div key={idx} className="h-1"></div>;
-    
-    // 1. 处理 H3 标题
-    if (line.startsWith('### ')) {
-      return <h4 key={idx} className="font-bold text-indigo-700 dark:text-indigo-300 mt-2 mb-1 text-[13px]">{line.replace('### ', '')}</h4>;
-    }
-    
-    let formattedLine = line;
-
-    // 2. 🌟 核心修复：处理 Markdown 图片标签 ![alt](url)
-    formattedLine = formattedLine.replace(
-      /!\[([^\]]*)\]\(([^)]+)\)/g, 
-      '<img src="$2" alt="$1" class="max-w-full h-auto object-contain rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 my-3 bg-white" loading="lazy" />'
-    );
-    // 3. 处理加粗
-    formattedLine = formattedLine.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    return <div key={idx} className="mb-0.5 text-slate-700 dark:text-slate-300 leading-relaxed break-words max-w-full overflow-x-auto custom-scrollbar" dangerouslySetInnerHTML={{ __html: formattedLine }} />;
-  });
-};
-
-// 【修改】接收 user 参数
 export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAddTodo, onUpdateTodo, onDeleteTodo, todos }) => {
   // 🌟 核心修复：状态声明正确移入组件内部
-  const [memos, setMemos] = useState([]); 
+  const [memos, setMemos] = useState([]);
+  const sendBtnRef = useRef(null); 
 
   // 🌟 核心修复：Effect 监听器正确移入组件内部
   useEffect(() => {
@@ -137,10 +115,9 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
       const inspectionPrompt = "【系统自动触发：记忆库例行深度巡检】当前是例行维护日。请提取当前备忘录中的所有基金/资产代码，主动调用工具获取它们的最新精确净值与涨跌幅。然后，请使用 update_decision_memo 逐一覆写并更新那些包含‘过时时效性数字’（如：近1月收益、当前距离击球区的百分比、最新价格等）的记忆卡片。注意：除非基本面逻辑破裂，否则请保留原有的【战略定调】和【击球区阈值】。全部更新完毕后，请输出一份《记忆库洗盘与资产巡检报告》。";
       setInput(inspectionPrompt);
       
-      // 4. 延迟 200ms 等待 React 状态更新后，模拟点击发送按钮
+      // 4. 延迟 200ms 等待 React 状态更新后触发发送
       setTimeout(() => {
-          const sendBtn = document.getElementById('chat-send-btn');
-          if (sendBtn) sendBtn.click();
+          sendBtnRef.current?.click();
       }, 200);
   }, []);
 
@@ -213,7 +190,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
                 status: 'pending',
                 extractedText: extractedText,
                 originalMessage: userMessage,
-                previewUrl: previewUrl
+                // previewUrl: previewUrl
             };
             
             const finalMessages = [...newMessages, { 
@@ -283,230 +260,32 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
     }
   };
 
-  // 🌟 核心升级：接收特定的 action 和 formData
   const handleConfirmAction = useCallback(async (action, formData = {}) => {
     if (!user || !db || !action) return;
+    if (typeof onAddTodo !== 'function') throw new Error("前端传参丢失：onAddTodo 未定义");
     setIsLoading(true);
-    
     try {
-        if (typeof onAddTodo !== 'function') throw new Error("前端传参丢失：onAddTodo 未定义");
-
-        // 🌟🌟 核心架构升级：如果是数据确认卡片，说明用户已核对数据，向 AI 发起请求
-        if (action.toolType === 'data_confirmation') {
-            // 1. 改变卡片状态为已完成
-            setMessages(prev => prev.map(m => {
-                if (m.isAction && m.actions) return { ...m, actions: m.actions.map(a => a.cardId === action.cardId ? { ...a, status: 'completed' } : a) };
-                return m;
-            }));
-
-            // 2. 组装极具杀伤力的 Ground Truth Prompt
-            const activeMarketData = enableMacroRadar ? "FETCH_NOW" : "【纯净模式】";
-            const stitchedPrompt = `【系统强制注入：用户上传并已人工核对无误的 Ground Truth 真实底层数据】\n<verified_data>\n${formData.extractedText}\n</verified_data>\n\n【用户的原始指令】：${action.originalMessage || '请深度分析上述数据并给出具体建议。'}`;
-            
-            // 3. 剥离掉包含卡片的系统历史，提供纯净上下文
-            const chatHistory = messages.filter(m => !m.isAction && m.role !== 'system');
-            
-            // 4. 调用无须任何修改的 ai.js！
-            const reply = await chatWithPortfolioAI(settings, portfolioStats, chatHistory, stitchedPrompt, activeMarketData, useWebSearch, todos, memos);
-            
-            // 5. 将 AI 的深度分析结果追加回聊天框
-            setMessages(prev => {
-                const finalMessages = [...prev];
-                if (typeof reply === 'object' && reply.type === 'ACTION_REQUIRED') {
-                    const actionsWithStatus = reply.payload.map((act, idx) => ({
-                        ...act, cardId: `act_${Date.now()}_${idx}`, status: 'pending'
-                    }));
-                    finalMessages.push({ role: 'assistant', content: reply.text, isAction: true, actions: actionsWithStatus });
-                } else {
-                    finalMessages.push({ role: 'assistant', content: reply });
-                }
-                if (user && db) setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'chat', 'history'), { messages: finalMessages }, { merge: true }).catch(e=>e);
-                return finalMessages;
-            });
-            
-            setIsLoading(false);
-            return; // 🚨 拦截结束，绝不往下执行普通的写入逻辑
-        }
-
-        // 🌟 新增：处理备忘录写入
-        if (action.toolType === 'memo') {
-            const memoRef = doc(db, 'artifacts', appId, 'users', user.uid, 'ai_memos', action.target);
-            await setDoc(memoRef, {
-                target: action.target,
-                targetName: action.targetName,
-                decisionType: action.decisionType,
-                coreLogic: action.coreLogic,
-                updatedAt: new Date().toISOString()
-            }, { merge: true });
-        } 
-        else if (action.toolType === 'fof_dict') {
-            const dictRef = doc(db, 'artifacts', appId, 'users', user.uid, 'fof_dict', action.fundCode);
-            await setDoc(dictRef, {
-                fundCode: action.fundCode,
-                fundName: action.fundName,
-                equityRatio: action.equityRatio,
-                sectors: action.sectors,
-                updatedAt: new Date().toISOString()
-            }, { merge: true });
-        }
-        else if (action.toolType === 'todo') {
-            // 🌟 终极容错推断引擎：不信任大模型的字段，只看特征！
-            let mType = 'add';
-            const cleanId = action.id ? String(action.id).replace(/[^a-zA-Z0-9_-]/g, '') : null;
-
-            if (action.manageType === 'delete' || action.actionType === 'delete') {
-                mType = 'delete';
-            } else if (action.manageType === 'update' || action.actionType === 'update') {
-                mType = 'update';
-            } else if (cleanId && !action.fundCode) {
-                // 🚨 核心杀手锏：有ID无代码，绝对是在顺延旧计划，强行扭转为 update
-                mType = 'update';
-            }
-
-            if (mType === 'add') {
-                // 防御墙：拦截残缺参数，绝不产生空白行
-                if (!action.fundCode || !action.fundName) {
-                    throw new Error("大模型生成了无效的新增卡片 (丢失核心参数)，已安全拦截，请驳回修改。");
-                }
-                await onAddTodo({
-                    type: 'ai_plan',
-                    fundCode: action.fundCode,
-                    fundName: action.fundName,
-                    actionType: action.tradeDirection || action.actionType || 'observe',
-                    amount: action.amount || 0,
-                    condition: action.condition || '',
-                    priority: action.priority || 'medium', // 🌟 新增：保存优先级
-                    isCompleted: false,
-                    createdAt: new Date().toISOString()
-                });
-            } else if (mType === 'update') {
-                if (!cleanId) throw new Error("大模型未返回有效的待办ID，无法顺延/更新。");
-                
-                const updatePayload = { updatedAt: new Date().toISOString() };
-                if (action.condition) updatePayload.condition = action.condition;
-                if (action.amount !== undefined) updatePayload.amount = action.amount;
-                if (action.priority) updatePayload.priority = action.priority; // 🌟 新增：支持更新优先级
-                
-                await onUpdateTodo(cleanId, updatePayload);
-            } else if (mType === 'delete') {
-                if (!cleanId) throw new Error("大模型未返回有效的待办ID，无法删除。");
-                await onDeleteTodo(cleanId);
-            }
-        }
-        else {
-            const parsedAmount = Number(action.amount);
-            const fundsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'funds');
-            const q = query(fundsRef, where('fundCode', '==', action.fundCode));
-            const querySnapshot = await getDocs(q);
-            const todayStr = new Date().toISOString().split('T')[0];
-
-            if (action.actionType === 'delete') {
-                if (querySnapshot.empty) throw new Error("未找到该基金的持仓记录。");
-                const fundDoc = querySnapshot.docs[0];
-                const fundData = fundDoc.data();
-                const transactions = fundData.transactions || [];
-                const targetIndex = transactions.slice().reverse().findIndex(t => Number(t.amountRaw) === parsedAmount);
-                if (targetIndex === -1) throw new Error(`未找到金额为 ${parsedAmount} 的记录。`);
-                
-                const realIndex = transactions.length - 1 - targetIndex;
-                const targetTx = transactions[realIndex];
-                transactions.splice(realIndex, 1);
-                
-                const fallbackNav = fundData.lastNav || 1;
-                const sharesToRevert = Number((parsedAmount / fallbackNav).toFixed(2));
-                let newShares = Number(fundData.shares || 0);
-                if (targetTx.type === 'buy') newShares = Math.max(0, newShares - sharesToRevert);
-                if (targetTx.type === 'sell') newShares += sharesToRevert;
-
-                await updateDoc(fundDoc.ref, { transactions, shares: Number(newShares.toFixed(2)) });
-                
-                if (settings.idleFunds !== undefined) {
-                    let newIdle = Number(settings.idleFunds);
-                    if (targetTx.type === 'buy') newIdle += parsedAmount;
-                    if (targetTx.type === 'sell') newIdle = Math.max(0, newIdle - parsedAmount);
-                    await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'general'), { idleFunds: newIdle }, { merge: true });
-                }
-            } else {
-                let currentNav = 1; 
-                try {
-                    const targetUrl = `https://danjuanfunds.com/djapi/fund/${action.fundCode}`;
-                    let fetchUrl = settings.proxyMode === 'custom' && settings.customProxyUrl ? (settings.customProxyUrl.includes('{{url}}') ? settings.customProxyUrl.replace('{{url}}', encodeURIComponent(targetUrl)) : settings.customProxyUrl + targetUrl) : `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
-                    const res = await fetch(fetchUrl);
-                    const data = await res.json();
-                    const actualData = settings.proxyMode === 'custom' ? data : JSON.parse(data.contents);
-                    const fetchedNav = parseFloat(actualData?.data?.fund_derived?.unit_nav);
-                    if (!isNaN(fetchedNav) && fetchedNav > 0) currentNav = fetchedNav;
-                } catch (e) { console.warn("净值抓取失败"); }
-
-                const txDate = formData.date || todayStr;
-                const feeAmount = Number(formData.fee) || 0;
-                let sharesDelta = 0;
-                
-                if (formData.shares && Number(formData.shares) > 0) {
-                    sharesDelta = Number(formData.shares);
-                } else {
-                    let netAmount = parsedAmount;
-                    if (action.actionType === 'buy') netAmount -= feeAmount; 
-                    if (action.actionType === 'sell') netAmount += feeAmount; 
-                    sharesDelta = Number((netAmount / currentNav).toFixed(2));
-                }
-
-                const newTx = { id: Date.now().toString(), date: txDate, amountRaw: parsedAmount.toString(), type: action.actionType };
-
-                if (!querySnapshot.empty) {
-                    const fundDoc = querySnapshot.docs[0];
-                    const fundData = fundDoc.data();
-                    const updatedTransactions = [...(fundData.transactions || []), newTx];
-                    let currentShares = Number(fundData.shares || 0);
-                    if (action.actionType === 'buy') currentShares += sharesDelta;
-                    else if (action.actionType === 'sell') currentShares = Math.max(0, currentShares - sharesDelta);
-                    
-                    await updateDoc(fundDoc.ref, { transactions: updatedTransactions, shares: Number(currentShares.toFixed(2)), lastNav: currentNav, lastNavDate: todayStr });
-                } else {
-                    const newFundRef = doc(fundsRef, Date.now().toString());
-                    await setDoc(newFundRef, {
-                        name: action.fundName || action.fundCode, fundCode: action.fundCode, mode: 'auto',
-                        shares: action.actionType === 'buy' ? sharesDelta : 0, currentValueRaw: '0', currentValue: 0, isArchived: false,
-                        lastNav: currentNav, lastNavDate: txDate, transactions: [newTx], updatedAt: new Date().toISOString()
-                    });
-                }
-
-                if (settings.idleFunds !== undefined) {
-                    let newIdle = Number(settings.idleFunds);
-                    if (action.actionType === 'buy') newIdle = Math.max(0, newIdle - parsedAmount);
-                    else if (action.actionType === 'sell') newIdle += parsedAmount;
-                    await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'general'), { idleFunds: newIdle }, { merge: true });
-                }
-            }
-        }
-
-        // 🌟 终极绝杀：精确定位到消息数组中的那个 action，仅仅将它的状态改为 completed！
-        setMessages(prev => {
-            const newMsgs = prev.map(m => {
-                if (m.isAction && m.actions) {
-                    // 把 a.id === action.id 换成 a.cardId === action.cardId
-                    return { ...m, actions: m.actions.map(a => a.cardId === action.cardId ? { ...a, status: 'completed' } : a) };
-                }
-                return m;
-            });
-            if (user && db) setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'chat', 'history'), { messages: newMsgs }, { merge: true }).catch(e=>e);
-            return newMsgs;
-        });
-
+      await dispatchAction(action, formData, {
+        user, settings,
+        setMessages, setIsLoading,
+        onAddTodo, onUpdateTodo, onDeleteTodo,
+        enableMacroRadar, useWebSearch,
+        portfolioStats, todos, memos, messages,
+      });
     } catch (e) {
-        console.error("写入失败:", e);
-        alert(`写入失败: ${e.message}\n请按 F12 查看控制台红字报错！`);
-        setMessages(prev => {
-            const newMsgs = prev.map(m => {
-                if (m.isAction && m.actions) return { ...m, actions: m.actions.map(a => a.cardId === action.cardId ? { ...a, status: 'cancelled' } : a) };
-                return m;
-            });
-            return [...newMsgs, { role: 'assistant', content: `❌ 操作失败: ${e.message}` }];
+      console.error("写入失败:", e);
+      alert(`写入失败: ${e.message}\n请按 F12 查看控制台红字报错！`);
+      setMessages(prev => {
+        const newMsgs = prev.map(m => {
+          if (m.isAction && m.actions) return { ...m, actions: m.actions.map(a => a.cardId === action.cardId ? { ...a, status: 'cancelled' } : a) };
+          return m;
         });
+        return [...newMsgs, { role: 'assistant', content: `❌ 操作失败: ${e.message}` }];
+      });
     } finally {
-        setIsLoading(false);
+      setIsLoading(false);
     }
- }, [user, settings, onAddTodo, onUpdateTodo, onDeleteTodo, enableMacroRadar, useWebSearch, portfolioStats, todos, memos, messages]);
+  }, [user, settings, onAddTodo, onUpdateTodo, onDeleteTodo, enableMacroRadar, useWebSearch, portfolioStats, todos, memos, messages]);
 
   // 精准取消函数
   const handleCancelAction = useCallback((action) => {
@@ -583,7 +362,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
       >
         <div 
           // 🌟 UI升级：高度从 85vh 提升到 90vh，宽度从 max-w-3xl 提升到 max-w-5xl (最高可达1024px，极其宽敞)
-          className={`w-full h-[100dvh] sm:h-[95vh] sm:max-w-7xl bg-white dark:bg-slate-800 sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden transform transition-all duration-300 sm:border border-slate-100 dark:border-slate-700 ${isOpen ? 'scale-100 translate-y-0' : 'sm:scale-95 translate-y-full sm:translate-y-8'}`}
+          className={`w-full h-[100dvh] sm:h-[95vh] sm:max-w-7xl bg-white dark:bg-slate-800 sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden transform transition-all duration-300 sm:border border-slate-100 dark:border-slate-700 safe-top ${isOpen ? 'scale-100 translate-y-0' : 'sm:scale-95 translate-y-full sm:translate-y-8'}`}
           onClick={e => e.stopPropagation()}
         >
           
@@ -656,7 +435,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
           </div>
 
           {/* 输入区 */}
-          <div className="p-3 sm:p-4 bg-white dark:bg-slate-800 border-t border-slate-100 dark:border-slate-700 shrink-0 relative">
+          <div className="p-3 sm:p-4 bg-white dark:bg-slate-800 border-t border-slate-100 dark:border-slate-700 shrink-0 relative safe-bottom">
             
             {/* 🌟 新增：OCR 引擎切换开关 (仅在选择了附件时显示，保持界面清爽) */}
             {attachment && (
@@ -684,62 +463,74 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
                 </div>
             )}
 
+            {/* 🌟 核心优化：上下流式输入框布局 */}
+            <div className="flex flex-col bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-2 focus-within:ring-2 focus-within:ring-indigo-500 transition-shadow">
             
-            <div className="flex items-end bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-1.5 focus-within:ring-2 focus-within:ring-indigo-500 transition-shadow">
-            
-            {/* 🌟 核心新增 5：隐藏的 File Input 与触发按钮 */}
-            <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFileChange} 
-                className="hidden" 
-                accept="image/*,application/pdf" 
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              title="上传走势截图或研报"
-              className="m-1 p-2.5 rounded-xl transition-colors shrink-0 flex items-center justify-center text-slate-500 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-400"
-            >
-              <Paperclip size={20} />
-            </button>
-
-            {/* 🌟 核心新增 3：宏观雷达开关按钮 */}
-            <button
-              onClick={() => setEnableMacroRadar(!enableMacroRadar)}
-              title={enableMacroRadar ? "双核盘口探针：已开启 (精准诊断大盘，耗 Token)" : "双核盘口探针：已关闭 (纯净省流模式)"}
-              className={`m-1 p-2.5 rounded-xl transition-colors shrink-0 flex items-center justify-center ${enableMacroRadar ? 'text-blue-600 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-400' : 'text-slate-400 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700'}`}
-            >
-              <Activity size={20} className={enableMacroRadar ? 'animate-pulse' : 'opacity-50'} />
-            </button>
-
-            {/* 联网开关按钮 */}
-            <button
-              onClick={() => setUseWebSearch(!useWebSearch)}
-              title={useWebSearch ? "联网搜索已开启 (耗时较长，适合查新闻)" : "联网搜索已关闭 (纯本地账本模式，秒回)"}
-              className={`m-1 p-2.5 rounded-xl transition-colors shrink-0 flex items-center justify-center ${useWebSearch ? 'text-indigo-600 bg-indigo-100 hover:bg-indigo-200 dark:bg-indigo-900/40 dark:text-indigo-400' : 'text-slate-400 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700'}`}
-            >
-              <Globe size={20} className={useWebSearch ? '' : 'opacity-50'} />
-            </button>
-            <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
-                }}
-                placeholder="询问关于您的持仓建议..."
-                className="flex-1 max-h-40 min-h-[50px] bg-transparent border-none focus:ring-0 resize-none p-3 text-sm sm:text-base dark:text-white outline-none custom-scrollbar"
-                rows={1}
+              {/* 隐藏的 File Input */}
+              <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleFileChange} 
+                  className="hidden" 
+                  accept="image/*,application/pdf" 
               />
-              <button 
-                id="chat-send-btn"
-                onClick={handleSend}
-                disabled={isLoading || !input.trim()}
-                className="m-1.5 p-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0 shadow-sm"
-              >
-                <Send size={20} className={input.trim() && !isLoading ? 'translate-x-0.5 -translate-y-0.5 transition-transform' : ''} />
-              </button>
+              
+              {/* 1. 上半部分：文字输入区，独占一行 */}
+              <textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+                  }}
+                  placeholder="询问关于您的持仓建议..."
+                  className="w-full max-h-40 min-h-[44px] bg-transparent border-none focus:ring-0 resize-none px-3 py-2 text-sm sm:text-base dark:text-white outline-none custom-scrollbar"
+                  rows={1}
+              />
+
+              {/* 2. 下半部分：操作底栏 */}
+              <div className="flex items-center justify-between mt-1 px-1">
+                
+                {/* 左侧：工具功能组 */}
+                <div className="flex items-center space-x-1.5 sm:space-x-2">
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    title="上传走势截图或研报"
+                    className="p-2 rounded-xl transition-colors text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 dark:text-slate-400"
+                  >
+                    <Paperclip size={18} />
+                  </button>
+
+                  <button
+                    onClick={() => setEnableMacroRadar(!enableMacroRadar)}
+                    title={enableMacroRadar ? "双核盘口探针：已开启 (精准诊断大盘，耗 Token)" : "双核盘口探针：已关闭 (纯净省流模式)"}
+                    className={`p-2 rounded-xl transition-colors ${enableMacroRadar ? 'text-blue-600 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-400' : 'text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'}`}
+                  >
+                    <Activity size={18} className={enableMacroRadar ? 'animate-pulse' : 'opacity-50'} />
+                  </button>
+
+                  <button
+                    onClick={() => setUseWebSearch(!useWebSearch)}
+                    title={useWebSearch ? "联网搜索已开启 (耗时较长，适合查新闻)" : "联网搜索已关闭 (纯本地账本模式，秒回)"}
+                    className={`p-2 rounded-xl transition-colors ${useWebSearch ? 'text-indigo-600 bg-indigo-100 hover:bg-indigo-200 dark:bg-indigo-900/40 dark:text-indigo-400' : 'text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'}`}
+                  >
+                    <Globe size={18} className={useWebSearch ? '' : 'opacity-50'} />
+                  </button>
+                </div>
+
+                {/* 右侧：发送按钮 (修复了仅传图片无法发送的逻辑) */}
+                <button
+                  ref={sendBtnRef}
+                  onClick={handleSend}
+                  disabled={isLoading || (!input.trim() && !attachment)}
+                  className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                >
+                  <Send size={18} className={(input.trim() || attachment) && !isLoading ? 'translate-x-[1px] -translate-y-[1px] transition-transform' : ''} />
+                </button>
+              </div>
+
             </div>
-            <div className="text-center mt-2.5 text-xs text-slate-400">
+
+            <div className="text-center mt-2 text-xs text-slate-400">
               Shift + Enter 换行，Enter 发送。账本数据已脱敏注入。
             </div>
           </div>
@@ -821,30 +612,32 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
                               ) : (
                                   <>
                                       {/* 默认的只读展示模式 */}
-                                      <div className="absolute top-3 right-3 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      {/* 🌟 核心修复：手机端常显(opacity-100)，PC端悬浮(sm:opacity-0)，提升层级(z-10) */}
+                                      <div className="absolute top-3 right-3 flex space-x-1.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity z-10">
                                           <button 
                                               onClick={() => {
                                                   setEditingMemoId(memo.id);
                                                   setEditMemoForm({ decisionType: memo.decisionType, coreLogic: memo.coreLogic });
                                               }} 
                                               title="人工修改记忆"
-                                              className="text-slate-400 hover:text-blue-500 bg-slate-50 hover:bg-blue-50 dark:bg-slate-900 dark:hover:bg-blue-900/30 p-1.5 rounded-lg transition-colors"
+                                              className="text-slate-500 hover:text-blue-500 bg-slate-100 hover:bg-blue-50 dark:text-slate-400 dark:bg-slate-700/80 dark:hover:bg-blue-900/30 p-2 rounded-lg transition-colors shadow-sm active:scale-90"
                                           >
                                               <Edit size={16}/>
                                           </button>
                                           <button 
                                               onClick={() => handleDeleteMemo(memo.id)} 
                                               title="抹除此记忆"
-                                              className="text-slate-400 hover:text-red-500 bg-slate-50 hover:bg-red-50 dark:bg-slate-900 dark:hover:bg-red-900/30 p-1.5 rounded-lg transition-colors"
+                                              className="text-slate-500 hover:text-red-500 bg-slate-100 hover:bg-red-50 dark:text-slate-400 dark:bg-slate-700/80 dark:hover:bg-red-900/30 p-2 rounded-lg transition-colors shadow-sm active:scale-90"
                                           >
                                               <Trash2 size={16}/>
                                           </button>
                                       </div>
 
-                                      <div className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-1 pr-16">
+                                      {/* 为了防止文字与放大的常显按钮重叠，把 pr-16 扩大到 pr-20 */}
+                                      <div className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-1 pr-20">
                                           {memo.targetName} <span className="text-slate-400 font-mono text-xs font-normal">({memo.target})</span>
                                       </div>
-                                      <div className="text-xs text-purple-600 dark:text-purple-400 font-bold mb-2 inline-block bg-purple-50 dark:bg-purple-900/30 px-2 py-0.5 rounded">
+                                      <div className="text-xs text-purple-600 dark:text-purple-400 font-bold mb-2 inline-block bg-purple-50 dark:bg-purple-900/30 px-2 py-0.5 rounded shadow-sm">
                                           定调方向: {memo.decisionType}
                                       </div>
                                       <div className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed bg-slate-50 dark:bg-slate-900/50 p-2.5 rounded-lg border border-slate-100 dark:border-slate-700/50">
@@ -867,204 +660,4 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
       </div> {/* 遮罩层的 div 闭合处 */}
     </>
   );
-};
-
-// 🌟 支持多实例并发与“原计划反查”的优化版 ActionCard
-const ActionCard = ({ action, onConfirm, onCancel, todos = [] }) => {
-    const [form, setForm] = useState({
-        date: action.date || new Date().toISOString().split('T')[0],
-        feeInput: '',
-        shares: '',
-        extractedText: action.extractedText || '' // 🌟 新增：承载可编辑的解析结果
-    });
-    const [feeMode, setFeeMode] = useState('rate');
-    
-    const isPending = action.status === 'pending';
-    const rawAmount = Number(action.amount) || 0;
-
-    // 🌟 优化2：核心反查逻辑。如果是修改/删除，去本地待办列表里找到原计划的数据
-    let targetTodo = null;
-    const actualId = action.id || action.todoId; // 兼容前后端不同的命名
-    if (action.toolType === 'todo' && actualId) {
-        targetTodo = todos.find(t => String(t.id) === String(actualId));
-    }
-
-    const handleConfirmClick = () => {
-        let finalFeeAmount = 0;
-        const inputVal = Number(form.feeInput);
-        if (!isNaN(inputVal) && inputVal > 0) {
-            finalFeeAmount = feeMode === 'rate' ? rawAmount * (inputVal / 100) : inputVal;
-        }
-        onConfirm(action, { date: form.date, fee: finalFeeAmount, shares: form.shares, extractedText: form.extractedText });
-    };
-
-    return (
-        <div className={`mt-3 border rounded-xl p-4 shadow-sm select-none transition-all duration-500 ${
-            action.status === 'completed' ? 'bg-green-50/50 dark:bg-green-900/10 border-green-200 dark:border-green-800/50 opacity-90' :
-            action.status === 'cancelled' ? 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 opacity-60 grayscale' :
-            'bg-indigo-50 dark:bg-slate-900 border-indigo-200 dark:border-indigo-700'
-        }`}>
-            <div className="flex justify-between items-center mb-3">
-                        <span className={`font-bold flex items-center ${action.status === 'completed' ? 'text-green-700 dark:text-green-400' : action.status === 'cancelled' ? 'text-slate-500 dark:text-slate-400' : 'text-slate-800 dark:text-slate-200'}`}>
-                            {action.status === 'completed'
-                                ? (action.toolType === 'data_confirmation' ? '✅ 数据已核验并传输' : action.toolType === 'memo' ? '✅ 记忆已存入大脑' : action.toolType === 'fof_dict' ? '✅ 底层穿透已入库' : '✅ 调仓/计划已处理')
-                                : action.status === 'cancelled'
-                                ? '⛔ 操作已撤销'
-                                : (action.toolType === 'data_confirmation' ? '👀 智算眼：数据解析核验' : action.toolType === 'memo' ? '🧠 AI 战略备忘录' : action.toolType === 'fof_dict' ? '🧬 FOF 资产穿透' : action.toolType === 'todo' ? '📅 AI 交易计划单' : '🤖 AI 自动化单据')}
-                        </span>
-
-                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                            action.status === 'completed' ? 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' :
-                            action.status === 'cancelled' ? 'bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400' :
-                            (action.toolType === 'data_confirmation' ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30' : // 🌟 为验证卡片增加蓝绿色徽章
-                            action.toolType === 'memo' ? 'bg-purple-100 text-purple-600 dark:bg-purple-900/30' :action.toolType === 'fof_dict' ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30' : // 🌟 为 X-Ray 字典分配科技蓝色标签
-                            (action.manageType === 'delete' || action.actionType === 'delete') ? 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400' :
-                            (action.manageType === 'update' || action.actionType === 'update') ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30' :
-                            (action.tradeDirection === 'buy' || action.actionType === 'buy') ? 'bg-red-100 text-red-600 dark:bg-red-900/30' :
-                            (action.tradeDirection === 'sell' || action.actionType === 'sell') ? 'bg-green-100 text-green-600 dark:bg-green-900/30' :
-                            'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300')
-                        }`}>
-                            {action.toolType === 'data_confirmation' ? 'Human-in-Loop' :
-                             action.toolType === 'memo' ? '战略定调' :
-                             action.toolType === 'fof_dict' ? 'X-Ray 字典' : // 🌟 右上角小徽章文字
-                             (action.manageType === 'delete' || action.actionType === 'delete') ? '计划废除' :
-                             (action.manageType === 'update' || action.actionType === 'update') ? '计划顺延' :
-                             (action.tradeDirection === 'buy' || action.actionType === 'buy') ? '买入' :
-                             (action.tradeDirection === 'sell' || action.actionType === 'sell') ? '卖出' : '操作记录'}
-                        </span>
-                    </div>
-            
-            <div className={`text-sm space-y-1 font-mono ${action.status === 'completed' ? 'text-green-800/70 dark:text-green-200/70' : action.status === 'cancelled' ? 'text-slate-500 dark:text-slate-400' : 'text-slate-600 dark:text-slate-400'}`}>
-                
-                {/* 🌟 优化3：名字和代码支持从 targetTodo 反查回显！ */}
-                <div>标的代码：<span className={isPending ? 'font-bold text-indigo-600 dark:text-indigo-400' : ''}>{action.fundCode || action.target || targetTodo?.fundCode}</span></div>
-                <div>标的名称：{action.fundName || action.targetName || targetTodo?.fundName || '未知匹配'}</div>
-                
-                {/* 💳 1. 记账单专属显示 */}
-                {action.toolType === 'ledger' && <div>目标金额：<span className={isPending ? 'font-bold text-slate-800 dark:text-slate-200' : ''}>{action.amount} 元</span></div>}
-
-                {/* 📝 2. 待办单专属显示 */}
-                {action.toolType === 'todo' && (
-                   <div className="mt-2 bg-amber-50 dark:bg-amber-900/10 p-3 rounded-lg border border-amber-100 dark:border-amber-800/30 relative overflow-hidden">
-                     
-                     {/* 🌟 新增：在卡片右上角显示 AI 评定的优先级 */}
-                     {action.manageType !== 'delete' && (
-                         <div className={`absolute top-0 right-0 px-2 py-1 rounded-bl-lg text-[10px] font-bold text-white shadow-sm ${action.priority === 'high' ? 'bg-red-500' : action.priority === 'low' ? 'bg-slate-400' : 'bg-amber-500'}`}>
-                             {action.priority === 'high' ? '🔴 优先级: 高' : action.priority === 'low' ? '⚪ 优先级: 低' : '🟡 优先级: 中'}
-                         </div>
-                     )}
-
-                     {action.manageType === 'delete' ? (
-                         <>
-                             <div className="text-red-600 dark:text-red-400 font-bold mb-2">🗑️ AI 请求废除/取消此计划</div>
-                             {targetTodo ? (
-                                 <div className="text-sm bg-white/50 dark:bg-slate-900/50 p-2 rounded border border-red-100 dark:border-red-900/30">
-                                     <div>方向：{targetTodo.actionType === 'buy' ? '买入' : '卖出'} <span className="font-bold text-slate-800 dark:text-slate-200">{targetTodo.amount} 元</span></div>
-                                     <div className="text-xs mt-1 text-slate-500">原条件：{targetTodo.condition}</div>
-                                 </div>
-                             ) : (
-                                 <div className="text-xs text-amber-500">⚠ 本地未找到该计划详情 (可能已被手动删除)</div>
-                             )}
-                         </>
-                     ) : (
-                         <>
-                             {action.manageType === 'update' && <div className="text-blue-600 dark:text-blue-400 font-bold mb-2">🔄 AI 请求顺延/修改此计划</div>}
-                             
-                             {(action.amount || targetTodo?.amount) && <div className="text-slate-600 dark:text-slate-400 mt-1">预备金额：<span className="font-bold text-slate-800 dark:text-slate-200">{action.amount || targetTodo?.amount} 元</span></div>}
-                             <div className="mt-1 text-amber-600 dark:text-amber-500">触发条件：<span className="font-bold">{action.condition || targetTodo?.condition}</span></div>
-                             {action.manageType === 'update' && <div className="text-[10px] text-slate-400 mt-1.5">*(以上为更新后的最新计划内容)*</div>}
-                         </>
-                     )}
-                   </div>
-                )}
-
-                {/* 🧠 3. 备忘录专属显示 */}
-                {action.toolType === 'memo' && (
-                   <div className="mt-2 bg-purple-50 dark:bg-purple-900/20 p-2 rounded-lg border border-purple-200 dark:border-purple-800/50">
-                     <div className="text-purple-700 dark:text-purple-300 mb-1">战略方向：<span className="font-bold">{action.decisionType}</span></div>
-                     <div className="text-slate-600 dark:text-slate-400 whitespace-normal leading-relaxed">核心逻辑：{action.coreLogic}</div>
-                   </div>
-                )}
-
-                {/* 🔍 4. FOF 穿透字典专属显示 */}
-                {action.toolType === 'fof_dict' && (
-                   <div className="mt-2 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-200 dark:border-blue-800/50">
-                     <div className="text-blue-700 dark:text-blue-300 font-bold mb-2 border-b border-blue-200/50 pb-1">
-                         真实权益仓位：<span className="text-lg">{(action.equityRatio * 100).toFixed(2)}%</span>
-                     </div>
-                     <div className="text-slate-600 dark:text-slate-400 text-xs space-y-1">
-                         {Object.entries(action.sectors || {}).map(([sec, ratio]) => (
-                             <div key={sec} className="flex justify-between items-center">
-                                 <span>{sec}</span>
-                                 <span className="font-mono font-bold text-slate-700 dark:text-slate-300">{(ratio * 100).toFixed(2)}%</span>
-                             </div>
-                         ))}
-                     </div>
-                   </div>
-                )}
-
-                {/* 👁️ 5. 数据解析核验专属显示 */}
-                {action.toolType === 'data_confirmation' && (
-                    <div className="mt-2 space-y-2">
-                        <div className="text-xs text-amber-600 dark:text-amber-500 font-bold mb-1.5 flex items-center">
-                            <Activity size={14} className="mr-1"/> 
-                            涉及真实资金决策，请务必核对下方 OCR 提取的内容，您可直接修改修正：
-                        </div>
-                        {action.previewUrl && (
-                            <img src={action.previewUrl} alt="原始图片" className="max-h-32 object-contain rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm mb-2 opacity-90"/>
-                        )}
-                        <textarea
-                            disabled={action.status !== 'pending'}
-                            value={form.extractedText}
-                            onChange={e => setForm({...form, extractedText: e.target.value})}
-                            className={`w-full p-3 text-[13px] leading-relaxed font-mono bg-white dark:bg-slate-950 border border-teal-200 dark:border-teal-800/60 rounded-xl outline-none custom-scrollbar transition-all ${action.status === 'pending' ? 'focus:ring-2 focus:ring-teal-500 min-h-[160px]' : 'min-h-[80px] text-slate-500'}`}
-                        />
-                    </div>
-                )}
-
-                {/* 仅记账单处于 pending 时，才渲染具体的交易表单 */}
-                {isPending && action.toolType === 'ledger' && action.actionType !== 'delete' && (
-                    <div className="mt-3 p-3 bg-white/50 dark:bg-slate-950/30 rounded-lg border border-indigo-100 dark:border-indigo-800/50 space-y-2.5">
-                        <div className="flex items-center justify-between text-xs">
-                            <span className="text-slate-600 dark:text-slate-400 font-medium">交易日期:</span>
-                            <input type="date" value={form.date} onChange={e => setForm({...form, date: e.target.value})} className="border border-slate-200 dark:border-slate-700 rounded px-2 py-1 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 w-[130px] outline-none" />
-                        </div>
-                        <div className="flex items-center justify-between text-xs">
-                            <div className="flex items-center text-slate-600 dark:text-slate-400 font-medium">
-                                预估手续费:
-                                <button onClick={() => setFeeMode(feeMode === 'rate' ? 'amount' : 'rate')} className="ml-2 px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-400 hover:bg-indigo-200 active:scale-95">{feeMode === 'rate' ? '按费率(%) ⇄' : '按金额(元) ⇄'}</button>
-                            </div>
-                            <div className="relative">
-                                <input type="number" placeholder={feeMode === 'rate' ? "0.15" : "0.00"} value={form.feeInput} onChange={e => setForm({...form, feeInput: e.target.value})} className="border border-slate-200 dark:border-slate-700 rounded py-1 pl-2 pr-6 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 w-[90px] outline-none text-right" />
-                                <span className="absolute right-2 top-1 text-slate-400">{feeMode === 'rate' ? '%' : '元'}</span>
-                            </div>
-                        </div>
-                        <div className="flex items-center justify-between text-xs">
-                            <span className="font-bold text-indigo-600 dark:text-indigo-400">实际确认份额:</span>
-                            <input type="number" placeholder="留空按净值估算" value={form.shares} onChange={e => setForm({...form, shares: e.target.value})} className="border border-indigo-200 dark:border-indigo-700 rounded px-2 py-1 bg-indigo-50/50 text-indigo-700 w-32 outline-none font-bold text-right" />
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {isPending && (
-                <div className="flex space-x-3 mt-4">
-                    <button onClick={() => onCancel(action)} className="flex-1 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">驳回修改</button>
-                    <button onClick={handleConfirmClick} className={`flex-1 py-1.5 rounded-lg text-white text-sm font-medium shadow-md transition-colors ${
-                        action.toolType === 'data_confirmation' ? 'bg-teal-600 hover:bg-teal-700' :
-                        action.toolType === 'memo' ? 'bg-purple-600 hover:bg-purple-700' : 
-                        action.toolType === 'fof_dict' ? 'bg-blue-600 hover:bg-blue-700' : 
-                        action.toolType === 'todo' ? (action.manageType === 'delete' ? 'bg-red-500 hover:bg-red-600' : 'bg-amber-500 hover:bg-amber-600') : 
-                        (action.actionType === 'delete' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700')
-                    }`}>
-                        {action.toolType === 'data_confirmation' ? '✅ 数据无误，请求深度分析' :
-                         action.toolType === 'memo' ? '确认写入长期记忆' : 
-                         action.toolType === 'fof_dict' ? '确认写入云端字典' :
-                         action.toolType === 'todo' ? (action.manageType === 'delete' ? '确认废除此计划' : action.manageType === 'update' ? '确认顺延/更新计划' : '确认加入待办') : 
-                         (action.actionType === 'delete' ? '确认撤销记录' : '确认并入账')}
-                    </button>
-                </div>
-            )}
-        </div>
-    );
 };

@@ -3,16 +3,5 @@
   "appName": "Fund Tracker",
   "webDir": "dist",
   "bundledWebRuntime": false,
-  "plugins": {
-    "SplashScreen": {
-      "launchShowDuration": 0,
-      "launchAutoHide": false,
-      "backgroundColor": "#f8fafc",
-      "androidSplashResourceName": "splash",
-      "androidScaleType": "CENTER_CROP",
-      "showSpinner": false,
-      "splashFullScreen": true,
-      "splashImmersive": true
-    }
-  }
+  "plugins": {}
 }

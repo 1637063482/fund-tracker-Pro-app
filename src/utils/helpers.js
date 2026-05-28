@@ -1,3 +1,5 @@
+import { isHolidayToday } from './holidayCalendar';
+
 export const evaluateExpression = (expr) => {
   if (typeof expr !== 'string') return expr || 0;
   let toEval = expr.trim();
@@ -51,36 +53,14 @@ export const formatPercent = (val) => new Intl.NumberFormat('zh-CN', { style: 'p
 // 🌟 升级版：支持法定节假日拦截的交易时间校验
 export const checkIsTradingTime = () => {
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
-  const day = now.getDay();
   const hours = now.getHours();
   const minutes = now.getMinutes();
 
-  // 1. A股铁律：周末绝对休市
-  if (day === 0 || day === 6) return false;
+  if (isHolidayToday(now)) return false;
 
-  // 2. A股铁律：法定节假日休市 (读取 App.jsx 预热的全局缓存)
-  try {
-    const targetYear = now.getFullYear();
-    const cacheKey = `HOLIDAY_CN_${targetYear}`;
-    const cached = localStorage.getItem(cacheKey);
-    if (cached) {
-      const holidayData = JSON.parse(cached);
-      const mm = String(now.getMonth() + 1).padStart(2, '0');
-      const dd = String(now.getDate()).padStart(2, '0');
-      const checkDateStr = `${targetYear}-${mm}-${dd}`;
-
-      // 如果今天是法定休息日，直接返回 false
-      const holiday = holidayData.find(h => h.date === checkDateStr);
-      if (holiday && holiday.isOffDay) return false; 
-    }
-  } catch (e) {
-    console.warn("节假日校验失败，降级为基础时间校验", e);
-  }
-
-  // 3. 正常工作日的交易时间段校验 (9:30-11:30, 13:00-15:00)
   const time = hours * 100 + minutes;
   const isMorning = time >= 930 && time <= 1130;
-  const isAfternoon = time >= 1300 && time < 1500; // 15:00 准点后算作收盘
+  const isAfternoon = time >= 1300 && time < 1500;
 
   return isMorning || isAfternoon;
 };

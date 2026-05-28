@@ -50,27 +50,123 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; backgr
 .dark input[type="date"]::-webkit-calendar-picker-indicator:hover { background-color: rgba(255,255,255,0.1); }
 
 /* ==========================================
-   移动端防白屏与长按穿透核心补丁 
+   移动端防白屏与长按穿透终极补丁 (GPU隔离版)
    ========================================== */
 
-/* 1. 禁用系统默认的长按弹出菜单（防图片/链接乱弹），并默认禁止全局文字被选中，防止长按时触发 iOS 渲染崩溃 */
-body {
+/* 1. 禁用全局长按菜单与选中，保障原生 App 级手感 */
+body, html {
   -webkit-touch-callout: none !important;
   -webkit-user-select: none !important;
   user-select: none !important;
+  overscroll-behavior-y: none;
 }
 
-/* 2. 仅给必需的元素（输入框、聊天气泡、代码块等）单独开放选中与复制权限 */
+/* 2. 【核心修复】表单控件专用：只开放点击与输入权限，绝对不加 3D 变换！(防止失去焦点) */
 input, 
 textarea, 
-.custom-scrollbar,
-.selectable-text {
-  -webkit-user-select: text !important;
-  user-select: text !important;
+select {
+  -webkit-touch-callout: default !important;
+  -webkit-user-select: auto !important; /* 表单必须用 auto */
+  user-select: auto !important;
+  /* 🚨 千万不要在这里写 transform: translateZ(0) */
 }
 
-/* 3. 开屏层被隐藏后，绝对禁止它响应任何触摸事件，防止幽灵遮挡 */
-#global-splash[style*="opacity: 0"] {
-  pointer-events: none !important;
+/* 3. 静态文本专用：聊天气泡文字开启 GPU 图层隔离防穿透 */
+.custom-scrollbar,
+.custom-scrollbar div,
+.custom-scrollbar span,
+.user-select-text {
+  -webkit-touch-callout: default !important;
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  will-change: transform;
+}
+
+/* 4. 兜底：开屏层一旦不可见，立刻物理隐身 */
+#global-splash[style*="opacity: 0"],
+#global-splash[style*="z-index: -"] {
   display: none !important;
+  visibility: hidden !important;
+}
+
+/* ==========================================
+   移动端响应式全面适配 (安全区 + 触摸 + 断点)
+   ========================================== */
+
+/* 5. 全面屏安全区：防止内容被刘海/底部指示条遮挡 */
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.safe-left {
+  padding-left: env(safe-area-inset-left, 0px);
+}
+.safe-right {
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+/* 6. 防止 iOS 橡皮筋效果导致的白屏闪烁 */
+html {
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 7. 触摸设备上：始终显示操作按钮，不再依赖 hover */
+@media (hover: none) and (pointer: coarse) {
+  /* 表格操作列在触摸设备上始终可见 */
+  .touch-visible-actions {
+    opacity: 1 !important;
+  }
+
+  /* 增大移动端可点击区域 */
+  .touch-target {
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* 移除只有 hover 才显示的交互提示 */
+  .group:hover .group-hover\:opacity-100 {
+    opacity: 1 !important;
+  }
+}
+
+/* 8. 极小屏幕 (< 360px) 额外缩放 */
+@media (max-width: 359px) {
+  html {
+    font-size: 14px;
+  }
+}
+
+/* 9. 表格横向滚动优化：添加滚动视觉提示 */
+.overflow-x-auto::-webkit-scrollbar {
+  height: 3px;
+}
+.overflow-x-auto::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+.dark .overflow-x-auto::-webkit-scrollbar-thumb {
+  background: #475569;
+}
+
+/* 10. 底部导航栏 / 输入框避开安全区 */
+.fixed-bottom-safe {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom, 16px));
+}
+
+/* 11. 自适应字号：根据屏幕宽度自动缩放，避免数字截断 */
+.text-fluid-stat {
+  font-size: clamp(0.875rem, 3.5vw, 1.5rem);
+  line-height: 1.2;
+}
+.text-fluid-stat-sm {
+  font-size: clamp(0.75rem, 2.5vw, 0.875rem);
 }

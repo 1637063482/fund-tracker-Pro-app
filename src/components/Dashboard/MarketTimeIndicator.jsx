@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, Bell } from 'lucide-react';
+import { isHolidayToday } from '../../utils/holidayCalendar';
 
 export const MarketTimeIndicator = () => {
   const [timeObj, setTimeObj] = useState(new Date());
@@ -17,33 +18,11 @@ export const MarketTimeIndicator = () => {
   };
 
   const getMarketStatus = (date) => {
-    const day = date.getDay();
     const hours = date.getHours();
     const mins = date.getMinutes();
     const currentTimeInMinutes = hours * 60 + mins;
-    const targetYear = date.getFullYear();
 
-    // 🌟 1. 节假日/周末终极拦截逻辑
-    let isHoliday = (day === 0 || day === 6);
-    
-    if (!isHoliday) {
-      try {
-        const cached = localStorage.getItem(`HOLIDAY_CN_${targetYear}`);
-        if (cached) {
-          const mm = String(date.getMonth() + 1).padStart(2, '0');
-          const dd = String(date.getDate()).padStart(2, '0');
-          const checkDateStr = `${targetYear}-${mm}-${dd}`;
-          
-          const holidayData = JSON.parse(cached);
-          const holiday = holidayData.find(h => h.date === checkDateStr);
-          if (holiday && holiday.isOffDay) {
-            isHoliday = true; // 命中法定休假日（如五一）
-          }
-        }
-      } catch (e) {
-        console.warn("节假日校验失败", e);
-      }
-    }
+    const isHoliday = isHolidayToday(date);
 
     if (isHoliday) {
       return { status: '节假日休市', isTrading: false, countdown: null };

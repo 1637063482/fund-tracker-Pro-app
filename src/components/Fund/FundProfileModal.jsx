@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { RefreshCw, X, BarChart2, Award, User, PieChart, Calendar, TrendingDown, Target, Activity, Sparkles, AlertTriangle, Send, Check } from 'lucide-react';
+import { renderMarkdown } from '../../utils/renderMarkdown';
 import { analyzeFundWithAI } from '../../utils/ai';
 
 export const FundProfileModal = ({ fund, profile, marketData, settings, onClose }) => {
@@ -17,7 +18,7 @@ export const FundProfileModal = ({ fund, profile, marketData, settings, onClose 
   };
 
   const handleRunAiAnalysis = async () => {
-    if (!settings.aiApiKey && !settings.geminiApiKey) {
+    if (!settings.aiApiKey && !settings.geminiApiKey && !settings.deepseekApiKey && !settings.siliconflowApiKey) {
       setAiError("请先在页面右上角设置中心配置 AI 模型 API Key");
       return;
     }
@@ -123,19 +124,7 @@ export const FundProfileModal = ({ fund, profile, marketData, settings, onClose 
     .slice(0, 5)
     .reverse();
 
-  // 【修复】Markdown 使用 div 替代 p，完美兼容 DeepSeek 的多层级思维链
-  const renderMarkdown = (text) => {
-    return text.split('\n').map((line, idx) => {
-      if (!line.trim()) return <div key={idx} className="h-2"></div>;
-      if (line.startsWith('### ')) {
-        return <h4 key={idx} className="font-bold text-purple-800 dark:text-purple-300 mt-4 mb-2 text-base flex items-center"><Sparkles size={14} className="mr-1.5 shrink-0"/>{line.replace('### ', '')}</h4>;
-      }
-      let formattedLine = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-      return <div key={idx} className="mb-1 text-slate-700 dark:text-slate-300 leading-relaxed text-sm break-words" dangerouslySetInnerHTML={{ __html: formattedLine }} />;
-    });
-  };
-
-  const aiName = settings.aiProvider === 'siliconflow' ? 'SiliconFlow (DeepSeek)' 
+  const aiName = settings.aiProvider === 'siliconflow' ? 'SiliconFlow (DeepSeek)'
                : (settings.aiProvider === 'deepseek' ? 'DeepSeek 官方' : 'Google Gemini');
 
   return (
