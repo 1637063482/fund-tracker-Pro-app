@@ -37,17 +37,17 @@ export const FundTable = ({
               <div className="flex items-center justify-center">{fundTab === 'active' ? '现持仓总值' : '清仓时市值'} {getSortIcon('currentValue')}</div>
             </th>
             {fundTab === 'active' && (
-              <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors w-32 sm:w-40 text-center whitespace-nowrap hidden md:table-cell" onClick={() => requestSort('holdingWeight')}>
+              <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors w-32 sm:w-40 text-center whitespace-nowrap" onClick={() => requestSort('holdingWeight')}>
                 <div className="flex items-center justify-center">持仓占比 {getSortIcon('holdingWeight')}</div>
               </th>
             )}
             <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors w-32 sm:w-40 text-center whitespace-nowrap" onClick={() => requestSort('profit')}>
               <div className="flex items-center justify-center">总计盈亏 {getSortIcon('profit')}</div>
             </th>
-            <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-center whitespace-nowrap hidden sm:table-cell" onClick={() => requestSort('xirr')}>
+            <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-center whitespace-nowrap" onClick={() => requestSort('xirr')}>
               <div className="flex items-center justify-center">年化(XIRR) {getSortIcon('xirr')}</div>
             </th>
-            <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-center whitespace-nowrap hidden md:table-cell" onClick={() => requestSort('simpleReturn')}>
+            <th className="p-4 sm:p-5 font-bold cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-center whitespace-nowrap" onClick={() => requestSort('simpleReturn')}>
               <div className="flex items-center justify-center">简单收益率 {getSortIcon('simpleReturn')}</div>
             </th>
             <th className="p-4 sm:p-5 font-bold text-center whitespace-nowrap touch-visible-actions">操作</th>
@@ -94,7 +94,7 @@ export const FundTable = ({
                 <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100 whitespace-nowrap">净本金: {formatMoney(fund.netInvested)}</div>
               </td>
               {fundTab === 'active' && (
-                <td className="p-4 sm:p-5 text-center whitespace-nowrap hidden md:table-cell">
+                <td className="p-4 sm:p-5 text-center whitespace-nowrap">
                   <div className="font-mono text-slate-700 dark:text-slate-300 text-base sm:text-lg xl:text-xl whitespace-nowrap"><AnimatedNumber value={fund.holdingWeight} formatter={formatPercent} /></div>
                   <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full mt-2 overflow-hidden mx-auto max-w-[120px] flex justify-start shadow-inner">
                     <div className="bg-gradient-to-r from-blue-400 to-indigo-500 h-full rounded-full transition-all duration-1000 ease-out" style={{width: `${Math.min(100, fund.holdingWeight * 100)}%`}}></div>
@@ -105,10 +105,10 @@ export const FundTable = ({
                 <div className={`font-mono font-medium text-base sm:text-lg xl:text-xl transition-colors duration-500 whitespace-nowrap ${fund.profit >= 0 ? 'text-red-500' : 'text-green-500'}`}><AnimatedNumber value={fund.profit} /></div>
                 <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100 whitespace-nowrap">占比: {formatPercent(fund.profitWeight)}</div>
               </td>
-              <td className={`p-4 sm:p-5 text-center font-mono font-bold text-base sm:text-lg xl:text-xl transition-colors duration-500 whitespace-nowrap hidden sm:table-cell ${fund.xirr >= 0 ? 'text-red-500' : 'text-green-500'}`}>
+              <td className={`p-4 sm:p-5 text-center font-mono font-bold text-base sm:text-lg xl:text-xl transition-colors duration-500 whitespace-nowrap ${fund.xirr >= 0 ? 'text-red-500' : 'text-green-500'}`}>
                 <AnimatedNumber value={fund.xirr} formatter={formatPercent} />
               </td>
-              <td className={`p-4 sm:p-5 text-center font-mono font-bold text-base sm:text-lg xl:text-xl transition-colors duration-500 whitespace-nowrap hidden md:table-cell ${fund.simpleReturn >= 0 ? 'text-red-500' : 'text-green-500'}`}>
+              <td className={`p-4 sm:p-5 text-center font-mono font-bold text-base sm:text-lg xl:text-xl transition-colors duration-500 whitespace-nowrap ${fund.simpleReturn >= 0 ? 'text-red-500' : 'text-green-500'}`}>
                 <AnimatedNumber value={fund.simpleReturn} formatter={formatPercent} />
               </td>
               <td className="p-4 sm:p-5 text-center whitespace-nowrap touch-visible-actions opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity duration-200">

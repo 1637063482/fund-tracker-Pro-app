@@ -34,15 +34,25 @@
 
     <style name="AppTheme.Splash" parent="Theme.SplashScreen">
 
-        <!-- 背景色与 HTML 开屏 (#f8fafc) 完全一致，实现原生→H5 无感过渡 -->
+        <!-- 全屏高清开屏图（xxxhdpi 下 1280x1920），解决图标模糊问题 -->
+
+        <item name="android:windowBackground">@drawable/splash</item>
+
+        <!-- SplashScreen 视图层底色，与 WebView 背景对齐，消除过渡白屏 -->
 
         <item name="windowSplashScreenBackground">#f8fafc</item>
 
-        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <!-- 隐藏系统自带图标，避免遮罩全屏图 -->
 
-        <!-- 第一帧绘制后切回 NoActionBar，背景同色无闪烁 -->
+        <item name="windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+
+        <!-- 开屏结束后切换回主主题 -->
 
         <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
+
+        <!-- 零动画时长，原生开屏消失瞬间即见 WebView，无闪烁 -->
+
+        <item name="windowSplashScreenAnimationDuration">0</item>
 
     </style>
 

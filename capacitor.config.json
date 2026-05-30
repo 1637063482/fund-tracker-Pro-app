@@ -3,5 +3,6 @@
   "appName": "Fund Tracker",
   "webDir": "dist",
   "bundledWebRuntime": false,
+  "backgroundColor": "#f8fafc",
   "plugins": {}
 }
