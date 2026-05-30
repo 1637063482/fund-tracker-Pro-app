@@ -32,28 +32,12 @@
 
 
 
-    <style name="AppTheme.Splash" parent="Theme.SplashScreen">
-
-        <!-- 全屏高清开屏图（xxxhdpi 下 1280x1920），解决图标模糊问题 -->
-
+    <!-- 3. 经典开屏主题：弃用 Theme.SplashScreen（其视图层遮罩导致全屏图不可见），
+         直接用 android:windowBackground 渲染全屏高清开屏图 -->
+    <style name="AppTheme.Splash" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:windowBackground">@drawable/splash</item>
-
-        <!-- SplashScreen 视图层底色，与 WebView 背景对齐，消除过渡白屏 -->
-
-        <item name="windowSplashScreenBackground">#f8fafc</item>
-
-        <!-- 隐藏系统自带图标，避免遮罩全屏图 -->
-
-        <item name="windowSplashScreenAnimatedIcon">@android:color/transparent</item>
-
-        <!-- 开屏结束后切换回主主题 -->
-
-        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
-
-        <!-- 零动画时长，原生开屏消失瞬间即见 WebView，无闪烁 -->
-
-        <item name="windowSplashScreenAnimationDuration">0</item>
-
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 
 
