@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 
 export function usePortfolioStats(baseFundsData, settings, overallXirr, globalPreCashFlows, xirrMap, fundProfiles) {
   return useMemo(() => {
-    if (!baseFundsData) return { pieData: [], contributionPieData: [], assetAllocationData: [], rankedByXirr: [], rankedByProfit: [], computedFundsWithMetrics: [], alpha: 0 };
+    if (!baseFundsData) return { pieData: [], contributionPieData: [], assetAllocationData: [], rankedByXirr: [], rankedBySimpleReturn: [], rankedByProfit: [], computedFundsWithMetrics: [], alpha: 0 };
 
     const baseFunds = baseFundsData.map(f => ({ ...f, xirr: xirrMap[f.id] || 0 }));
 
@@ -52,6 +52,7 @@ export function usePortfolioStats(baseFundsData, settings, overallXirr, globalPr
     const assetAllocationData = Object.keys(assetAllocation).map(k => ({ name: k, value: assetAllocation[k] })).sort((a, b) => b.value - a.value);
 
     const rankedByXirr = [...computedFundsWithMetrics].filter(f => f.transactions.length > 0).sort((a, b) => b.xirr - a.xirr);
+    const rankedBySimpleReturn = [...computedFundsWithMetrics].filter(f => f.transactions.length > 0).sort((a, b) => b.simpleReturn - a.simpleReturn);
     const rankedByProfit = [...computedFundsWithMetrics].filter(f => f.transactions.length > 0).sort((a, b) => b.profit - a.profit);
 
     const netTotalInvested = Math.max(0, portfolioTotalCurrentValue - portfolioTotalProfit);
@@ -95,6 +96,7 @@ export function usePortfolioStats(baseFundsData, settings, overallXirr, globalPr
       contributionPieData,
       assetAllocationData,
       rankedByXirr,
+      rankedBySimpleReturn,
       rankedByProfit,
       computedFundsWithMetrics,
       alpha,

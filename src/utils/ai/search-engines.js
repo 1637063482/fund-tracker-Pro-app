@@ -1,23 +1,20 @@
 // 搜索引擎适配器：Tavily、Exa、Serper
 import { buildProxyUrl } from './proxy';
 
-export const fetchTavilySearch = async (apiKey, query, searchType = "news", settings = {}, timeRange = "d3") => {
+export const fetchTavilySearch = async (apiKey, query, searchType = "news", settings = {}, timeRange = "d1") => {
   if (!apiKey) return "";
   try {
     const targetUrl = 'https://api.tavily.com/search';
     const bodyPayload = {
       api_key: apiKey,
       query,
-      search_depth: "advanced",
-      max_results: 5,
-      include_domains: ["wallstreetcn.com", "cls.cn", "xueqiu.com", "yicai.com", "stcn.com", "jin10.com"],
-      exclude_domains: ["eastmoney.com", "chinabond.com.cn", "baidu.com", "zhihu.com", "wikipedia.org", "gov.cn", "news.cn", "xinhuanet.com", "sohu.com", "163.com"]
+      search_depth: "basic",
+      max_results: 4,
+      topic: "news",
+      days: timeRange === "d1" ? 1 : (timeRange === "w1" ? 7 : (timeRange === "d3" ? 3 : 1)),
+      include_domains: ["cls.cn", "wallstreetcn.com", "jin10.com", "yicai.com", "stcn.com", "caixin.com"],
+      exclude_domains: ["eastmoney.com", "baidu.com", "zhihu.com"]
     };
-
-    if (searchType === "news") {
-      bodyPayload.topic = "news";
-      bodyPayload.days = timeRange === "d1" ? 1 : (timeRange === "w1" ? 7 : 3);
-    }
 
     const fetchUrl = buildProxyUrl(settings, targetUrl);
 

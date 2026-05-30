@@ -84,7 +84,7 @@ export const TodoListCard = ({ todos, onAddTodo, onToggleTodo, onDeleteTodo }) =
   );
 
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden mt-6 transition-colors duration-500 flex flex-col h-[550px] md:h-[650px]">
+    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden mt-6 transition-colors duration-500 flex flex-col h-[700px] md:h-[830px]">
       <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 shrink-0">
         <h3 className="text-base sm:text-lg font-bold flex items-center text-slate-800 dark:text-white">
           <Clock className="mr-2 text-indigo-500" /> 交易计划与待办事项

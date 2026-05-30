@@ -53,12 +53,16 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; backgr
    移动端防白屏与长按穿透终极补丁 (GPU隔离版)
    ========================================== */
 
-/* 1. 禁用全局长按菜单与选中，保障原生 App 级手感 */
+/* 1. 禁用全局长按菜单（保留文本选择能力） */
 body, html {
   -webkit-touch-callout: none !important;
+  overscroll-behavior-y: none;
+}
+
+/* 仅对按钮、导航等交互元素禁用文本选择 */
+button, nav, [role="button"], .no-select {
   -webkit-user-select: none !important;
   user-select: none !important;
-  overscroll-behavior-y: none;
 }
 
 /* 2. 【核心修复】表单控件专用：只开放点击与输入权限，绝对不加 3D 变换！(防止失去焦点) */

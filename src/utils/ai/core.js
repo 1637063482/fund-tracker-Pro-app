@@ -1,7 +1,6 @@
 // 核心逻辑：单基诊断、全盘体检、聊天对话引擎
 import { resolveProvider } from './providers';
-import { buildProxyUrl } from './proxy';
-import { formatCashFlows, fetchAdvancedMarketData } from './market-data';
+import { fetchAdvancedMarketData } from './market-data';
 import { fetchTavilySearch } from './search-engines';
 import { calculate7DayPenalty } from './fifo';
 import { defineTools } from './tools-definitions';
@@ -14,10 +13,57 @@ import {
   fullDateTimeStr
 } from './prompts';
 
+// 推理强度配置映射
+const buildReasoningConfig = (effort) => {
+  if (effort === 'disabled') return {};
+  if (effort === 'high') return { thinking: { type: "enabled" }, reasoning_effort: "high" };
+  return { thinking: { type: "enabled" }, reasoning_effort: "max" }; // default/max
+};
+
+// 工具名称 → 用户友好状态提示
+const TOOL_LABELS = {
+  'get_realtime_fund_data': '正在获取基金净值…',
+  'get_batch_fund_data': '正在批量获取基金数据…',
+  'get_fund_history_data': '正在获取历史净值序列…',
+  'get_fund_comparison': '正在执行多基金横向对比…',
+  'get_financial_news': '正在获取最新财经快讯…',
+  'google_macro_search': '正在搜索宏观政策资讯…',
+  'tavily_news_search': '正在搜索相关新闻…',
+  'exa_research': '正在检索深度研报…',
+  'get_fund_holdings_penetration': '正在穿透底层持仓…',
+  'get_fund_transaction_history': '正在查询交易流水…',
+  'get_market_historical_intraday': '正在获取历史K线…',
+  'generate_trend_chart': '正在生成走势图表…',
+  'execute_javascript': '正在执行量化计算…',
+  'update_ledger': '正在写入交易记录…',
+  'manage_plan_todo': '正在更新交易计划…',
+  'update_decision_memo': '正在更新战略备忘录…',
+  'update_fof_dictionary': '正在更新FOF字典…',
+};
+
+// Token 估算工具（中文约1.8字符/token，用于开发调试和生产监控）
+const estimateTokens = (body) => {
+  let totalChars = 0;
+  if (body.messages) {
+    for (const msg of body.messages) {
+      totalChars += (msg.content || '').length;
+    }
+  }
+  if (body.tools) {
+    totalChars += JSON.stringify(body.tools).length;
+  }
+  if (body.systemInstruction?.parts) {
+    for (const p of body.systemInstruction.parts) {
+      totalChars += (p.text || '').length;
+    }
+  }
+  return Math.round(totalChars / 1.8);
+};
+
 // ============================================================================
 // 1. 底层 HTTP 请求封装
 // ============================================================================
-const executeAIRequest = async (provider, apiKey, modelName, prompt, targetTemp = 0.1, targetTopP = 0.1) => {
+const executeAIRequest = async (settings, provider, apiKey, modelName, prompt, targetTemp = 0.1, targetTopP = 0.1) => {
   try {
     let url = '';
     let body = {};
@@ -30,10 +76,10 @@ const executeAIRequest = async (provider, apiKey, modelName, prompt, targetTemp 
         tools: [{ googleSearch: {} }],
         generationConfig: { temperature: targetTemp, topP: targetTopP, maxOutputTokens: 8192 },
         safetySettings: [
-          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" }
         ]
       };
     } else {
@@ -45,7 +91,7 @@ const executeAIRequest = async (provider, apiKey, modelName, prompt, targetTemp 
         temperature: targetTemp,
         top_p: targetTopP,
         max_tokens: 8192,
-        ...(provider === 'deepseek' && { thinking: { type: "enabled" }, reasoning_effort: "max" })
+        ...(provider === 'deepseek' && buildReasoningConfig(settings.reasoningEffort))
       };
     }
 
@@ -54,6 +100,11 @@ const executeAIRequest = async (provider, apiKey, modelName, prompt, targetTemp 
 
     if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
     if (data.message && !data.choices) throw new Error(data.message);
+
+    // Token 估算日志
+    const estTokens = estimateTokens(body);
+    const reasoningLabel = provider === 'deepseek' ? (settings.reasoningEffort || 'max') : 'n/a';
+    console.log('%c📊 [Token 估算] ' + provider + ' | 推理: ' + reasoningLabel + ' | 预估输入: ≈' + estTokens + ' tokens | 模型: ' + modelName, 'color: #10b981; font-weight: bold;');
 
     if (provider === 'gemini') {
       if (!data.candidates || data.candidates.length === 0) {
@@ -92,20 +143,7 @@ export const analyzeFundWithAI = async (settings, fund, profile, marketData) => 
   const { provider, apiKey, targetModel } = resolveProvider(settings);
 
   const marketEnv = await fetchAdvancedMarketData(settings);
-  const derived = profile.fund_derived || {};
-  const baseData = profile.sec_header_base_data || [];
-  const maxDrawdown = baseData.find(d => d.data_name === '最大回撤')?.data_value_str || '未知';
-  const rank1y = derived.srank_l1y || '未知';
-  const rank3y = derived.srank_l3y || '未知';
-  const yieldHistory = derived.yield_history || [];
-  const yieldStr = yieldHistory.map(y => `${y.name}:${y.yield}%`).join(', ');
-  const netInvested = fund?.netInvested || 0;
-  const currentValue = fund?.currentValue || 0;
-  const profit = fund?.profit || 0;
-  const profitRate = fund?.totalInvested > 0 ? ((profit / fund.totalInvested) * 100).toFixed(2) : 0;
-  const idleFunds = Number(settings.idleFunds) || 0;
 
-  // 联网检索
   let searchContext = "";
   if (provider !== 'gemini' && settings.tavilyApiKey) {
     const isBondFund = (fund?.name || '').includes('债');
@@ -117,44 +155,9 @@ export const analyzeFundWithAI = async (settings, fund, profile, marketData) => 
     }
   }
 
-  const prompt = `
-你是一位拥有30年经验的华尔街顶尖宏观策略与量化分析师，以"客观、犀利、直击痛点"著称。
+  const prompt = buildFundAnalysisPrompt(fund, profile, settings, marketEnv, searchContext);
 
-【分析前置要求 (极其重要)】
-0. 绝对信任数据：下方提供的所有数据均为绝对真实的客观事实（Ground Truth），禁止质疑其真实性！
-1. 现在的真实物理时间是 ${new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}。
-2. 请直接读取下方数据作为当前市场基准，绝对不允许凭记忆瞎编点位！${marketEnv}
-3. 宏观资产温度与历史纵深：结合 A股、美股、黄金、中美国债收益率等核心资产【近3个月、近半年、近1年】的中长线走势趋势，评估当前处于反弹初期、主升浪还是下跌通道。
-4. 标的雷达：这只基金（${fund?.name}）近期是否有重要新闻，或其所属核心板块近期的政策/行业利好利空。
-5. 【带风控框架的独立裁判】：在评价我的买卖行为时，你拥有绝对的独立批判权。如果你发现我属于典型的"火场捡钢镚"，请用最冷酷的数据戳穿我的幻觉，并建议纠正。
-${searchContext}
-
-【基金基本面】
-名称：${fund?.name} (${fund?.fundCode})
-类型：${profile.type_desc || '未知'}
-近1年同类排名：${rank1y}
-近3年同类排名：${rank3y}
-最大回撤：${maxDrawdown}
-近期阶段表现：${yieldStr}
-
-【我的真实交易账本与操作轨迹】
-总投入本金：${netInvested} 元
-当前持仓市值：${currentValue} 元
-当前累计盈亏：${profit} 元 (盈亏率: ${profitRate}%)
---- 历史操作轨迹 ---
-${formatCashFlows(fund?.transactions)}
-
-【你的输出任务】
-使用 Markdown 输出以下几部分（500字左右）：
-### 🌍 宏观与标的实时扫描
-### 🕵️ 账户行为诊断
-### 💡 极简操作建议
-### 🕵️ 操作复盘与现状诊断
-### 🎯 当前标的执行指令
-### 💰 【${idleFunds}元】空闲资金利用建议
-`;
-
-  return await executeAIRequest(provider, apiKey, targetModel, prompt, 0.2, 0.2);
+  return await executeAIRequest(settings, provider, apiKey, targetModel, prompt, 0.2, 0.2);
 };
 
 // ============================================================================
@@ -162,14 +165,6 @@ ${formatCashFlows(fund?.transactions)}
 // ============================================================================
 export const analyzePortfolioWithAI = async (settings, portfolioStats, marketData) => {
   const { provider, apiKey, targetModel } = resolveProvider(settings);
-
-  const activeFunds = portfolioStats.computedFundsWithMetrics
-    .filter(f => f.currentValue > 0 && !f.isArchived)
-    .map(f => {
-      const profitRate = f.totalInvested > 0 ? ((f.profit / f.totalInvested) * 100).toFixed(2) : 0;
-      const cashFlows = formatCashFlows(f.transactions);
-      return `\n- 资产：${f.name} (代码: ${f.fundCode || '未知'})\n  当前市值: ${f.currentValue}元 | 累计盈亏率: ${profitRate}% | 资产类型: ${f.name.includes('债') ? '固收' : '权益/其他'}\n  操作流水:\n  ${cashFlows.split('\n').join('\n  ')}`;
-    }).join('\n');
 
   const marketEnv = marketData && marketData.length > 0
     ? `\n【今日实时大盘与基准行情】\n${marketData.map(m => `- ${m.name}: ${m.price} (${m.change > 0 ? '+' : ''}${(m.percent * 100).toFixed(2)}%)`).join('\n')}`
@@ -184,45 +179,15 @@ export const analyzePortfolioWithAI = async (settings, portfolioStats, marketDat
     }
   }
 
-  const idleFunds = Number(settings.idleFunds) || 0;
-  const todayStr = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+  const prompt = buildPortfolioAnalysisPrompt(portfolioStats, settings, marketEnv, searchContext);
 
-  const prompt = `
-你是一位面向高净值客户的首席资产配置官(CIO)。请对我的整体基金投资组合进行"上帝视角"的宏观诊断。
-
-【分析前置要求 (极其重要)】
-0. 绝对信任数据：下方提供的全盘资产快照、大盘行情等数据，均为绝对真实的客观事实（Ground Truth），禁止质疑！
-1. 现在的真实物理时间是 ${todayStr}。
-2. 请直接读取下方数据作为当前市场基准，绝对不允许自己瞎编点位！${marketEnv}
-3. 梳理全球核心资产（中美股市、大宗商品、债券利率）在【近3个月、近半年、近1年】的大周期趋势。
-4. 结合美联储最新降息/加息预期、中美股市的核心矛盾等宏观指标。
-5. 【无情鞭挞与客观诊断】：请作为独立客观的第三方进行评估！仔细阅读我的【操作流水】，不要因为我近期有大额加仓操作，就当老好人建议"继续观察"。
-${searchContext}
-
-【我的全盘资产快照】
-总投入净本金：${portfolioStats.totalInvested} 元
-全盘当前总市值：${portfolioStats.totalCurrentValue} 元
-全盘累计盈亏：${portfolioStats.totalProfit} 元
-综合年化收益率(XIRR)：${(portfolioStats.overallXirr * 100).toFixed(2)}%
-当前预备空闲资金(子弹)：${idleFunds} 元
-
-【当前持仓明细与比重】
-${activeFunds}
-
-【你的输出任务】
-使用 Markdown 格式输出以下三部分（500字左右）：
-### 🔍 组合致命隐患与优势
-### 🗑️ 存量资产清洗指令
-### 🎯 【${idleFunds}元】空闲子弹精准打出方案
-`;
-
-  return await executeAIRequest(provider, apiKey, targetModel, prompt, 0.4, 0.5);
+  return await executeAIRequest(settings, provider, apiKey, targetModel, prompt, 0.4, 0.5);
 };
 
 // ============================================================================
 // 4. 持续交互对话引擎 (聊天框专用) — 核心重构
 // ============================================================================
-export const chatWithPortfolioAI = async (settings, portfolioStats, chatHistory, newMessage, marketData, useWebSearch = true, todos = [], memos = []) => {
+export const chatWithPortfolioAI = async (settings, portfolioStats, chatHistory, newMessage, marketData, useWebSearch = true, todos = [], memos = [], onStatus = null) => {
   const { provider, apiKey, targetModel } = resolveProvider(settings);
 
   const idleFunds = Number(settings.idleFunds) || 0;
@@ -233,7 +198,6 @@ export const chatWithPortfolioAI = async (settings, portfolioStats, chatHistory,
     .map(f => {
       const profitRate = f.totalInvested > 0 ? ((f.profit / f.totalInvested) * 100).toFixed(2) : 0;
       const xirrRate = (f.xirr * 100).toFixed(2);
-      const cashFlows = formatCashFlows(f.transactions);
 
       let fundTypeTag = "其他类型/混合";
       const name = f.name || '';
@@ -255,9 +219,7 @@ export const chatWithPortfolioAI = async (settings, portfolioStats, chatHistory,
       return `\n- 资产: ${f.name} (代码: ${f.fundCode || '未知'}) | 🏷️ [大类判定]: ${fundTypeTag}
 > 当前市值: ${f.currentValue} 元 | 累计盈亏: ${f.profit} 元
 > 累计投入: ${f.totalInvested} 元 | 净本金: ${f.netInvested} 元
-> 简单盈亏率: ${profitRate}% | 年化收益率(XIRR): ${xirrRate}% | 持有份额: ${f.shares || 0}${penaltyWarning}
-> 操作流水:
-${cashFlows.split('\n').join('\n    ')}`;
+> 简单盈亏率: ${profitRate}% | 年化收益率(XIRR): ${xirrRate}% | 持有份额: ${f.shares || 0}${penaltyWarning}`;
     }).join('\n');
 
   // === 组装待办上下文 ===
@@ -304,41 +266,11 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
     marketStr = marketData;
   }
 
-  // === 构建 system prompt ===
-  const systemPrompt = buildChatSystemPrompt(provider, settings, portfolioStats);
+  // === 构建 system prompt（纯静态层，利用 DeepSeek 上下文缓存） ===
+  const systemPrompt = buildChatSystemPrompt(provider);
 
-  // === 构建最新状态注入 ===
-  const latestStateWrapper = `
-====================================================
-🚨 [最高优先级指令：系统底层强制注入最新状态] 🚨
-====================================================
-⚠️ 致命纪律：请立即忽略上方历史对话中的旧盘口与旧资产记忆！你必须且只能基于以下【最新客观事实】进行本次分析与决策！现在的真实物理时间是：${fullDateTimeStr()}。
-
-${marketStr}
-${memosText}
-🚨 【逻辑一致性强制防线】：在给出建议前必须优先审视上述备忘录。除非今天的盘口发生了极其重大且根本性的反转，否则绝对禁止推翻你自己的定调！
-
-【当前全盘与子弹快照】
-全盘总市值：${portfolioStats.totalCurrentValue} 元 | 累计总盈亏：${portfolioStats.totalProfit} 元
-综合年化(XIRR)：${(portfolioStats.overallXirr * 100).toFixed(2)}% | 预备空闲子弹：${idleFunds} 元
-
-【当前真实持仓明细】
-${activeFundsDetail}
-
-【当前交易计划池 (包含排队中与近期已执行)】
-${todosContext}
-
-🚨 【防重防漏与资金风控纪律】：
-1. 拦截重复建仓，但允许网格交易。
-2. 流动性压测与子弹预扣：评估空闲资金时，必须在脑海中【先扣除】待办列表中所有独立消耗现金的"计划买入"金额！
-3. 隐性摩擦成本绝对防线：上方持仓明细中带有"🚨 [系统底层强制风控拦截]"警告的资产，【绝对禁止】下达立刻卖出或转换指令！
-4. 交易日历核对防线：在设定任何未来的交易日期时，请基于当前的物理日期推算，周末及法定节假日不交易，赎回资金 T+2 至 T+4 到账。
-====================================================
-【用户最新指令】
-${newMessage}
-
-👉(系统级注入器警报：如果你判定需要修改备忘录、增删改待办、画图或记账，请务必直接触发对应的 Tool Call 接口！)
-`;
+  // === 构建最新状态注入（通过 prompts.js 统一模板构建） ===
+  const latestStateWrapper = buildLatestStateWrapper(marketStr, memosText, portfolioStats, settings, activeFundsDetail, todosContext, newMessage);
 
   try {
     let url = '';
@@ -373,9 +305,10 @@ ${newMessage}
         tools: useWebSearch ? [{ googleSearch: {} }] : [],
         generationConfig: { temperature: 0.1, topP: 0.1, maxOutputTokens: 8192 },
         safetySettings: [
-          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" }
         ]
       };
     } else {
@@ -396,24 +329,17 @@ ${newMessage}
         temperature: 0.1,
         top_p: 0.1,
         max_tokens: 8192,
-        ...(provider === 'deepseek' && { thinking: { type: "enabled" }, reasoning_effort: "max" })
+        ...(provider === 'deepseek' && buildReasoningConfig(settings.reasoningEffort))
       };
 
-      // 加载工具定义
-      body.tools = [];
-
-      if (useWebSearch && !isReasoner) {
-        if (useWebSearch && !isReasoner) {
-          const allTools = defineTools(settings);
-          body.tools.push(...allTools);
-        }
-
-        // 剥离 tools 防止 400 报错
-        if (isReasoner || body.tools.length === 0) {
-          delete body.tools;
-        }
+      // 加载工具定义（推理模型不支持 function calling，需移除 tools 字段）
+      if (!isReasoner) {
+        body.tools = defineTools(settings);
       }
     }
+
+    // 状态通知：开始思考
+    onStatus && onStatus({ type: 'thinking', label: '正在深度思考…' });
 
     let response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
     let data = await response.json();
@@ -421,19 +347,24 @@ ${newMessage}
     if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
     if (data.message && !data.choices) throw new Error(data.message);
 
+    // Token 估算日志
+    const estTokens = estimateTokens(body);
+    const reasoningLabel = provider === 'deepseek' ? (settings.reasoningEffort || 'max') : 'n/a';
+    console.log('%c📊 [Token 估算] ' + provider + ' | 推理: ' + reasoningLabel + ' | 预估输入: ≈' + estTokens + ' tokens | 模型: ' + targetModel, 'color: #10b981; font-weight: bold;');
+
     let accumulatedReasoning = '';
     let accumulatedContent = '';
     let maxLoops = 12;
     let pendingActions = [];
+    let roundNum = 0;
 
     // === 工具调用循环（策略模式分派） ===
     while (provider !== 'gemini' && data.choices && data.choices[0].message.tool_calls && maxLoops > 0) {
       maxLoops--;
+      roundNum++;
       const responseMsg = data.choices[0].message;
 
       if (responseMsg.reasoning_content) {
-        console.log(`%c🧠 [AI 大脑神经元活动] 第 ${12 - maxLoops} 轮思考:`, `color: #f59e0b; font-size: 13px; font-weight: bold; background: #fffbeb; padding: 2px 6px; border-radius: 4px;`);
-        console.log(`%c${responseMsg.reasoning_content}`, `color: #64748b; font-style: italic; border-left: 3px solid #f59e0b; padding-left: 10px; margin-bottom: 10px;`);
         accumulatedReasoning += responseMsg.reasoning_content + '\n\n';
       }
 
@@ -446,6 +377,10 @@ ${newMessage}
       // 策略模式分派每个工具调用
       for (const toolCall of responseMsg.tool_calls) {
         const toolName = toolCall.function.name;
+        const label = TOOL_LABELS[toolName] || '正在调用 ' + toolName + '…';
+        const roundTag = responseMsg.tool_calls.length > 1 ? ' (' + (responseMsg.tool_calls.indexOf(toolCall) + 1) + '/' + responseMsg.tool_calls.length + ')' : '';
+        onStatus && onStatus({ type: 'tool', label: label + roundTag, tool: toolName, round: roundNum });
+
         let args = {};
         try {
           args = JSON.parse(toolCall.function.arguments || '{}');
@@ -459,11 +394,17 @@ ${newMessage}
           settings,
           body,
           pendingActions,
+          portfolioStats,
           fullDateTimeStr: fullDateTimeStr(),
           todayStr: new Date().toISOString().split('T')[0]
         };
 
         await dispatchToolCall(toolName, ctx);
+      }
+
+      // 状态通知：进入下一轮
+      if (maxLoops > 0) {
+        onStatus && onStatus({ type: 'thinking', label: '正在综合分析第 ' + (roundNum + 1) + ' 轮结果…', round: roundNum + 1 });
       }
 
       response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });

@@ -3,12 +3,16 @@ import { X, Sparkles, RefreshCw, AlertTriangle, PieChart, Send, Check, Layers, A
 import { analyzePortfolioWithAI } from '../../utils/ai';
 import { renderMarkdown } from '../../utils/renderMarkdown';
 import { calculatePortfolioXRay } from '../../utils/helpers';
+import { useScrollLock } from '../../hooks/useScrollLock';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 import { collection, getDocs } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 import { getAuth } from 'firebase/auth'; // 用于获取当前用户
 
 export const PortfolioAnalysisModal = ({ portfolioStats, settings, marketData, fundProfiles, onClose }) => {
+  useScrollLock(true);
+  const focusRef = useFocusTrap(true);
   const [aiReport, setAiReport] = useState(null);
   const[aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
@@ -115,7 +119,7 @@ useEffect(() => {
 
   return (
     <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity duration-250 ${isClosing ? 'opacity-0' : 'opacity-100'}`} onClick={handleClose}>
-      <div className={`bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col transform transition-all duration-250 ${isClosing ? 'scale-95 translate-y-4' : 'scale-100 translate-y-0'} animate-in fade-in zoom-in-95`} onClick={e => e.stopPropagation()}>
+      <div ref={focusRef} className={`bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col transform transition-all duration-250 ${isClosing ? 'scale-95 translate-y-4' : 'scale-100 translate-y-0'} animate-in fade-in zoom-in-95`} onClick={e => e.stopPropagation()}>
         
         <div className="flex justify-between items-center p-6 border-b border-slate-100 dark:border-slate-700 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-slate-800 dark:to-slate-800 shrink-0">
           <h3 className="text-xl font-bold flex items-center text-indigo-900 dark:text-indigo-400">

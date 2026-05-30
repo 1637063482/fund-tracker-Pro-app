@@ -24,9 +24,25 @@
 
         <item name="windowNoTitle">true</item>
 
-        <!-- 防闪屏垫背色：无缝衔接前端的 #f8fafc -->
+        <!-- 与 SplashScreen 同色，切换时无闪烁 -->
 
         <item name="android:windowBackground">#f8fafc</item>
+
+    </style>
+
+
+
+    <style name="AppTheme.Splash" parent="Theme.SplashScreen">
+
+        <!-- 背景色与 HTML 开屏 (#f8fafc) 完全一致，实现原生→H5 无感过渡 -->
+
+        <item name="windowSplashScreenBackground">#f8fafc</item>
+
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+
+        <!-- 第一帧绘制后切回 NoActionBar，背景同色无闪烁 -->
+
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
 
     </style>
 

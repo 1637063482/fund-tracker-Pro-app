@@ -1,5 +1,45 @@
 import { isHolidayToday } from './holidayCalendar';
 
+// 安全的四则运算求值器（不依赖 eval / new Function）
+const safeMathEval = (s) => {
+  s = s.replace(/\s/g, '');
+  let i = 0;
+
+  const expr = () => {
+    let left = term();
+    while (i < s.length) {
+      if (s[i] === '+') { i++; left += term(); }
+      else if (s[i] === '-') { i++; left -= term(); }
+      else break;
+    }
+    return left;
+  };
+
+  const term = () => {
+    let left = factor();
+    while (i < s.length) {
+      if (s[i] === '*') { i++; left *= factor(); }
+      else if (s[i] === '/') { i++; const divisor = factor(); left = divisor === 0 ? 0 : left / divisor; }
+      else break;
+    }
+    return left;
+  };
+
+  const factor = () => {
+    if (i >= s.length) return 0;
+    if (s[i] === '(') { i++; const val = expr(); if (i < s.length && s[i] === ')') i++; return val; }
+    if (s[i] === '-') { i++; return -factor(); }
+    if (s[i] === '+') { i++; return factor(); }
+    let start = i;
+    while (i < s.length && /[0-9.]/.test(s[i])) i++;
+    if (start === i) return 0;
+    return parseFloat(s.slice(start, i));
+  };
+
+  const result = expr();
+  return isNaN(result) || !isFinite(result) ? 0 : result;
+};
+
 export const evaluateExpression = (expr) => {
   if (typeof expr !== 'string') return expr || 0;
   let toEval = expr.trim();
@@ -7,7 +47,7 @@ export const evaluateExpression = (expr) => {
   if (!toEval) return 0;
   if (!/^[0-9+\-*/().\s]*$/.test(toEval)) return isNaN(parseFloat(expr)) ? 0 : parseFloat(expr);
   try {
-    const result = new Function('"use strict";return (' + toEval + ')')();
+    const result = safeMathEval(toEval);
     return isNaN(result) || !isFinite(result) ? 0 : Number(result.toFixed(2));
   } catch (e) {
     return isNaN(parseFloat(expr)) ? 0 : parseFloat(expr);

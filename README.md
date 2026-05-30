@@ -1,90 +1,129 @@
-Fund Tracker Pro 个人资产与基金收益分析系统
+# Fund Tracker Pro
 
-📖 项目简介
+个人基金资产管理 + AI 量化投资 Copilot 系统
 
-Fund Tracker Pro 是一款现代化的个人资产与基金收益追踪应用。本项目采用了**“一套代码，多端运行”**的全栈跨平台策略。不仅可以通过浏览器直接访问并作为 PWA（渐进式 Web 应用）极速安装到电脑桌面，还能通过 Capacitor 打包为原生 Android APK，在手机端提供流畅的沉浸式体验。
+## 核心能力
 
-🎯 核心功能
+### 基金持仓与流水管理
 
-资产流水管理： 详尽记录基金的买入、卖出、单价与份额，支持历史记录追溯。
+- **双层记账模式**：支持自动模式（输入基金代码 + 份额，自动追踪净值）和手动模式（自由表达式计算市值）
+- **完整交易流水**：记录买入、卖出、分红、手续费等所有流水类型
+- **实时净值拉取**：多数据源自动切换（天天基金、新浪财经、蛋卷基金），可配置反代代理绕过跨域
+- **清仓归档**：已清仓资产移入历史区，保留完整收益数据用于复盘
 
-多维收益洞察： 实时聚合计算总资产、单日盈亏与累计盈亏，直观呈现资产波动趋势。
+### 大盘行情监控
 
-多端数据同步： 依托实时数据库，实现手机端与电脑端数据的毫秒级云端同步，拒绝数据割裂。
+- **五大核心指数**：上证、深证、创业板、10年期国债 ETF、30年期国债 ETF 实时行情
+- **多数据源容灾**：腾讯财经 / 新浪财经 / 雪球三源自动切换，支持 5 个公共 CORS 代理节点轮换
+- **自动刷新**：交易时段内每 5 秒轮询，休市/节假日智能拦截，不浪费请求
+- **法定节假日识别**：自动从 jsDelivr CDN 同步中国法定假日数据，周末 + 节假日双重过滤
 
-离线极速访问： 深度集成 Service Worker 技术，核心资源预缓存，实现无网状态下应用秒开。
+### AI 量化投资 Copilot
 
-🏗️ 技术架构设计
+聊天框内嵌的 AI 投资助手，支持三大模型（Gemini / DeepSeek / 硅基流动），具备：
 
-系统采用了前后端分离与 Serverless 架构，确保了极佳的性能与可维护性：
+**17 个专属工具调用能力**：
+- 净值数据：单基 / 批量 / 历史序列 / 多基横向对比（含相关性矩阵 + 综合评级）
+- 市场行情：历史 K 线 OHLC（开高低收）、分时路径、多周期共振
+- 资讯搜索：新浪财经多栏目快讯聚合、Tavily 搜索引擎、Exa 深度研报、Serper Google 搜索
+- 实体操作：记账（批量写入交易流水）、待办管理（增/删/改）、战略备忘录写入、FOF 字典入库
+- 可视化：QuickChart 图表生成（支持线图/柱状图/色带/趋势线/双Y轴/数据点标注）
+- 量化计算：Web Worker 沙箱执行 JS 代码（复利、相关性、波动率、最大回撤等精确计算）
 
-前端视图层： 基于 React 组件化开发，使用 Vite 提供极速构建，并由 Tailwind CSS 驱动响应式 UI 与暗黑模式切换。
+**三层战略记忆系统**：
+- 第一层「财富宪法」：全局投资目标与底线约束
+- 第二层「宏观定价锚点」：当前市场环境与极值边界
+- 第三层「资产身份挂牌」：每只基金的定调标签（战略看多 / 网格震荡 / 持有观望 / 黑名单）+ 纪律红线
 
-跨平台容器层：
+**双核多周期打分卡**：
+- 权益引擎：宏观赔率极值（40分）+ 战术微观反转（30分）+ 量价验证（30分）
+- 固收引擎：宏观利率极值（50分）+ 股债跷跷板（50分）
+- 自动交叉矩阵：根据标签 × 得分，输出买入 / 持有 / 卖出 / 网格指令
 
-移动端： 使用 Capacitor 接入原生底层能力，配置沉浸式 Splash Screen，彻底消除 Web App 启动白屏痛点。
+**周五自动巡检**：每周五弹出巡检提示，AI 自动遍历所有备忘录标的，核查最新净值，覆写过时快照数据
 
-桌面/网页端： 严格遵循 PWA 规范，配置独立应用清单（Manifest），实现类原生桌面软件体验。
+**防幻觉协议**：多层级系统约束（净值数据唯一通道、T+1 妥协、交易日历核对、资金交收物理规律校验）
 
-后端数据层： 接入 Firebase BaaS（后端即服务），免除服务器运维烦恼，专注于核心业务逻辑。
+### Cloudflare Worker 云端巡检
 
-CI/CD 自动化部署： 源码托管于 GitHub，通过 Cloudflare Pages 构建流水线。实现提交代码即自动构建、全球边缘节点 CDN 加速分发。
+- 前端一键「上传至云大脑」将账本同步到 Worker KV
+- Worker 定时触发（UTC 6/7/14/15），支持盘中异动 / 收盘快报 / 每日清算 / 每周复盘四种模式
+- 规则引擎自动判定市场情绪（股债双牛/跷跷板/双杀等），生成机器交易信标
+- **多通道推送**：飞书卡片 / 钉钉机器人 / Ntfy，支持 Markdown 富文本
+- 利润快照 KV 持久化，区间盈亏自动计算
 
-🚀 极速无白屏构建与多端部署指南
+### 全盘资产分析
 
-如果你需要在本地重新初始化该项目，或将其打包为 Android 原生应用，请按以下步骤操作：
+- **综合指标**：投资总净本金、全盘持仓总值、累计盈亏、XIRR 年化收益率、简单收益率
+- **三大排行榜**：按 XIRR / 累计收益 / 简单收益率排序
+- **可视化图表**：大类资产配置图、单一持仓比重分布、正向盈利贡献分布
+- **财富目标复盘**：基于设定目标金额和基准年化，计算 Alpha 超额收益、偏离基准轨迹、缺口金额、所需月收益
+- **复利推演**：基于当前 XIRR 推演至目标日期的预期资产规模
+- **FOF X-Ray 穿透雷达**：底层持仓穿透 → 申万行业归类 → 全局集中度预警
 
-第 0 步：网络代理设置 (必需)
+### 待办事项系统
 
-npm config set proxy [http://127.0.0.1:7890](http://127.0.0.1:7890)
+- AI 可自动生成交易计划卡片（买入/卖出/观察，含触发条件与金额）
+- 用户手动添加操作备忘
+- 优先级分级（高/中/低），完成状态追踪
+- 7 天赎回惩罚费自动风控拦截
 
-npm config set https-proxy [http://127.0.0.1:7890](http://127.0.0.1:7890)
+### 多端跨平台
 
-若无代理，可使用淘宝镜像：npm config set registry [https://registry.npmmirror.com](https://registry.npmmirror.com)
+- **PWA**：Service Worker 离线缓存，可安装到桌面
+- **Android APK**：Capacitor 打包原生应用，沉浸式体验
+- **暗黑模式**：CSS 类名驱动，手动切换
+- **响应式布局**：Tailwind CSS，完整适配移动端 + PC 端
 
+### 数据安全
 
-第 1 步：安装环境依赖
+- Firebase Authentication 认证登录
+- Firestore 实时数据库，多端数据实时同步
+- 15 分钟无操作自动登出
+- 数据导出为 JSON 本地备份
+- 聊天记录云端持久化，跨设备恢复对话上下文
 
+## 技术栈
+
+| 层 | 技术 |
+|---|---|
+| 前端框架 | React 19 + Vite 8 |
+| UI 框架 | Tailwind CSS 3 + Lucide React 图标 |
+| 跨平台 | Capacitor 8 (Android) + PWA |
+| 后端服务 | Firebase Auth + Firestore |
+| AI 引擎 | Gemini API / DeepSeek API / 硅基流动 (SiliconFlow) |
+| 搜索 | Tavily / Exa / Serper (Google) |
+| 推送 | Cloudflare Worker + Ntfy / 飞书 / 钉钉 |
+| 图表 | QuickChart.io (Chart.js 渲染) + 自定义 DonutChart |
+| Markdown | 自研解析器 + DOMPurify 安全净化 |
+| 安全 | Web Worker 沙箱执行 JS / DOMPurify XSS 防护 |
+
+## 快速开始
+
+```bash
+# 安装依赖
 npm install
 
-
-第 2 步：本地开发调试
-
+# 启动开发服务器
 npm run dev
 
-
-第 3 步：转化为 Android 原生工程 (Capacitor)
-
-1. 编译前端静态资源到 dist 目录
+# 构建生产版本
 npm run build
+```
 
-2. 如果未初始化过，先执行 init
-npx cap init "Fund Tracker" "com.your.app" --web-dir dist
+## Firebase 配置
 
-3. 添加 Android 平台代码骨架并同步前端资源
-npx cap add android
-npx cap sync android
+需要创建 Firebase 项目并启用 Authentication（邮箱登录）和 Firestore 数据库。配置信息可在 `src/config/constants.js` 中修改。
 
+## Cloudflare Worker 部署
 
-第 4 步：生成专属原生图标 (Android 必需)
+将 `src/worker.js` 部署为 Cloudflare Worker，配置环境变量 `SYNC_SECRET`，并绑定 KV 命名空间 `FUND_DB`。在前端设置中配置 Worker URL 和同步密码后即可使用云端巡检推送。
 
-确保根目录新建 assets 文件夹，并放入高清的 icon.png 和开屏图 splash.png，然后执行：
+## AI 模型配置
 
-npm install -D @capacitor/assets
-npx capacitor-assets generate
+在系统设置中心配置：
+- **Gemini**：需 Google API Key
+- **DeepSeek**：需 DeepSeek API Key，支持 reasoning_effort 调节（disabled/high/max），推理过程可视化展示
+- **硅基流动**：需 SiliconFlow API Key
 
-
-第 5 步：云端打包 (网页版 PWA & 安卓 APK)
-
-当你完成所有代码修改后，只需将代码推送到 GitHub 主分支，即可触发双端更新：
-
-git add .
-
-git commit -m "feat: update system features"
-
-git push origin main
-
-
-网页端 (PWA)： Cloudflare Pages 会自动拉取最新代码并执行构建，访问专属域名即可看到更新。通过浏览器地址栏右侧图标即可一键安装到桌面。
-
-安卓端 (APK)： 登录 Ionic Appflow 控制台，在 Commits 列表中选择最新提交，点击 New build -> Android Debug APK 即可在云端生成安装包并下载。
+可选配置 Tavily / Exa / Serper API Key 以启用联网搜索能力。

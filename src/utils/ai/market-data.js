@@ -140,7 +140,6 @@ export const fetchAdvancedMarketData = async (settings) => {
       emFetchUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(emUrl)}`;
     }
 
-    console.log(`🌍 [情绪探针] 正在请求东财批量数据，代理模式: ${settings.proxyMode}`);
     const emRes = await fetch(emFetchUrl, { cache: 'no-store' });
     if (!emRes.ok) throw new Error(`HTTP ${emRes.status}`);
 
@@ -162,7 +161,6 @@ export const fetchAdvancedMarketData = async (settings) => {
       } catch (e) { /* ignore */ }
     }
 
-    console.log("%c🔍 [深度探针] 东财批量接口原始返回结构:", "color: #eab308; font-weight: bold;");
     console.dir(actualEmData);
 
     if (actualEmData?.data?.diff && Array.isArray(actualEmData.data.diff)) {
@@ -171,9 +169,7 @@ export const fetchAdvancedMarketData = async (settings) => {
         const down = market.f105 || 0;
         upCount += up;
         downCount += down;
-        console.log(`   └─ 细分市场 ${index + 1} 探针: 涨 ${up}, 跌 ${down}`);
       });
-      console.log(`✅ [情绪探针] 成功获取两市聚合数据: 总计上涨 ${upCount} 家, 下跌 ${downCount} 家`);
     } else {
       console.warn("⚠️ [情绪探针] 请求成功，但未找到有效的 diff 数组结构。");
     }

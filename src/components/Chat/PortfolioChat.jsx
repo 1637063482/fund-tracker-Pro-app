@@ -3,8 +3,11 @@ import { MessageSquare, X, Send, RefreshCw, Trash2, Bot, User, Sparkles, Globe, 
 import { chatWithPortfolioAI } from '../../utils/ai';
 import { extractDataFromImage } from '../../services/fileParser';
 import { renderMarkdown } from '../../utils/renderMarkdown';
+import { useScrollLock } from '../../hooks/useScrollLock';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { ActionCard } from './ActionCard';
 import { dispatchAction } from './actionHandlers';
+import { ImageModal } from '../UI/ImageModal';
 import { doc, setDoc, onSnapshot, collection, query, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 
@@ -26,10 +29,13 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   }, [user]);
 
   const [isOpen, setIsOpen] = useState(false);
+  useScrollLock(isOpen);
+  const focusRef = useFocusTrap(isOpen);
   const [useWebSearch, setUseWebSearch] = useState(true);
   // 🌟 核心新增 1：控制宏观雷达的开关状态
   const [enableMacroRadar, setEnableMacroRadar] = useState(false); 
   const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
+  const [zoomedImage, setZoomedImage] = useState(null); // 图片放大查看
 
   // 🌟 核心新增：附件与预览状态
   const [attachment, setAttachment] = useState(null);
@@ -55,21 +61,19 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   // 🌟 新增：周五例行巡检黄条的显示状态
   const [showInspectionBanner, setShowInspectionBanner] = useState(false);
 
-  // 🌟 新增：挂载时检测是否需要弹出巡检黄条
+  // 🌟 周五例行巡检黄条：从 Firestore 读取状态，跨设备同步
   useEffect(() => {
       const today = new Date();
-      const isFriday = today.getDay() === 5; // 0是周日，5是周五
-      
-      if (isFriday) {
-          const todayStr = today.toISOString().split('T')[0]; // 获取 YYYY-MM-DD
-          const lastInspection = localStorage.getItem('last_inspection_date');
-          
-          // 如果今天是周五，且今天还没有执行过巡检，则弹出黄条
-          if (lastInspection !== todayStr) {
-              setShowInspectionBanner(true);
-          }
+      const isFriday = today.getDay() === 5;
+      const todayStr = today.toISOString().split('T')[0];
+      const lastInspection = settings.lastInspectionDate;
+
+      if (isFriday && lastInspection !== todayStr) {
+          setShowInspectionBanner(true);
+      } else {
+          setShowInspectionBanner(false);
       }
-  }, []);
+  }, [settings.lastInspectionDate]);
 
   // 🌟 新增：物理抹除 AI 记忆的函数
   const handleDeleteMemo = async (memoId) => {
@@ -102,14 +106,19 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   };
 
 // 🌟 新增：统一的巡检触发函数 (黄条和弹窗按钮共用)
-  const handleTriggerInspection = useCallback(() => {
+  const handleTriggerInspection = useCallback(async () => {
       // 1. 关闭所有提示和弹窗
       setShowInspectionBanner(false);
       setIsMemoModalOpen(false);
       
-      // 2. 记录今天已巡检，本周五不再弹黄条
+      // 2. 记录今天已巡检到 Firestore（跨设备同步），本周五不再弹黄条
       const todayStr = new Date().toISOString().split('T')[0];
-      localStorage.setItem('last_inspection_date', todayStr);
+      try {
+        const settingsRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'general');
+        await setDoc(settingsRef, { lastInspectionDate: todayStr }, { merge: true });
+      } catch (e) {
+        console.error('写入巡检日期失败:', e);
+      }
       
       // 3. 填入最高级系统指令
       const inspectionPrompt = "【系统自动触发：记忆库例行深度巡检】当前是例行维护日。请提取当前备忘录中的所有基金/资产代码，主动调用工具获取它们的最新精确净值与涨跌幅。然后，请使用 update_decision_memo 逐一覆写并更新那些包含‘过时时效性数字’（如：近1月收益、当前距离击球区的百分比、最新价格等）的记忆卡片。注意：除非基本面逻辑破裂，否则请保留原有的【战略定调】和【击球区阈值】。全部更新完毕后，请输出一份《记忆库洗盘与资产巡检报告》。";
@@ -126,6 +135,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   ]);
   const[input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [aiStatus, setAiStatus] = useState(null); // { type:'thinking'|'tool', label, tool?, round? }
    const messagesEndRef = useRef(null);
 
   // 🌟 修复：精准控制滚动时机，防止确认卡片时画面乱跳
@@ -221,9 +231,9 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
       const activeMarketData = enableMacroRadar 
           ? "FETCH_NOW" 
           : "【系统指令：用户已手动关闭大盘雷达，本次对话进入纯净模式。严禁读取、臆测或分析任何 A股、债市的大盘宏观走势！请彻底抛弃大盘数据，完全基于用户的具体基金持仓和提问作答。】";         
-      const reply = await chatWithPortfolioAI(settings, portfolioStats, chatHistory, userMessage, activeMarketData, useWebSearch, todos, memos);
-      
-      
+      const reply = await chatWithPortfolioAI(settings, portfolioStats, chatHistory, userMessage, activeMarketData, useWebSearch, todos, memos, setAiStatus);
+      setAiStatus(null);
+
       let finalMessages;
       // 🌟 核心拦截：如果 AI 返回的是一个操作对象，而不是普通文本
       if (typeof reply === 'object' && reply.type === 'ACTION_REQUIRED') {
@@ -360,8 +370,8 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
         className={`fixed inset-0 z-50 flex items-center justify-center sm:p-6 bg-slate-900/60 backdrop-blur-sm transition-all duration-300 ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
         onClick={() => setIsOpen(false)}
       >
-        <div 
-          // 🌟 UI升级：高度从 85vh 提升到 90vh，宽度从 max-w-3xl 提升到 max-w-5xl (最高可达1024px，极其宽敞)
+        <div
+          ref={focusRef}
           className={`w-full h-[100dvh] sm:h-[95vh] sm:max-w-7xl bg-white dark:bg-slate-800 sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden transform transition-all duration-300 sm:border border-slate-100 dark:border-slate-700 safe-top ${isOpen ? 'scale-100 translate-y-0' : 'sm:scale-95 translate-y-full sm:translate-y-8'}`}
           onClick={e => e.stopPropagation()}
         >
@@ -412,21 +422,49 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
           )}
 
           {/* 消息列表区 */}
-          <div className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-5 bg-slate-50 dark:bg-slate-900 custom-scrollbar relative">
+          <div
+            className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-4 sm:space-y-5 bg-slate-50 dark:bg-slate-900 custom-scrollbar relative"
+            onClick={(e) => {
+              if (e.target.tagName === 'IMG' && e.target.dataset.zoomable === 'true') {
+                setZoomedImage({ src: e.target.src, alt: e.target.alt });
+              }
+            }}
+          >
             
             {/* 🌟 这里直接使用我们缓存好的渲染列表 */}
             {renderedMessages}
 
             {isLoading && (
-              <div className="flex justify-start">
-                <div className="flex flex-row max-w-[80%]">
-                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm bg-indigo-100 text-indigo-600 mr-3">
-                    <RefreshCw size={18} className="animate-spin" />
+              <div className="flex justify-start animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <div className="flex flex-row max-w-[85%]">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 mr-3">
+                    {aiStatus?.type === 'tool'
+                      ? <Activity size={18} className="animate-pulse" />
+                      : <RefreshCw size={18} className="animate-spin" />
+                    }
                   </div>
-                  <div className="px-5 py-4 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl rounded-tl-sm flex items-center space-x-1.5">
-                    <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce"></span>
-                    <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></span>
-                    <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></span>
+                  <div className="px-4 py-3 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl rounded-tl-sm">
+                    {aiStatus ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-slate-600 dark:text-slate-300">{aiStatus.label}</span>
+                        {aiStatus.type === 'thinking' && (
+                          <span className="flex space-x-1">
+                            <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce"></span>
+                            <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></span>
+                            <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></span>
+                          </span>
+                        )}
+                        {aiStatus.type === 'tool' && (
+                          <span className="text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded-full font-mono">{aiStatus.round ? 'R' + aiStatus.round : ''}</span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex items-center space-x-1.5">
+                        <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"></span>
+                        <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></span>
+                        <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -658,6 +696,16 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
 
         </div> {/* 整个聊天框大界面的 div 闭合处 */}
       </div> {/* 遮罩层的 div 闭合处 */}
+
+      {/* 图片放大查看器 */}
+      {zoomedImage && (
+        <ImageModal
+          src={zoomedImage.src}
+          alt={zoomedImage.alt}
+          onClose={() => setZoomedImage(null)}
+        />
+      )}
+
     </>
   );
 };

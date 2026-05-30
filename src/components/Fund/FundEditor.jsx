@@ -2,8 +2,10 @@ import React, { useState, useMemo } from 'react';
 import { ArrowDown, ArrowUp, Zap, RefreshCw, AlertCircle, Activity, RefreshCcw, Archive, Trash2, Plus, Save, CheckCircle2 } from 'lucide-react';
 import { SmartInput } from '../UI/SmartInput';
 import { evaluateExpression, formatMoney } from '../../utils/helpers';
+import { useScrollLock } from '../../hooks/useScrollLock';
 
 export const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
+  useScrollLock(true);
   const [localFund, setLocalFund] = useState({
     id: fund.id, 
     name: fund.name || '',

@@ -2,8 +2,12 @@ import React, { useState } from 'react';
 import { RefreshCw, X, BarChart2, Award, User, PieChart, Calendar, TrendingDown, Target, Activity, Sparkles, AlertTriangle, Send, Check } from 'lucide-react';
 import { renderMarkdown } from '../../utils/renderMarkdown';
 import { analyzeFundWithAI } from '../../utils/ai';
+import { useScrollLock } from '../../hooks/useScrollLock';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 export const FundProfileModal = ({ fund, profile, marketData, settings, onClose }) => {
+  useScrollLock(true);
+  const focusRef = useFocusTrap(true);
   const [isClosing, setIsClosing] = useState(false);
   const[aiReport, setAiReport] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -129,7 +133,7 @@ export const FundProfileModal = ({ fund, profile, marketData, settings, onClose 
 
   return (
     <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4 transition-opacity duration-250 ${isClosing ? 'opacity-0' : 'opacity-100'}`} onClick={handleClose}>
-      <div className={`bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col transform transition-all duration-250 ${isClosing ? 'scale-95 translate-y-4' : 'scale-100 translate-y-0'} animate-in fade-in zoom-in-95`} onClick={e => e.stopPropagation()}>
+      <div ref={focusRef} className={`bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col transform transition-all duration-250 ${isClosing ? 'scale-95 translate-y-4' : 'scale-100 translate-y-0'} animate-in fade-in zoom-in-95`} onClick={e => e.stopPropagation()}>
         
         <div className="shrink-0 bg-gradient-to-r from-blue-600 to-indigo-600 p-5 sm:p-6 text-white relative overflow-hidden">
           <div className="absolute right-0 top-0 opacity-10 transform scale-150 -translate-y-4 translate-x-4">

@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
 import { Settings, X, Database, PieChart, Cloud, Sparkles, Bell } from 'lucide-react';
+import { useScrollLock } from '../../hooks/useScrollLock';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 export const ProxySettingsModal = ({ settings, onSave, onClose }) => {
+  useScrollLock(true);
+  const focusRef = useFocusTrap(true);
   const [mode, setMode] = useState(settings.proxyMode || 'builtin');
   const [customUrl, setCustomUrl] = useState(settings.customProxyUrl || '');
   const [dataSource, setDataSource] = useState(settings.dataSource || 'tencent');
@@ -13,6 +17,7 @@ export const ProxySettingsModal = ({ settings, onSave, onClose }) => {
   const [deepseekModel, setDeepseekModel] = useState(settings.deepseekModel || 'deepseek-v4-pro');
   const[siliconflowKey, setSiliconflowKey] = useState(settings.siliconflowApiKey || '');
   const[siliconflowModel, setSiliconflowModel] = useState(settings.siliconflowModel || 'deepseek-ai/DeepSeek-V3');
+  const[reasoningEffort, setReasoningEffort] = useState(settings.reasoningEffort || 'max');
   const[tavilyKey, setTavilyKey] = useState(settings.tavilyApiKey || '');
   const[exaKey, setExaKey] = useState(settings.exaApiKey || '');       // 🌟 新增
   const[serperKey, setSerperKey] = useState(settings.serperApiKey || ''); // 🌟 新增
@@ -39,6 +44,7 @@ export const ProxySettingsModal = ({ settings, onSave, onClose }) => {
       deepseekModel: deepseekModel,
       siliconflowApiKey: siliconflowKey,
       siliconflowModel: siliconflowModel,
+      reasoningEffort: reasoningEffort,
       tavilyApiKey: tavilyKey,
       exaApiKey: exaKey,       // 🌟 新增
       serperApiKey: serperKey, // 🌟 新增
@@ -50,7 +56,7 @@ export const ProxySettingsModal = ({ settings, onSave, onClose }) => {
 
   return (
     <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity duration-200 ${isClosing ? 'opacity-0' : 'opacity-100'}`}>
-      <div className={`bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden transform transition-all duration-200 ${isClosing ? 'scale-95 translate-y-4' : 'scale-100 translate-y-0'} animate-in fade-in zoom-in-95 slide-in-from-bottom-4`}>
+      <div ref={focusRef} className={`bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden transform transition-all duration-200 ${isClosing ? 'scale-95 translate-y-4' : 'scale-100 translate-y-0'} animate-in fade-in zoom-in-95 slide-in-from-bottom-4`}>
         
         <div className="flex justify-between items-center p-6 border-b dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
           <h3 className="text-xl font-bold flex items-center text-slate-800 dark:text-white"><Settings className="mr-2 text-blue-500 transition-transform hover:rotate-90 duration-500" /> 系统全局设置</h3>
@@ -93,6 +99,33 @@ export const ProxySettingsModal = ({ settings, onSave, onClose }) => {
                    {aiProvider === 'deepseek' && "注意：DeepSeek 官方 API 需预付费充值。建议填写旗舰模型 deepseek-v4-pro 以获得最佳量化推理能力。"}
                    {aiProvider === 'siliconflow' && "注册 siliconflow.cn 获取 Key，国内直连，免费无限制使用最强 DeepSeek-V3 模型。"}
                  </p>
+
+                 {aiProvider === 'deepseek' && (
+                   <div className="mt-3 pt-3 border-t border-purple-200 dark:border-purple-800/50">
+                     <label className="text-xs font-bold text-purple-700 dark:text-purple-300 block mb-2">🧠 推理深度 (影响Token消耗)</label>
+                     <div className="grid grid-cols-3 gap-1.5">
+                       {[
+                         { id: 'disabled', label: '⚡ 快速', desc: '禁用推理，省Token' },
+                         { id: 'high', label: '🔍 深度', desc: '平衡推理与成本' },
+                         { id: 'max', label: '🧠 极致', desc: '最强推理，费Token' },
+                       ].map(opt => (
+                         <button
+                           key={opt.id}
+                           type="button"
+                           onClick={() => setReasoningEffort(opt.id)}
+                           className={`p-2 border rounded-lg flex flex-col items-center transition-all duration-200 active:scale-95 text-xs ${
+                             reasoningEffort === opt.id
+                               ? 'bg-purple-100 border-purple-500 text-purple-700 dark:bg-purple-900/40 dark:border-purple-500 dark:text-purple-300 shadow-sm'
+                               : 'border-slate-200 text-slate-500 hover:bg-white dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700'
+                           }`}
+                         >
+                           <span className="font-bold text-[11px]">{opt.label}</span>
+                           <span className="text-[9px] opacity-70 mt-0.5">{opt.desc}</span>
+                         </button>
+                       ))}
+                     </div>
+                   </div>
+                 )}
               </div>
 
               {/* 矩阵联网检索配置 (多引擎智能路由) */}

@@ -97,7 +97,7 @@ export async function fetchFundNavService({
           }
         }
       } else if (currentDataSource === 'tiantian_lsjz') {
-        const targetUrl = `http://api.fund.eastmoney.com/f10/lsjz?fundCode=${code}&pageIndex=1&pageSize=1`;
+        const targetUrl = `https://api.fund.eastmoney.com/f10/lsjz?fundCode=${code}&pageIndex=1&pageSize=1`;
         const res = await fetchViaProxy(targetUrl);
         const data = await res.json();
         const navStr = data?.Data?.LSJZList?.[0]?.DWJZ;
