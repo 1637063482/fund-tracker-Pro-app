@@ -228,8 +228,12 @@ const handleGenerateTrendChart = async (ctx) => {
           catch (e) { rData = rData.replace(/[\[\]]/g, '').split(','); }
         }
         const sData = (Array.isArray(rData) ? rData : []).map(d => {
+          // 核心修复：放过 null、横杠、空字符串，将它们识别为图表断点
+          if (d === null || d === 'null' || d === '' || String(d).trim() === '-' || String(d).trim() === '—') {
+            return null; 
+          }
           const num = parseFloat(String(d).replace(/[^\d.-]/g, ''));
-          return isNaN(num) ? 0 : num;
+          return isNaN(num) ? null : num; // 必须返回 null，绝对不能是 0
         });
         if (sData.length === 0) return;
 
@@ -289,7 +293,13 @@ const handleGenerateTrendChart = async (ctx) => {
       let min = Infinity, max = -Infinity;
       datasets.forEach(ds => {
         if (ds.yAxisID !== axisId) return;
-        const vals = ds.type === 'scatter' ? ds.data.map(d => d.y) : ds.data;
+        
+        const rawVals = ds.type === 'scatter' ? ds.data.map(d => d.y) : ds.data;
+        // 核心修复：必须滤除 null，否则 Math.min(null, 4000) 结果为 0！
+        const vals = rawVals.filter(v => v !== null && v !== undefined && !isNaN(v));
+        
+        if (vals.length === 0) return; // 如果全是空值则跳过
+        
         const dsMin = Math.min(...vals);
         const dsMax = Math.max(...vals);
         if (dsMin < min) min = dsMin;
@@ -297,7 +307,7 @@ const handleGenerateTrendChart = async (ctx) => {
       });
       if (min === Infinity) return { yMin: 0, yMax: 1 };
       const range = max - min;
-      const pad = range === 0 ? 0.5 : range * 0.15; // 移除了 isMultiCompare 依赖
+      const pad = range === 0 ? 0.5 : range * 0.15; 
       return { yMin: parseFloat((min - pad).toFixed(4)), yMax: parseFloat((max + pad).toFixed(4)) };
     }
 

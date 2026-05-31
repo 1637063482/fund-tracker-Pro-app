@@ -63,7 +63,7 @@ export default {
 
     if (utcHour === 6) runMode = 'intraday';
     else if (utcHour === 7) runMode = 'market_close';
-    else if ((utcHour === 14 || utcHour === 15) && utcDay === 5) runMode = 'weekly_with_daily';
+    else if (utcHour === 15 && utcDay === 5) runMode = 'weekly';
     else if (utcHour === 14 || utcHour === 15) runMode = 'daily';
 
     if (isManualTest && request) {
@@ -382,7 +382,7 @@ export default {
 
     // 9. 单基明细
     let fundDetailDisplayStr = "";
-    if ((runMode === 'daily' || runMode === 'weekly' || runMode === 'weekly_with_daily') && displayFundList.length > 0) {
+    if ((runMode === 'daily' || runMode === 'weekly') && displayFundList.length > 0) {
       fundDetailDisplayStr = '\n\n---\n**🧾 ' + periodLabel + '单基明细**\n> ' + displayFundList.join('\n> ');
     }
 
@@ -412,41 +412,21 @@ export default {
       reportTitle = '🔔 15:00 收盘快报';
       reportBody = '> **📊 15:00 收盘跨资产快报**\n\n' + feishuMarketTable + '\n\n' +
         '> **💬 今日情绪**：' + mood;
-    } else if (runMode === 'weekly' || runMode === 'weekly_with_daily') {
+    } else if (runMode === 'weekly') {
       const milestoneProgress = targetAmt > 0 ? ((portfolioTotalProfit / targetAmt) * 100).toFixed(2) : '未知';
-      // 周五：先输出当日日报，再叠加周报总结
-      const dailyPart = '**📊 今日跨资产大盘**\n\n' + feishuMarketTable + '\n\n' +
+      reportTitle = '📅 资产深度操作周报';
+      reportBody = '**📊 本周跨资产大盘概览**\n\n' + feishuMarketTable + '\n\n' +
         '---\n\n' +
-        '**💰 今日清算**\n\n' +
+        '**💰 本周全盘清算**\n\n' +
         periodLabel + '：**' + periodTotalProfitStr + '**\n' +
         '累计总盈亏：' + portfolioTotalProfit.toFixed(2) + ' 元\n' +
         '全盘总市值：' + portfolioTotalCurrentValue.toFixed(2) + ' 元\n' +
-        '备用空闲资金：' + idleFunds + ' 元\n\n' +
+        '财富目标进度：' + milestoneProgress + '%\n' +
+        '备用空闲资金：' + idleFunds + ' 元\n' +
+        '距离上次买入已防守：' + daysSinceLastBuy + ' 天\n\n' +
+        marketCalendarStatus + '\n\n' +
         hardcodedActions +
         fundDetailDisplayStr;
-
-      if (runMode === 'weekly_with_daily') {
-        reportTitle = '📅 资产深度周报 (含周五日报)';
-        reportBody = dailyPart + '\n\n---\n\n' +
-          '**📅 本周全盘总结**\n\n' +
-          '财富目标进度：' + milestoneProgress + '%\n' +
-          '距离上次买入已防守：' + daysSinceLastBuy + ' 天\n\n' +
-          marketCalendarStatus;
-      } else {
-        reportTitle = '📅 资产深度操作周报';
-        reportBody = '**📊 本周跨资产大盘概览**\n\n' + feishuMarketTable + '\n\n' +
-          '---\n\n' +
-          '**💰 本周全盘清算**\n\n' +
-          periodLabel + '：**' + periodTotalProfitStr + '**\n' +
-          '累计总盈亏：' + portfolioTotalProfit.toFixed(2) + ' 元\n' +
-          '全盘总市值：' + portfolioTotalCurrentValue.toFixed(2) + ' 元\n' +
-          '财富目标进度：' + milestoneProgress + '%\n' +
-          '备用空闲资金：' + idleFunds + ' 元\n' +
-          '距离上次买入已防守：' + daysSinceLastBuy + ' 天\n\n' +
-          marketCalendarStatus + '\n\n' +
-          hardcodedActions +
-          fundDetailDisplayStr;
-      }
     } else {
       // daily
       reportTitle = '📝 晚间量化核算';
@@ -479,7 +459,7 @@ export default {
           let cardColor = "blue";
           if (runMode === 'market_close') {
             cardColor = mainEqChange > 0 ? "red" : (mainEqChange < 0 ? "green" : "blue");
-          } else if (runMode === 'weekly' || runMode === 'weekly_with_daily') {
+          } else if (runMode === 'weekly') {
             cardColor = "purple";
           } else if (runMode === 'daily') {
             cardColor = periodTotalProfit >= 0 ? "red" : "green";
@@ -554,7 +534,7 @@ export default {
     }
 
     // 13. KV 利润快照写入
-    if (!isManualTest && (runMode === 'daily' || runMode === 'weekly' || runMode === 'weekly_with_daily')) {
+    if (!isManualTest && (runMode === 'daily' || runMode === 'weekly')) {
       try {
         historyObj.daily = { totalProfit: portfolioTotalProfit, funds: currentFundProfitsMap };
         if (runMode === 'weekly') {
