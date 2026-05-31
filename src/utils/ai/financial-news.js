@@ -1,4 +1,4 @@
-// 多源财经快讯聚合器 — 新浪财经 + 搜索兜底，并行拉取去重合并
+// 财经快讯聚合模块：并行拉取新浪财经免费快讯 + 搜索引擎兜底，去重合并后供 AI 引用
 import { buildProxyUrl } from './proxy';
 import { fetchTavilySearch, fetchSerperSearch } from './search-engines';
 
@@ -109,7 +109,7 @@ async function fetchSearchNews(settings, topic) {
   // Serper 补充
   if (settings.serperApiKey && items.length < 4) {
     try {
-      const text = await fetchSerperSearch(settings.serperApiKey, query + ' (site:cls.cn OR site:wallstreetcn.com)', 'qdr:d');
+      const text = await fetchSerperSearch(settings.serperApiKey, query + ' (site:cls.cn OR site:wallstreetcn.com)', 'qdr:d', 4, settings);
       if (text) {
         const blocks = text.split('\n\n---\n');
         for (const block of blocks) {

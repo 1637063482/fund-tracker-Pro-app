@@ -1,7 +1,4 @@
-// ============================================================================
-// 🌟 核心感知层：纯血 Gemini 2.5 Pro 视觉与长文本解析引擎
-// 专攻：长篇 PDF 原生解析 (季报/年报) & 复杂不规则中文截图 (持仓明细)
-// ============================================================================
+// 文件解析服务：Gemini 视觉 OCR 引擎，支持图片截图与 PDF 的文本/表格数据提取（季报、年报、持仓明细）
 
 // 🌟 （可选）如果你希望在代码里硬编码兜底 API Key，可填在这里。
 // 默认情况下，代码会优先读取你在 App 设置面板里配置的 Gemini API Key。
@@ -60,8 +57,7 @@ const extractWithGeminiPro = async (file, settings, mimeType) => {
 4. 请将提取出的数据组装成一个极度干净、对齐的 Markdown 文本和表格格式输出。不要输出任何寒暄语。
     `;
     
-    // 🌟 核心战力升级：Flash -> Pro，200万 Token 超大上下文，智商和抗幻觉能力呈指数级提升
-    const targetModel = 'gemini-2.5-flash'; 
+    const targetModel = settings.geminiModel || 'gemini-2.5-flash'; 
     const fetchUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey}`;
 
     const requestBody = {

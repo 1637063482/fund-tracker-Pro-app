@@ -1,8 +1,9 @@
+# GitHub Actions CI 流水线：推送 main 分支时自动构建 Android APK（Capacitor + Gradle）
 name: Build Android APK
 
 on:
   push:
-    branches: [ "main" ] # 当推送到 main 分支时触发
+    branches: [ "main" ]
 
 jobs:
   build:

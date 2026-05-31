@@ -1,11 +1,26 @@
+// 页面滚动锁定 Hook：弹窗/模态框打开时禁止背景页面滚动，关闭后恢复，支持嵌套调用
+// 使用 overflow:hidden 而非 position:fixed，避免 unlock 时 scrollTo 与用户滚动冲突导致页面跳动
 import { useEffect, useRef } from 'react';
 
 let lockCount = 0;
-let originalOverflow = '';
-let originalPosition = '';
-let originalTop = '';
-let originalWidth = '';
-let scrollY = 0;
+let originalHtmlOverflow = '';
+let originalBodyOverflow = '';
+let originalPaddingRight = '';
+let scrollbarWidth = 0;
+
+function getScrollbarWidth() {
+  if (scrollbarWidth > 0) return scrollbarWidth;
+  const div = document.createElement('div');
+  div.style.width = '100px';
+  div.style.height = '100px';
+  div.style.overflow = 'scroll';
+  div.style.position = 'absolute';
+  div.style.top = '-9999px';
+  document.body.appendChild(div);
+  scrollbarWidth = div.offsetWidth - div.clientWidth;
+  document.body.removeChild(div);
+  return scrollbarWidth;
+}
 
 export function useScrollLock(active) {
   const locked = useRef(false);
@@ -33,27 +48,26 @@ export function useScrollLock(active) {
 
 function lockBody() {
   if (lockCount === 0) {
-    scrollY = window.scrollY;
-    originalOverflow = document.body.style.overflow;
-    originalPosition = document.body.style.position;
-    originalTop = document.body.style.top;
-    originalWidth = document.body.style.width;
+    originalHtmlOverflow = document.documentElement.style.overflow;
+    originalBodyOverflow = document.body.style.overflow;
+    originalPaddingRight = document.body.style.paddingRight;
 
+    const sw = getScrollbarWidth();
+    document.documentElement.style.overflow = 'hidden';
     document.body.style.overflow = 'hidden';
-    document.body.style.position = 'fixed';
-    document.body.style.top = `-${scrollY}px`;
-    document.body.style.width = '100%';
+    if (sw > 0) {
+      document.body.style.paddingRight = `${sw}px`;
+    }
   }
   lockCount++;
 }
 
 function unlockBody() {
-  lockCount = Math.max(0, lockCount - 1);
+  if (lockCount === 0) return;
+  lockCount--;
   if (lockCount === 0) {
-    document.body.style.overflow = originalOverflow;
-    document.body.style.position = originalPosition;
-    document.body.style.top = originalTop;
-    document.body.style.width = originalWidth;
-    window.scrollTo(0, scrollY);
+    document.documentElement.style.overflow = originalHtmlOverflow;
+    document.body.style.overflow = originalBodyOverflow;
+    document.body.style.paddingRight = originalPaddingRight;
   }
 }

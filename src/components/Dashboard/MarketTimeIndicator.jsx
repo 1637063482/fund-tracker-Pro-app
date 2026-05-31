@@ -1,3 +1,4 @@
+// 市场时间指示器组件：实时展示 A 股交易时段状态（开盘/午休/收盘/休市），支持收盘提醒开关
 import React, { useState, useEffect } from 'react';
 import { Clock, Bell } from 'lucide-react';
 import { isHolidayToday } from '../../utils/holidayCalendar';
@@ -78,7 +79,7 @@ export const MarketTimeIndicator = () => {
       </div>
       
       {countdown && (
-        <div className={`flex items-center px-3 py-1 rounded-md text-xs xl:text-sm font-bold transition-all duration-500 ${urgent ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 shadow-sm' : 'text-amber-600 dark:text-amber-500'}`}>
+        <div className={`flex items-center px-3 py-1 rounded-full text-xs xl:text-sm font-bold transition-all duration-500 ${urgent ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 shadow-sm' : 'text-amber-600 dark:text-amber-500'}`}>
           <Bell className={`mr-1 w-[14px] h-[14px] xl:w-[18px] xl:h-[18px] text-red-500 ${urgent ? 'animate-bounce' : ''}`} />
           {countdown}
         </div>

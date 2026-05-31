@@ -1,4 +1,6 @@
-import React from 'react';
+// Markdown 渲染组件：将 AI 输出的 Markdown 文本解析为 React 组件，支持表格、代码块、折叠面板与 XSS 防护
+import React, { useState } from 'react';
+import { Brain, ChevronDown, ChevronRight } from 'lucide-react';
 import DOMPurify from 'dompurify';
 
 // ========================
@@ -269,16 +271,38 @@ const groupIntoCards = (blocks) => {
 // ========================
 // 主渲染函数
 // ========================
+// 可折叠的 AI 思考过程组件
+const CollapsibleThink = ({ html }) => {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="my-3 border border-amber-200/60 dark:border-amber-700/40 rounded-[0.875rem] overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-2 px-4 py-2.5 bg-amber-50/80 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors text-left"
+      >
+        {expanded ? <ChevronDown size={16} className="text-amber-500 shrink-0" /> : <ChevronRight size={16} className="text-amber-500 shrink-0" />}
+        <Brain size={16} className="text-amber-500 shrink-0" />
+        <span className="text-sm font-medium text-amber-800 dark:text-amber-300">AI 思考过程</span>
+        <span className="text-[11px] text-amber-500 dark:text-amber-400 ml-auto">{expanded ? '点击收起' : '点击展开'}</span>
+      </button>
+      {expanded && (
+        <div className="p-4 text-sm text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-800/50" dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} />
+      )}
+    </div>
+  );
+};
+
 export function renderMarkdown(text) {
   if (!text || typeof text !== 'string') return null;
 
   // 保留 AI 思考过程 HTML
-  const thinkMatch = text.match(/^(### 🧠 AI[\s\S]*?<\/div>\n\n)/);
+  const thinkMatch = text.match(/^### (🧠 AI[\s\S]*?<\/div>\n\n)/);
   let thinkBlock = '';
   let mainText = text;
   if (thinkMatch) {
     thinkBlock = thinkMatch[1];
-    mainText = text.slice(thinkMatch[1].length);
+    mainText = text.slice(thinkMatch[0].length);
   }
 
   // AI 状态文字（"正在深度思考..."等）不需要渲染
@@ -324,10 +348,12 @@ export function renderMarkdown(text) {
         ) }} />;
       }
       case 'blockquote': {
-        return <div key={key} dangerouslySetInnerHTML={{ __html: sanitizeHtml(
-          '<blockquote class="border-l-4 border-amber-400 dark:border-amber-500 pl-4 py-2 my-3 text-slate-600 dark:text-slate-400 italic bg-amber-50 dark:bg-amber-900/20 rounded-r-lg leading-relaxed">' + applyInline(block.content) + '</blockquote>'
-        ) }} />;
-      }
+  return <div key={key} dangerouslySetInnerHTML={{ __html: sanitizeHtml(
+    '<blockquote class="border-l-4 border-amber-400 dark:border-amber-500 pl-4 py-3 my-4 text-slate-600 dark:text-slate-400 italic bg-amber-50 dark:bg-amber-900/20 rounded-xl overflow-hidden leading-relaxed">' + 
+    applyInline(block.content) + 
+    '</blockquote>'
+  ) }} />;
+}
       case 'hr': {
         return <hr key={key} className="my-4 border-slate-200 dark:border-slate-700" />;
       }
@@ -340,10 +366,10 @@ export function renderMarkdown(text) {
 
   const elements = [];
 
-  // 思考过程块
+  // 思考过程块 — 可折叠
   if (thinkBlock) {
     elements.push(
-      <div key="think" dangerouslySetInnerHTML={{ __html: sanitizeHtml(thinkBlock) }} />
+      <CollapsibleThink key="think" html={thinkBlock} />
     );
   }
 

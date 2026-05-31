@@ -1,3 +1,4 @@
+// 全局错误边界组件：捕获子组件渲染时的未处理异常，展示友好降级 UI 并提供重试按钮
 import React, { Component } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 
@@ -28,7 +29,7 @@ export class ErrorBoundary extends Component {
               应用遇到了一个未预期的错误。请尝试刷新页面，如果问题持续存在请联系技术支持。
             </p>
             {this.state.error && (
-              <pre className="mt-2 p-3 bg-slate-100 dark:bg-slate-900 rounded-lg text-xs text-left text-red-600 dark:text-red-400 overflow-auto max-h-32 font-mono">
+              <pre className="mt-2 p-3 bg-slate-100 dark:bg-slate-900 rounded-[0.875rem] text-xs text-left text-red-600 dark:text-red-400 overflow-auto max-h-32 font-mono">
                 {this.state.error.message}
               </pre>
             )}

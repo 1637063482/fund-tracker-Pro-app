@@ -1,3 +1,4 @@
+// 数字动画组件：数值变化时以滚动/渐变动画过渡显示，支持自定义格式化函数
 import React, { useState, useEffect, useRef } from 'react';
 import { formatMoney } from '../../utils/helpers';
 
@@ -16,15 +17,18 @@ export const AnimatedNumber = ({ value, formatter = formatMoney, className = "" 
     let end = value;
     if (start === end) return;
 
-    const duration = 500;
+    const duration = 400;
     const startTime = performance.now();
 
     const animate = (currentTime) => {
       const elapsed = currentTime - startTime;
       const progress = Math.min(elapsed / duration, 1);
-      
-      const easeProgress = 1 - Math.pow(1 - progress, 3);
-      const current = start + (end - start) * easeProgress;
+
+      // Spring easing with gentle overshoot
+      const damping = 0.85;
+      const stiffness = 0.4;
+      const springProgress = 1 - Math.pow(damping, progress * 12) * Math.cos(progress * stiffness * 24);
+      const current = start + (end - start) * springProgress;
       
       setDisplayValue(current);
 

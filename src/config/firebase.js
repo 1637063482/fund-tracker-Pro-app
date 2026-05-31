@@ -1,3 +1,4 @@
+// Firebase SDK 初始化模块：创建并导出 auth（认证）和 db（Firestore）实例供全局使用
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';

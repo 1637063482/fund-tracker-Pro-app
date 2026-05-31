@@ -1,3 +1,4 @@
+// 智能输入框组件：支持公式计算（以 = 开头）与日期输入的通用输入框，聚焦时展示表达式，失焦后展示计算结果
 import React, { useState, useEffect } from 'react';
 import { evaluateExpression } from '../../utils/helpers';
 
@@ -21,7 +22,7 @@ export const SmartInput = ({ value, onChange, placeholder, className, isDate = f
       onBlur={handleBlur}
       disabled={disabled}
       placeholder={placeholder}
-      className={`px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all duration-300 dark:bg-slate-800 dark:border-slate-700 dark:text-white ${className} ${disabled ? 'opacity-50 cursor-not-allowed bg-slate-100 dark:bg-slate-900' : ''}`}
+      className={`px-3 py-2 border rounded-[0.75rem] focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 focus:outline-none transition-all duration-300 dark:bg-slate-800 dark:border-slate-700 dark:text-white ${className} ${disabled ? 'opacity-50 cursor-not-allowed bg-slate-100 dark:bg-slate-900' : ''}`}
     />
   );
 };

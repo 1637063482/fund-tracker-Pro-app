@@ -1,14 +1,17 @@
-import React, { useState } from 'react';
+// 基金详情弹窗组件：展示单只基金的 AI 深度分析报告，支持从 Firestore 缓存读取或重新生成
+import React, { useState, useEffect } from 'react';
 import { RefreshCw, X, BarChart2, Award, User, PieChart, Calendar, TrendingDown, Target, Activity, Sparkles, AlertTriangle, Send, Check } from 'lucide-react';
 import { renderMarkdown } from '../../utils/renderMarkdown';
 import { analyzeFundWithAI } from '../../utils/ai';
-import { useScrollLock } from '../../hooks/useScrollLock';
+import { toFeishuMarkdown } from '../../utils/feishuMarkdown';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { useModalAnimation } from '../../hooks/useModalAnimation';
 
-export const FundProfileModal = ({ fund, profile, marketData, settings, onClose }) => {
-  useScrollLock(true);
-  const focusRef = useFocusTrap(true);
-  const [isClosing, setIsClosing] = useState(false);
+export const FundProfileModal = ({ fund, profile, marketData, settings, onClose, triggerRect }) => {
+  const { isOpen, open, close, overlayStyle, panelStyle } = useModalAnimation(onClose, triggerRect, settings.animationSpeed || 1.0);
+  const focusRef = useFocusTrap(isOpen);
+
+  useEffect(() => { open(); }, []);
   const[aiReport, setAiReport] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
@@ -59,7 +62,7 @@ export const FundProfileModal = ({ fund, profile, marketData, settings, onClose 
             card: {
               config: { wide_screen_mode: true },
               header: { title: { tag: "plain_text", content: titleText }, template: "blue" },
-              elements: [{ tag: "markdown", content: aiReport }]
+              elements: [{ tag: "markdown", content: toFeishuMarkdown(aiReport) }]
             }
           })
         });
@@ -98,8 +101,8 @@ export const FundProfileModal = ({ fund, profile, marketData, settings, onClose 
 
   if (!profile) {
     return (
-      <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity duration-250 ${isClosing ? 'opacity-0' : 'opacity-100'}`}>
-        <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl flex flex-col items-center shadow-2xl">
+      <div style={overlayStyle}>
+        <div style={panelStyle} className="bg-white dark:bg-slate-900 p-8 rounded-[1.25rem] flex flex-col items-center shadow-apple-2xl">
           <RefreshCw size={32} className="animate-spin text-blue-500 mb-4" />
           <p className="text-slate-500 dark:text-slate-400 font-medium">正在深度解析底层配置...</p>
         </div>
@@ -132,8 +135,8 @@ export const FundProfileModal = ({ fund, profile, marketData, settings, onClose 
                : (settings.aiProvider === 'deepseek' ? 'DeepSeek 官方' : 'Google Gemini');
 
   return (
-    <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4 transition-opacity duration-250 ${isClosing ? 'opacity-0' : 'opacity-100'}`} onClick={handleClose}>
-      <div ref={focusRef} className={`bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col transform transition-all duration-250 ${isClosing ? 'scale-95 translate-y-4' : 'scale-100 translate-y-0'} animate-in fade-in zoom-in-95`} onClick={e => e.stopPropagation()}>
+    <div style={overlayStyle} onClick={close}>
+      <div ref={focusRef} style={panelStyle} className="bg-white dark:bg-slate-900 rounded-[1.25rem] shadow-apple-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col border border-slate-200/60 dark:border-slate-700/40" onClick={e => e.stopPropagation()}>
         
         <div className="shrink-0 bg-gradient-to-r from-blue-600 to-indigo-600 p-5 sm:p-6 text-white relative overflow-hidden">
           <div className="absolute right-0 top-0 opacity-10 transform scale-150 -translate-y-4 translate-x-4">
@@ -148,7 +151,7 @@ export const FundProfileModal = ({ fund, profile, marketData, settings, onClose 
                 {profile.fd_name || fund?.name}
               </h2>
             </div>
-            <button onClick={handleClose} className="p-1.5 bg-white/10 hover:bg-white/30 rounded-full transition-colors active:scale-90 shrink-0 shadow-sm">
+            <button onClick={close} className="p-1.5 bg-white/10 hover:bg-white/30 rounded-full transition-colors active:scale-90 shrink-0 shadow-sm">
               <X size={20} />
             </button>
           </div>
@@ -159,7 +162,7 @@ export const FundProfileModal = ({ fund, profile, marketData, settings, onClose 
           {/* AI 诊断面板区域 */}
           <div className="p-4 sm:p-6 bg-gradient-to-b from-purple-50 to-white dark:from-purple-900/20 dark:to-slate-900 border-b border-slate-100 dark:border-slate-700">
              {!aiReport && !aiLoading && !aiError && (
-               <button onClick={handleRunAiAnalysis} className="w-full py-3.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold text-sm shadow-md transition-all active:scale-95 flex items-center justify-center">
+               <button onClick={handleRunAiAnalysis} className="w-full py-3.5 bg-purple-600 hover:bg-purple-700 text-white rounded-full font-bold text-sm shadow-apple-sm transition-all active:scale-[0.97] flex items-center justify-center">
                  <Sparkles size={18} className="mr-2" /> 召唤 {aiName} 全息诊断 (含现金流轨迹)
                </button>
              )}
@@ -172,7 +175,7 @@ export const FundProfileModal = ({ fund, profile, marketData, settings, onClose 
              )}
 
              {aiError && (
-               <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-xl text-red-600 dark:text-red-400 text-sm flex items-start border border-red-100 dark:border-red-800/50">
+               <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-[0.875rem] text-red-600 dark:text-red-400 text-sm flex items-start border border-red-200/60 dark:border-red-800/40">
                  <AlertTriangle size={18} className="mr-2 shrink-0 mt-0.5" />
                  <div>
                     <span className="font-bold">分析失败：</span>{aiError}
@@ -182,7 +185,7 @@ export const FundProfileModal = ({ fund, profile, marketData, settings, onClose 
              )}
 
              {aiReport && (
-               <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-purple-200 dark:border-purple-800 shadow-sm animate-in slide-in-from-top-4 duration-500 relative">
+               <div className="apple-card p-5 animate-in slide-in-from-top-4 duration-500 relative">
                  <div className="absolute -top-3 -left-3 bg-gradient-to-r from-purple-500 to-indigo-500 text-white p-1.5 rounded-full shadow-md">
                    <Sparkles size={16} />
                  </div>
@@ -212,15 +215,15 @@ export const FundProfileModal = ({ fund, profile, marketData, settings, onClose 
                </div>
              )}
              <div className="flex flex-wrap gap-2 text-xs font-medium">
-                <span className="bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 border border-blue-100 dark:border-blue-800 px-2.5 py-1 rounded-md shadow-sm">
+                <span className="bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 border border-blue-100 dark:border-blue-800 px-2.5 py-1 rounded-[0.625rem] shadow-sm">
                   {typeDesc}
                 </span>
                 {fundTags.map((tag, i) => (
-                  <span key={i} className="bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-600 px-2.5 py-1 rounded-md shadow-sm">
+                  <span key={i} className="bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-600 px-2.5 py-1 rounded-[0.625rem] shadow-sm">
                     {tag.name}
                   </span>
                 ))}
-                <span className={`px-2.5 py-1 rounded-md border shadow-sm ${profile.fund_status === "0" ? 'bg-green-50 text-green-600 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:border-slate-700'}`}>
+                <span className={`px-2.5 py-1 rounded-[0.625rem] border shadow-sm ${profile.fund_status === "0" ? 'bg-green-50 text-green-600 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:border-slate-700'}`}>
                   {profile.fund_status === "0" ? "开放申赎" : "限制交易"}
                 </span>
              </div>

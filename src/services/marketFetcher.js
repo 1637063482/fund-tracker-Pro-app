@@ -1,4 +1,4 @@
-// 市场行情数据拉取服务：支持腾讯 / 新浪 / 雪球三种数据源
+// 市场行情数据拉取服务：支持腾讯 / 新浪 / 雪球三种数据源，包含指数行情与板块涨跌
 import { ASSET_NAMES, PROXY_NODES } from '../config/constants';
 
 const MARKET_CODES = {

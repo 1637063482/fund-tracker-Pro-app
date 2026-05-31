@@ -1,4 +1,4 @@
-// 行情数据抓取模块：腾讯分时、多周期 K 线、东财情绪聚合
+// 行情数据抓取模块：腾讯分时图、多周期 K 线数据、东方财富市场情绪指标聚合拉取
 import { buildProxyUrl } from './proxy';
 
 // 格式化现金流数据
@@ -69,7 +69,7 @@ export const fetchIntradayTrend = async (code, settings) => {
   }
 };
 
-// 多周期 K 线轨迹提取器
+// 多周期 K 线轨迹提取器（轻量版：收盘价序列+极值区间，OHLC 细节由 get_market_historical_intraday 按需获取）
 export const fetchMultiPeriodKLines = async (code, period = 'day', count = 20, settings) => {
   try {
     const url = `https://ifzq.gtimg.cn/appstock/app/kline/kline?param=${code},${period},,,${count},`;

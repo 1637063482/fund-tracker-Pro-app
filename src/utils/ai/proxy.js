@@ -1,4 +1,4 @@
-// 统一的代理 URL 构建，消除 20+ 处重复的模板字符串拼接
+// 代理 URL 构建模块：统一拼接 CORS 代理前缀与基金代码转换，消除 20+ 处重复的模板字符串拼接
 export const buildProxyUrl = (settings, targetUrl) => {
   if (settings.proxyMode !== 'custom' || !settings.customProxyUrl) {
     return targetUrl;

@@ -1,4 +1,4 @@
-// AI 模块统一导出入口
+// AI 模块统一导出入口：聚合 providers / proxy / fifo / market-data / search-engines / tools / prompts / core 所有子模块
 export { resolveProvider } from './providers';
 export { buildProxyUrl, buildAllOriginsUrl, toIfzqCode } from './proxy';
 export { calculate7DayPenalty } from './fifo';

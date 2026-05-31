@@ -1,3 +1,4 @@
+// 图片预览组件：全屏图片查看器，支持双指缩放、鼠标滚轮缩放与拖拽平移
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { X, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
 
@@ -102,7 +103,7 @@ export const ImageModal = ({ src, alt, onClose }) => {
       <div className="absolute top-4 right-4 flex items-center gap-1 z-10">
         <button
           onClick={() => setScale(prev => clampScale(prev - 0.5))}
-          className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors"
+          className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-[0.625rem] transition-colors"
           title="缩小"
         >
           <ZoomOut size={20} />
@@ -112,21 +113,21 @@ export const ImageModal = ({ src, alt, onClose }) => {
         </span>
         <button
           onClick={() => setScale(prev => clampScale(prev + 0.5))}
-          className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors"
+          className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-[0.625rem] transition-colors"
           title="放大"
         >
           <ZoomIn size={20} />
         </button>
         <button
           onClick={resetZoom}
-          className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors"
+          className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-[0.625rem] transition-colors"
           title="重置"
         >
           <RotateCcw size={20} />
         </button>
         <button
           onClick={onClose}
-          className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors ml-2"
+          className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-[0.625rem] transition-colors ml-2"
           title="关闭"
         >
           <X size={20} />
@@ -149,7 +150,7 @@ export const ImageModal = ({ src, alt, onClose }) => {
           ref={imgRef}
           src={src}
           alt={alt || ''}
-          className="max-w-full max-h-full object-contain select-none rounded-lg shadow-2xl"
+          className="max-w-full max-h-full object-contain select-none rounded-[0.625rem] shadow-2xl"
           style={{
             transform: `scale(${scale}) translate(${position.x / scale}px, ${position.y / scale}px)`,
             transition: isDragging ? 'none' : 'transform 0.2s ease-out',

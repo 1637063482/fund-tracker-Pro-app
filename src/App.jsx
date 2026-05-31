@@ -1,3 +1,4 @@
+// 应用主组件：管理全局状态（用户认证、基金数据、行情、设置、主题），编排所有子组件与业务逻辑
 import React, { useState, useEffect, useMemo, useRef, Fragment, useCallback } from 'react';
 import {
   Activity, Download, CloudOff, RefreshCw, Sun, Moon, LogOut, Settings, Pause, Play,
@@ -26,6 +27,9 @@ import { TodoListCard } from './components/Dashboard/TodoListCard';
 import { FundTable } from './components/Dashboard/FundTable';
 import { useBaseFundsData } from './hooks/useBaseFundsData';
 import { usePortfolioStats } from './hooks/usePortfolioStats';
+import { useModalAnimation } from './hooks/useModalAnimation';
+import { AnimatedModal } from './components/UI/AnimatedModal';
+import { Tooltip } from './components/UI/Tooltip';
 import { toast, ToastContainer } from './components/UI/Toast';
 
 
@@ -100,11 +104,11 @@ export default function App() {
     const todoRef = doc(db, 'artifacts', appId, 'users', user.uid, 'todos', id);
     await setDoc(todoRef, newData, { merge: true });
   };
-  const[settings, setSettings] = useState({ 
-    targetAmount: 100000, 
-    targetDate: '2030-12-31', 
+  const[settings, setSettings] = useState({
+    targetAmount: 100000,
+    targetDate: '2030-12-31',
     targetAnnualRate: 5,
-    proxyMode: 'custom', 
+    proxyMode: 'custom',
     customProxyUrl: '',
     dataSource: 'tencent',
     navDataSource: 'tiantian',
@@ -117,7 +121,15 @@ export default function App() {
     serperApiKey: '',
     cfWorkerUrl: '',
     cfWorkerSecret: '',
-    reasoningEffort: 'max'
+    reasoningEffort: 'max',
+    temperature: 0.1,
+    topP: 0.1,
+    maxOutputTokens: 8192,
+    maxHistoryMessages: 20,
+    maxToolLoops: 12,
+    marketRefreshInterval: 5000,
+    autoLogoutMinutes: 15,
+    searchResultCount: 6
   });
   const[theme, setTheme] = useState('light'); 
 
@@ -145,16 +157,39 @@ export default function App() {
     initHolidayData();
   }, []);
   
-  const [marketData, setMarketData] = useState([]); 
+  const [marketData, setMarketData] = useState([]);
+  const prevPricesRef = useRef({});
+  const [tickDirs, setTickDirs] = useState({}); // { [id]: 'up' | 'down' }
   const[isFetchingMarket, setIsFetchingMarket] = useState(false);
   const[marketError, setMarketError] = useState('');
-  const [activeProxyIndex, setActiveProxyIndex] = useState(0); 
-  const isFetchingRef = useRef(false); 
+  const [activeProxyIndex, setActiveProxyIndex] = useState(0);
+
+  // 检测行情数值变化方向，触发跳动动画
+  useEffect(() => {
+    if (marketData.length === 0) return;
+    const newDirs = {};
+    marketData.forEach(d => {
+      const prev = prevPricesRef.current[d.id];
+      if (prev !== undefined && prev !== d.price) {
+        newDirs[d.id] = d.price > prev ? 'up' : 'down';
+      }
+      prevPricesRef.current[d.id] = d.price;
+    });
+    if (Object.keys(newDirs).length > 0) {
+      setTickDirs(newDirs);
+      const timer = setTimeout(() => setTickDirs({}), 800);
+      return () => clearTimeout(timer);
+    }
+  }, [marketData]);
+
+  const isFetchingRef = useRef(false);
   // 【关键修改1】初始状态默认开启，把控制权完全交给用户
   const [isAutoRefresh, setIsAutoRefresh] = useState(true); 
 
   const[editingFundId, setEditingFundId] = useState(null);
-  const[isProxyModalOpen, setProxyModalOpen] = useState(false); 
+  const[isProxyModalOpen, setProxyModalOpen] = useState(false);
+  const [modalTriggerRect, setModalTriggerRect] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null); // { id, message, onConfirm }
   const[isPortfolioModalOpen, setPortfolioModalOpen] = useState(false);
   const[dbError, setDbError] = useState(''); 
   const[isDbConnected, setIsDbConnected] = useState(false);
@@ -163,7 +198,6 @@ export default function App() {
   
   const[fundNavs, setFundNavs] = useState({});
   const[fetchingNavCodes, setFetchingNavCodes] = useState({}); 
-  const[isClosingEditor, setIsClosingEditor] = useState(false); 
   
   const[xirrMap, setXirrMap] = useState({});
   const[overallXirr, setOverallXirr] = useState(0);
@@ -171,7 +205,7 @@ export default function App() {
   const[fundProfiles, setFundProfiles] = useState({});
   const[viewingProfileCode, setViewingProfileCode] = useState(null);
 
-  const INACTIVITY_LIMIT = 15 * 60 * 1000; 
+  const INACTIVITY_LIMIT = (settings.autoLogoutMinutes ?? 15) * 60 * 1000;
   const logoutTimerRef = useRef(null);
   const targetAmountTimeoutRef = useRef(null); 
   const targetDateTimeoutRef = useRef(null);
@@ -249,13 +283,13 @@ export default function App() {
 
   const resetLogoutTimer = useCallback(() => {
     if (logoutTimerRef.current) clearTimeout(logoutTimerRef.current);
-    if (user) {
+    if (user && INACTIVITY_LIMIT > 0) {
       logoutTimerRef.current = setTimeout(() => {
         console.log('长时间未操作，自动登出。');
         handleSignOut();
       }, INACTIVITY_LIMIT);
     }
-  }, [user, handleSignOut]);
+  }, [user, handleSignOut, INACTIVITY_LIMIT]);
 
   useEffect(() => {
     const events =['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
@@ -435,16 +469,12 @@ export default function App() {
       if (checkIsTradingTime()) {
         manualFetch();
       }
-    }, 5000); 
-    return () => clearInterval(intervalId); 
-  },[isAutoRefresh, manualFetch, user]);
+    }, settings.marketRefreshInterval || 5000);
+    return () => clearInterval(intervalId);
+  },[isAutoRefresh, manualFetch, user, settings.marketRefreshInterval]);
 
   const handleCloseEditor = () => {
-     setIsClosingEditor(true);
-     setTimeout(() => {
-         setEditingFundId(null);
-         setIsClosingEditor(false);
-     }, 200);
+    setEditingFundId(null);
   };
 
   const handleSaveFund = async (fund) => {
@@ -452,13 +482,16 @@ export default function App() {
     const fundId = fund.id || Date.now().toString(); 
     const fundRef = doc(db, 'artifacts', appId, 'users', user.uid, 'funds', fundId);
     
+    // 归档前的市值：auto 用净值×份额，manual 用录入值
+    const preArchiveValue = fund.mode === 'auto'
+      ? (Number(fund.shares) || 0) * (fundNavs[fund.fundCode]?.nav || fund.lastNav || 0)
+      : evaluateExpression(fund.currentValueRaw) || 0;
+
     let finalCurrentValue = 0;
     if (fund.isArchived) {
        finalCurrentValue = 0;
-    } else if (fund.mode === 'auto') {
-       finalCurrentValue = (Number(fund.shares) || 0) * (fundNavs[fund.fundCode]?.nav || fund.lastNav || 0);
     } else {
-       finalCurrentValue = evaluateExpression(fund.currentValueRaw) || 0;
+       finalCurrentValue = preArchiveValue;
     }
 
     const payload = {
@@ -466,6 +499,7 @@ export default function App() {
       transactions: fund.transactions ||[],
       currentValueRaw: fund.currentValueRaw || '0',
       currentValue: finalCurrentValue,
+      exitValue: fund.isArchived ? (fund.exitValue || preArchiveValue) : (fund.exitValue || 0),
       mode: fund.mode === 'auto' ? 'auto' : 'manual',
       fundCode: fund.fundCode || '',
       shares: fund.shares ? Number(fund.shares) : 0,
@@ -476,8 +510,7 @@ export default function App() {
     };
 
     try {
-       await setDoc(fundRef, payload, { merge: true }); 
-       handleCloseEditor();
+       await setDoc(fundRef, payload, { merge: true });
     } catch (err) {
        console.error("保存失败", err);
        toast('保存失败，请检查Firebase数据库安全规则: ' + err.message, 'error');
@@ -485,8 +518,13 @@ export default function App() {
   };
 
   const handleDeleteFund = async (id) => {
-    if (!user || !db || !window.confirm('确认删除该记录吗？此操作无法恢复。建议使用“归档”功能保留历史收益。')) return;
-    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'funds', id));
+    if (!user || !db) return;
+    setDeleteConfirm({ id });
+  };
+
+  const confirmDeleteFund = async () => {
+    if (!deleteConfirm) return;
+    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'funds', deleteConfirm.id));
   };
 
   const handleSaveSettings = async (newSettings) => {
@@ -656,6 +694,7 @@ export default function App() {
            marketData={marketData}
            settings={settings}
            onClose={() => setViewingProfileCode(null)}
+           triggerRect={modalTriggerRect}
         />
       )}
 
@@ -663,9 +702,10 @@ export default function App() {
         <PortfolioAnalysisModal
            portfolioStats={portfolioStats}
            settings={settings}
-           marketData={marketData} 
-           fundProfiles={fundProfiles} // 🌟 新增：注入全盘基金底层画像数据
+           marketData={marketData}
+           fundProfiles={fundProfiles}
            onClose={() => setPortfolioModalOpen(false)}
+           triggerRect={modalTriggerRect}
         />
       )}
 
@@ -676,37 +716,35 @@ export default function App() {
       {!authLoading && user && (
         <div className="min-h-screen text-slate-800 dark:text-slate-200 pb-10 relative animate-in fade-in duration-700 bg-slate-50 dark:bg-slate-900">
           
-          <header className="bg-white/90 dark:bg-slate-800/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-700 sticky top-0 z-30 shadow-sm transition-colors duration-500 safe-top">
+          <header className="apple-glass sticky top-0 z-30 transition-colors duration-500 safe-top">
             <div className="max-w-[1600px] mx-auto px-4 h-16 flex items-center justify-between">
               <div className="flex items-center space-x-2 group cursor-pointer">
-                <Activity className="text-blue-600 dark:text-blue-400 transform transition-transform duration-500 group-hover:rotate-180" size={28} />
-                <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 hidden sm:block">
+                <Activity className="text-blue-500 dark:text-blue-400 transform transition-transform duration-500 group-hover:rotate-180" size={24} />
+                <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-blue-500 hidden sm:block">
                   Fund Tracker Pro
                 </h1>
               </div>
 
               <div className="flex items-center space-x-3 sm:space-x-4">
-                {/* 【新增】同步到 Cloudflare Worker 的按钮 */}
-                <button 
-                  type="button" 
-                  onClick={handleSyncToWorker} 
-                  title="将当前最新账本同步至云端 AI 巡检大脑" 
-                  className="flex items-center text-xs bg-purple-50 text-purple-600 hover:bg-purple-100 dark:bg-purple-900/30 dark:text-purple-400 dark:hover:bg-purple-800/50 px-3 py-1.5 rounded-full font-bold shadow-sm border border-purple-200 dark:border-purple-800 transition-all active:scale-95"
-                >
-                  <Cloud className="w-4 h-4 mr-1.5" /> <span className="hidden sm:inline">上传至云大脑</span>
-                </button>
+                <Tooltip content="将最新账本同步至云端 AI 巡检大脑">
+                  <button type="button" onClick={handleSyncToWorker} className="flex items-center text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-800/50 px-3 py-1.5 rounded-full font-bold shadow-sm border border-blue-200/60 dark:border-blue-800/40 transition-all active:scale-[0.97]">
+                    <Cloud className="w-4 h-4 mr-1.5" /> <span className="hidden sm:inline">上传至云大脑</span>
+                  </button>
+                </Tooltip>
 
-                <button type="button" onClick={exportData} title="导出数据至本地 JSON" className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 transition-colors hidden sm:block active:scale-90">
-                  <Download size={18} />
-                </button>
+                <Tooltip content="导出数据至本地 JSON">
+                  <button type="button" onClick={exportData} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 transition-colors hidden sm:block active:scale-90">
+                    <Download size={18} />
+                  </button>
+                </Tooltip>
 
                 {dbError ? (
-                  <div className="flex items-center space-x-1.5 text-xs bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-3 py-1.5 rounded-full border border-red-200 dark:border-red-800 transition-all duration-300">
+                  <div className="flex items-center space-x-1.5 text-xs bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 px-3 py-1.5 rounded-full border border-red-200/60 dark:border-red-800/40 transition-all duration-300">
                     <CloudOff size={14} />
                     <span className="hidden sm:inline font-medium">数据库异常</span>
                   </div>
                 ) : (
-                  <div className="flex items-center space-x-1.5 text-xs bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 px-3 py-1.5 rounded-full border border-green-200 dark:border-green-800 transition-all duration-500">
+                  <div className="flex items-center space-x-1.5 text-xs bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 px-3 py-1.5 rounded-full border border-green-200/60 dark:border-green-800/40 transition-all duration-500">
                     {isDbConnected ? (
                       <Fragment>
                         <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
@@ -726,7 +764,7 @@ export default function App() {
                 </button>
                 <div className="flex items-center bg-slate-100 dark:bg-slate-700 rounded-full pr-1 pl-3 py-1 transition-colors shadow-sm">
                   <span className="text-xs text-slate-600 dark:text-slate-300 mr-2 sm:mr-3 truncate max-w-[80px] sm:max-w-xs">{user.email || 'Admin'}</span>
-                  <button type="button" onClick={handleSignOut} className="flex items-center text-xs bg-white dark:bg-slate-600 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/50 dark:hover:text-red-400 transition-colors rounded-full px-2 py-1 font-medium shadow-sm border border-slate-200 dark:border-slate-600 active:scale-95">
+                  <button type="button" onClick={handleSignOut} className="flex items-center text-xs bg-white dark:bg-slate-600 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/50 dark:hover:text-red-400 transition-colors rounded-full px-2 py-1 font-medium shadow-sm border border-slate-200 dark:border-slate-600 active:scale-[0.97]">
                     <LogOut size={12} className="sm:mr-1" /> <span className="hidden sm:inline">退出</span>
                   </button>
                 </div>
@@ -736,7 +774,7 @@ export default function App() {
 
           <main className="max-w-[1600px] mx-auto px-4 py-6 sm:py-8 space-y-6">
             
-            <section className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 sm:p-5 relative overflow-hidden transition-colors duration-500">
+            <section className="apple-card p-4 sm:p-5 relative overflow-hidden transition-colors duration-500">
               <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-5 gap-3">
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                   <h2 className="font-extrabold flex items-center text-xl sm:text-3xl xl:text-4xl tracking-wide text-slate-800 dark:text-white">
@@ -747,18 +785,18 @@ export default function App() {
                 </div>
                 
                 <div className="flex flex-wrap items-center gap-2.5 text-sm w-full xl:w-auto">
-                  <button type="button" onClick={() => setProxyModalOpen(true)} className="text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 flex items-center transition-colors bg-slate-50 hover:bg-slate-100 dark:bg-slate-900/50 dark:hover:bg-slate-800 px-3 py-1.5 rounded-md border border-slate-100 dark:border-slate-700 font-medium active:scale-95">
+                  <button type="button" ref={el => el && setProxyModalOpen && null} onClick={(e) => { setModalTriggerRect(e.currentTarget.getBoundingClientRect()); setProxyModalOpen(true); }} className="text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 flex items-center transition-colors bg-slate-50 hover:bg-slate-100 dark:bg-slate-900/50 dark:hover:bg-slate-800 px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 font-medium active:scale-[0.97]">
                     <Settings size={14} className="mr-1" /> 系统设置中心
                   </button>
 
                   <div className="hidden sm:block w-px h-4 bg-slate-300 dark:bg-slate-600 mx-1"></div>
                   
-                  <button type="button" onClick={() => setIsAutoRefresh(!isAutoRefresh)} className={`px-3 py-1.5 rounded-md flex items-center transition-all duration-300 shadow-sm border font-medium active:scale-95 ${isAutoRefresh ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800 hover:bg-green-100 dark:hover:bg-green-900/50' : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'}`}>
+                  <button type="button" onClick={() => setIsAutoRefresh(!isAutoRefresh)} className={`px-3 py-1.5 rounded-full flex items-center transition-all duration-300 shadow-sm border font-medium active:scale-[0.97] ${isAutoRefresh ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800 hover:bg-green-100 dark:hover:bg-green-900/50' : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'}`}>
                     {isAutoRefresh ? <Pause size={14} className="mr-1.5" /> : <Play size={14} className="mr-1.5" />}
                     {isAutoRefresh ? '自动刷新: 开' : '自动刷新: 关'}
                   </button>
 
-                  <button type="button" onClick={manualFetch} disabled={isFetchingMarket} className={`bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-md flex items-center transition-all shadow-sm font-medium active:scale-95 disabled:opacity-50 group`}>
+                  <button type="button" onClick={manualFetch} disabled={isFetchingMarket} className={`bg-blue-500 hover:bg-blue-600 text-white px-4 py-1.5 rounded-full flex items-center transition-all shadow-apple-sm font-medium active:scale-[0.97] disabled:opacity-50 group`}>
                     <RefreshCw size={14} className={`mr-1.5 transition-transform duration-500 group-hover:rotate-180 ${isFetchingMarket ? 'animate-spin' : ''}`}/> 刷新
                   </button>
                 </div>
@@ -769,7 +807,7 @@ export default function App() {
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
                 {marketData.length === 0 ? (
                     Array(5).fill(0).map((_, i) => (
-                      <div key={'skel'+i} className="bg-slate-50 dark:bg-slate-900 p-4 sm:p-5 rounded-xl border border-slate-100 dark:border-slate-700 animate-pulse">
+                      <div key={'skel'+i} className="bg-slate-50 dark:bg-slate-900 p-4 sm:p-5 rounded-[0.875rem] border border-slate-100 dark:border-slate-700 animate-pulse">
                         <div className="h-3 w-16 bg-slate-200 dark:bg-slate-800 rounded mb-3"></div>
                         <div className="h-6 w-24 bg-slate-200 dark:bg-slate-800 rounded mb-2"></div>
                         <div className="h-3 w-12 bg-slate-200 dark:bg-slate-800 rounded"></div>
@@ -780,7 +818,7 @@ export default function App() {
                     const isPositive = data.change > 0;
                     const textColor = isPositive ? 'text-red-500' : (data.change < 0 ? 'text-green-500' : 'text-slate-500');
                     return (
-                      <div key={data.id} className="bg-slate-50 dark:bg-slate-900 p-4 sm:p-5 rounded-xl border border-slate-100 dark:border-slate-700 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 cursor-default">
+                      <div key={data.id} className={`apple-card-hover p-4 sm:p-5 transition-all duration-300 cursor-default hover:[transform:translateY(-8px)_scale(1.02)] ${tickDirs[data.id] === 'up' ? 'animate-tick-up' : tickDirs[data.id] === 'down' ? 'animate-tick-down' : ''} ${data.change > 0 ? 'bg-tick-up' : data.change < 0 ? 'bg-tick-down' : ''}`}>
                         <div className="text-sm sm:text-base text-slate-600 dark:text-slate-400 mb-1.5 font-bold tracking-wide truncate">{data.name}</div>
                         <div className={`text-xl sm:text-2xl lg:text-3xl font-bold font-mono ${textColor} transition-colors duration-300 truncate w-full block`}>
                           <AnimatedNumber value={data.price} formatter={(v) => v.toFixed(3)} />
@@ -815,6 +853,7 @@ export default function App() {
                   fetchFundNavManually={fetchFundNavManually}
                   formatPercent={formatPercent}
                   formatMoney={formatMoney}
+                  onCaptureRect={setModalTriggerRect}
                 />
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4 relative pt-2">
@@ -825,7 +864,7 @@ export default function App() {
                     { label: '综合年化(XIRR)', val: portfolioStats.overallXirr, color: portfolioStats.overallXirr>=0?'text-red-500':'text-green-500', isPercent: true },
                     { label: '简单收益率', val: portfolioStats.overallSimpleReturn, color: portfolioStats.overallSimpleReturn>=0?'text-red-500':'text-green-500', isPercent: true }
                   ].map((item, idx) => (
-                    <div key={idx} className="bg-white dark:bg-slate-800 p-3 sm:p-4 xl:p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm relative overflow-hidden z-10 transition-colors duration-500 hover:shadow-md hover:-translate-y-0.5">
+                    <div key={idx} className="apple-card-hover p-3 sm:p-4 xl:p-5 relative overflow-hidden z-10 transition-colors duration-500">
                       <div className="text-fluid-stat-sm font-bold text-slate-500 mb-1 sm:mb-1.5 relative z-10">{item.label}</div>
                       <div className={`text-fluid-stat font-bold font-mono relative z-10 ${item.color} transition-colors duration-500`}>
                           <AnimatedNumber value={item.val} formatter={item.isPercent ? formatPercent : formatMoney} />
@@ -837,14 +876,14 @@ export default function App() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-6">
                   
-                  <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden transition-colors duration-500">
+                  <div className="apple-card overflow-hidden transition-colors duration-500">
                     <h3 className="text-base sm:text-lg font-bold p-4 sm:p-5 border-b dark:border-slate-700 flex items-center bg-slate-50 dark:bg-slate-900/50">
                       <Award className="mr-2 text-yellow-500"/> 按年化(XIRR)排序榜单
                     </h3>
                     <div className="divide-y dark:divide-slate-700 max-h-[400px] overflow-y-auto custom-scrollbar p-1">
                       {portfolioStats.rankedByXirr.length === 0 ? <div className="p-6 text-center text-slate-400 text-sm">暂无数据</div> : null}
                       {portfolioStats.rankedByXirr.map((f, i) => (
-                        <div key={'xirr'+f.id} className="flex justify-between items-center p-3 sm:p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors rounded-lg mx-1">
+                        <div key={'xirr'+f.id} className="flex justify-between items-center p-3 sm:p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors rounded-[0.875rem] mx-1">
                           <span className="font-medium truncate flex items-center pr-2 text-sm sm:text-base">
                             <span className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full text-white text-xs sm:text-sm flex items-center justify-center mr-3 sm:mr-4 transition-transform hover:scale-110 ${i===0?'bg-gradient-to-br from-yellow-400 to-yellow-600 shadow-md':i===1?'bg-gradient-to-br from-slate-300 to-slate-500 shadow-sm':i===2?'bg-gradient-to-br from-amber-600 to-amber-800 shadow-sm':'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>{i+1}</span>
                             <span className="truncate" title={f.name}>{f.name}</span>
@@ -855,14 +894,14 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden transition-colors duration-500">
+                  <div className="apple-card overflow-hidden transition-colors duration-500">
                     <h3 className="text-base sm:text-lg font-bold p-4 sm:p-5 border-b dark:border-slate-700 flex items-center bg-slate-50 dark:bg-slate-900/50">
                       <Award className="mr-2 text-yellow-500"/> 按累计收益排序榜单
                     </h3>
                     <div className="divide-y dark:divide-slate-700 max-h-[400px] overflow-y-auto custom-scrollbar p-1">
                       {portfolioStats.rankedByProfit.length === 0 ? <div className="p-6 text-center text-slate-400 text-sm">暂无数据</div> : null}
                       {portfolioStats.rankedByProfit.map((f, i) => (
-                        <div key={'profit'+f.id} className="flex justify-between items-center p-3 sm:p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors rounded-lg mx-1">
+                        <div key={'profit'+f.id} className="flex justify-between items-center p-3 sm:p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors rounded-[0.875rem] mx-1">
                           <span className="font-medium truncate flex items-center pr-2 text-sm sm:text-base">
                             <span className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full text-white text-xs sm:text-sm flex items-center justify-center mr-3 sm:mr-4 transition-transform hover:scale-110 ${i===0?'bg-gradient-to-br from-yellow-400 to-yellow-600 shadow-md':i===1?'bg-gradient-to-br from-slate-300 to-slate-500 shadow-sm':i===2?'bg-gradient-to-br from-amber-600 to-amber-800 shadow-sm':'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>{i+1}</span>
                             <span className="truncate" title={f.name}>{f.name}</span>
@@ -873,14 +912,14 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden transition-colors duration-500">
+                  <div className="apple-card overflow-hidden transition-colors duration-500">
                     <h3 className="text-base sm:text-lg font-bold p-4 sm:p-5 border-b dark:border-slate-700 flex items-center bg-slate-50 dark:bg-slate-900/50">
                       <Award className="mr-2 text-yellow-500"/> 按简单收益率排序榜单
                     </h3>
                     <div className="divide-y dark:divide-slate-700 max-h-[400px] overflow-y-auto custom-scrollbar p-1">
                       {portfolioStats.rankedBySimpleReturn.length === 0 ? <div className="p-6 text-center text-slate-400 text-sm">暂无数据</div> : null}
                       {portfolioStats.rankedBySimpleReturn.map((f, i) => (
-                        <div key={'simple'+f.id} className="flex justify-between items-center p-3 sm:p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors rounded-lg mx-1">
+                        <div key={'simple'+f.id} className="flex justify-between items-center p-3 sm:p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors rounded-[0.875rem] mx-1">
                           <span className="font-medium truncate flex items-center pr-2 text-sm sm:text-base">
                             <span className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full text-white text-xs sm:text-sm flex items-center justify-center mr-3 sm:mr-4 transition-transform hover:scale-110 ${i===0?'bg-gradient-to-br from-yellow-400 to-yellow-600 shadow-md':i===1?'bg-gradient-to-br from-slate-300 to-slate-500 shadow-sm':i===2?'bg-gradient-to-br from-amber-600 to-amber-800 shadow-sm':'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>{i+1}</span>
                             <span className="truncate" title={f.name}>{f.name}</span>
@@ -893,11 +932,12 @@ export default function App() {
                 </div> {/* 结束：三个榜单的 grid 容器 */}
 
                 {/* 🌟 新增：待办事项卡片 (它依然属于左侧大的 section 内部) */}
-                <TodoListCard 
-                  todos={todos} 
-                  onAddTodo={handleAddTodo} 
-                  onToggleTodo={handleToggleTodo} 
-                  onDeleteTodo={handleDeleteTodo} 
+                <TodoListCard
+                  todos={todos}
+                  onAddTodo={handleAddTodo}
+                  onToggleTodo={handleToggleTodo}
+                  onDeleteTodo={handleDeleteTodo}
+                  settings={settings}
                 />
 
               </section> {/* 结束：左侧占宽度的 section */}
@@ -906,22 +946,22 @@ export default function App() {
               <section className="lg:col-span-4 xl:col-span-3 space-y-6">
                 
                 {/* 【新增入口】一键开启全盘资产体检 */}
-                <button onClick={() => setPortfolioModalOpen(true)} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-xl shadow-lg flex justify-center items-center font-bold text-base transition-all active:scale-95 group">
+                <button onClick={(e) => { setModalTriggerRect(e.currentTarget.getBoundingClientRect()); setPortfolioModalOpen(true); }} className="w-full py-4 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-apple-md flex justify-center items-center font-bold text-base transition-all active:scale-[0.97] group">
                    <Sparkles className="mr-2 group-hover:rotate-12 transition-transform" size={20}/>
                    一键开启全盘资产 AI 深度体检
                 </button>
 
-                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-5 sm:p-6 transition-colors duration-500 hover:shadow-md">
+                <div className="apple-card-hover p-5 sm:p-6 transition-colors duration-500">
                   <h3 className="text-base sm:text-lg font-bold mb-4 sm:mb-5 flex items-center"><PieChart className="mr-2 text-indigo-500"/> 大类资产配置图</h3>
                   <DonutChart data={portfolioStats.assetAllocationData} centerLabel="类别比重" />
                 </div>
 
-                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-5 sm:p-6 transition-colors duration-500 hover:shadow-md">
+                <div className="apple-card-hover p-5 sm:p-6 transition-colors duration-500">
                   <h3 className="text-base sm:text-lg font-bold mb-4 sm:mb-5 flex items-center"><PieChart className="mr-2 text-blue-500"/> 单一持仓比重分布</h3>
                   <DonutChart data={portfolioStats.pieData} />
                 </div>
 
-                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-5 sm:p-6 transition-colors duration-500 hover:shadow-md">
+                <div className="apple-card-hover p-5 sm:p-6 transition-colors duration-500">
                   <h3 className="text-base sm:text-lg font-bold mb-4 sm:mb-5 flex items-center"><PieChart className="mr-2 text-blue-500"/> 正向盈利贡献分布</h3>
                   <DonutChart 
                     data={portfolioStats.contributionPieData} 
@@ -930,7 +970,7 @@ export default function App() {
                   />
                 </div>
 
-                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-5 sm:p-6 relative overflow-hidden transition-colors duration-500">
+                <div className="apple-card apple-section p-5 sm:p-6 relative overflow-hidden transition-colors duration-500">
                   <div className="absolute -right-10 -top-10 text-blue-50 dark:text-blue-900/10 transition-transform duration-1000 hover:scale-110 hover:rotate-12 transform-gpu"><Target size={160}/></div>
                   
                   <h3 className="text-base sm:text-lg font-bold mb-4 sm:mb-5 flex items-center relative z-10"><Target className="mr-2 text-blue-500"/> 财富目标与年化复盘</h3>
@@ -945,7 +985,7 @@ export default function App() {
                           onChange={handleIdleFundsChange}
                           onBlur={handleIdleFundsBlur}
                           placeholder="例如: 10000"
-                          className="w-full px-3 py-2 border border-indigo-200 dark:border-indigo-800 rounded-xl dark:bg-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all duration-300 shadow-sm font-mono text-indigo-700 dark:text-indigo-300 font-bold bg-indigo-50 dark:bg-indigo-900/20" 
+                          className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] dark:bg-slate-900 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 focus:outline-none transition-all duration-300 shadow-sm font-mono text-indigo-700 dark:text-indigo-300 font-bold bg-indigo-50 dark:bg-indigo-900/20" 
                         />
                       </div>
                       <div>
@@ -955,7 +995,7 @@ export default function App() {
                           value={settings.targetAmount === '' ? '' : settings.targetAmount} 
                           onChange={handleTargetAmountChange}
                           onBlur={handleTargetAmountBlur}
-                          className="w-full px-3 py-2 border rounded-xl dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all duration-300 shadow-sm hover:shadow" 
+                          className="w-full px-3 py-2 border border-slate-200 rounded-[0.75rem] dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 focus:outline-none transition-all duration-300" 
                         />
                       </div>
                       <div>
@@ -965,7 +1005,7 @@ export default function App() {
                           value={settings.targetDate} 
                           onChange={handleTargetDateChange} 
                           onBlur={handleTargetDateBlur}
-                          className="w-full px-3 py-2 border rounded-xl dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all duration-300 shadow-sm hover:shadow" 
+                          className="w-full px-3 py-2 border border-slate-200 rounded-[0.75rem] dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 focus:outline-none transition-all duration-300" 
                         />
                       </div>
                       <div className="sm:col-span-2 mt-1">
@@ -975,8 +1015,8 @@ export default function App() {
                            value={settings.targetAnnualRate} 
                            onChange={handleTargetRateChange} 
                            placeholder="例如: 5"
-                           step="0.1"
-                           className="w-full px-3 py-2 font-bold text-blue-600 dark:text-blue-400 bg-slate-50 border rounded-xl dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all duration-300 shadow-inner"
+                           step="0.01"
+                           className="w-full px-3 py-2 font-bold text-blue-600 dark:text-blue-400 bg-slate-50 border border-slate-200 rounded-[0.75rem] dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 focus:outline-none transition-all duration-300"
                         />
                       </div>
                     </div>
@@ -1004,13 +1044,13 @@ export default function App() {
                         <div className="bg-gradient-to-r from-blue-500 to-indigo-500 h-full rounded-full transition-all duration-1000 ease-out" style={{width: `${Math.max(0, Math.min(100, (portfolioStats.totalProfit / (portfolioStats.safeTargetAmount || 1)) * 100))}%`}}></div>
                       </div>
 
-                      <div className="flex flex-col text-sm bg-blue-50 dark:bg-blue-900/20 p-4 sm:p-5 rounded-xl mt-4 border border-blue-100 dark:border-blue-800/50 shadow-sm transition-colors duration-500">
+                      <div className="flex flex-col text-sm bg-blue-50 dark:bg-blue-900/20 p-4 sm:p-5 rounded-[0.875rem] mt-4 border border-blue-200/60 dark:border-blue-800/40 shadow-apple-sm hover:shadow-apple-md hover:-translate-y-0.5 transition-all duration-300">
                         <span className="text-blue-700 dark:text-blue-300 font-medium mb-1">为达成目标金额，每月需新增收益：</span>
                         <span className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-blue-600 dark:text-blue-400 break-all"><AnimatedNumber value={portfolioStats.requiredMonthly} /></span>
                       </div>
                       
                       {portfolioStats.totalProfit < 0 && portfolioStats.daysToBreakEven !== null && (
-                         <div className="bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-100 dark:border-amber-800/50 mt-2 text-sm flex items-start animate-in fade-in zoom-in">
+                         <div className="bg-amber-50 dark:bg-amber-900/20 p-3 rounded-[0.875rem] border border-amber-200/60 dark:border-amber-800/40 mt-2 text-sm flex items-start animate-in fade-in zoom-in hover:shadow-md hover:-translate-y-0.5 transition-all duration-300">
                             <AlertCircle size={16} className="text-amber-500 mr-2 shrink-0 mt-0.5" />
                             <div>
                               按照 <span className="font-bold">{settings.targetAnnualRate}%</span> 的设定基准年化复利推演，要填平当前的亏损缺口，预计还需要 <span className="font-bold tabular-nums text-amber-600 dark:text-amber-400 text-base">{portfolioStats.daysToBreakEven}</span> 天。
@@ -1018,7 +1058,7 @@ export default function App() {
                          </div>
                       )}
                       {portfolioStats.totalProfit >= 0 && (
-                         <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg border border-green-100 dark:border-green-800/50 mt-2 text-sm flex items-center animate-in fade-in zoom-in text-green-700 dark:text-green-400">
+                         <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-[0.875rem] border border-green-200/60 dark:border-green-800/40 mt-2 text-sm flex items-center animate-in fade-in zoom-in text-green-700 dark:text-green-400 hover:shadow-md hover:-translate-y-0.5 transition-all duration-300">
                             <CheckCircle2 size={16} className="mr-2 shrink-0" />
                             当前资产已处于整体盈利状态，无需推演回本周期。
                          </div>
@@ -1027,14 +1067,14 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="bg-gradient-to-br from-slate-800 to-slate-900 dark:from-slate-900 dark:to-black rounded-xl shadow-lg border border-slate-700 p-6 sm:p-8 relative overflow-hidden text-white transition-all hover:shadow-xl hover:-translate-y-1 duration-300">
+                <div className="bg-gradient-to-br from-slate-800 to-slate-900 dark:from-slate-900 dark:to-black rounded-[0.875rem] shadow-apple-lg border border-slate-700/60 p-6 sm:p-8 relative overflow-hidden text-white transition-all hover:shadow-xl hover:-translate-y-1 duration-300">
                   <div className="absolute -right-6 -bottom-6 text-white/5 pointer-events-none transform-gpu"><TrendingUp size={140}/></div>
                   <h3 className="text-lg sm:text-xl font-bold mb-4 flex items-center relative z-10 text-blue-400">
                     <TrendingUp className="mr-2" size={24}/> 静态复利推演
                   </h3>
                   <div className="space-y-4 relative z-10">
                     <div className="text-slate-300 text-sm sm:text-base leading-relaxed">
-                      基于当前 <span className="font-bold text-white tabular-nums text-base sm:text-lg bg-white/10 px-2 py-0.5 rounded-md ml-1 mr-1 shadow-inner">{formatPercent(portfolioStats.overallXirr)}</span> 综合年化收益率推演：
+                      基于当前 <span className="font-bold text-white tabular-nums text-base sm:text-lg bg-white/10 px-2 py-0.5 rounded-[0.625rem] ml-1 mr-1">{formatPercent(portfolioStats.overallXirr)}</span> 综合年化收益率推演：
                     </div>
                     <div className="pt-2 border-t border-white/10 mt-2">
                       <div className="text-slate-400 text-sm sm:text-base mb-1">至目标日期预计总持仓将达到:</div>
@@ -1050,38 +1090,62 @@ export default function App() {
           </main>
 
           {isProxyModalOpen && (
-            <ProxySettingsModal 
-              settings={settings} 
-              onSave={(newSet) => { handleSaveSettings(newSet); setProxyModalOpen(false); }} 
-              onClose={() => setProxyModalOpen(false)} 
+            <ProxySettingsModal
+              settings={settings}
+              onSave={(newSet) => handleSaveSettings(newSet)}
+              onClose={() => setProxyModalOpen(false)}
+              triggerRect={modalTriggerRect}
             />
           )}
 
           {editingFundId && editingFundData && (
-            <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-2 sm:p-4 transition-opacity duration-200 ${isClosingEditor ? 'opacity-0' : 'opacity-100'}`}>
-              <div className={`bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh] sm:max-h-[85vh] transform transition-all duration-200 ${isClosingEditor ? 'scale-95 translate-y-4' : 'scale-100 translate-y-0'} animate-in fade-in zoom-in-95 slide-in-from-bottom-4`}>
-                <div className="flex justify-between items-center p-4 sm:p-6 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 shrink-0">
-                  <h3 className="text-lg sm:text-xl font-bold flex items-center text-slate-800 dark:text-white">
-                    {editingFundId === 'new' ? <Plus className="mr-2 text-blue-500" /> : <Edit3 className="mr-2 text-blue-500" />} 
-                    <span className="truncate max-w-[200px] sm:max-w-md">{editingFundId === 'new' ? '新增基金记录' : `修改资产参数`}</span>
-                  </h3>
-                  <button type="button" onClick={handleCloseEditor} className="text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 rounded-full p-1.5 shadow-sm active:scale-90"><X size={20} /></button>
-                </div>
-                <div className="p-0 sm:p-5 overflow-y-auto custom-scrollbar flex-grow bg-white dark:bg-slate-800">
-                  <FundEditor fund={editingFundData} onSave={handleSaveFund} onCancel={handleCloseEditor} fundNavs={fundNavs} fetchNavManually={fetchFundNavManually} />
-                </div>
-              </div>
-            </div>
+            <AnimatedModal
+              onClose={() => setEditingFundId(null)}
+              triggerRect={modalTriggerRect}
+              speed={settings.animationSpeed || 1.0}
+              className="bg-white dark:bg-slate-900 rounded-[1.25rem] shadow-apple-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh] sm:max-h-[85vh] border border-slate-200/60 dark:border-slate-700/40"
+            >
+              {(close) => (
+                <>
+                  <div className="flex justify-between items-center p-4 sm:p-6 border-b border-slate-200/60 dark:border-slate-700/40 bg-white/80 dark:bg-slate-900/80 backdrop-blur-glass shrink-0">
+                    <h3 className="text-lg font-bold flex items-center text-slate-800 dark:text-white tracking-tight">
+                      {editingFundId === 'new' ? <Plus className="mr-2 text-blue-500" size={20} /> : <Edit3 className="mr-2 text-blue-500" size={20} />}
+                      <span className="truncate max-w-[200px] sm:max-w-md">{editingFundId === 'new' ? '新增基金记录' : '修改资产参数'}</span>
+                    </h3>
+                    <button type="button" onClick={close} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full p-1.5 active:scale-[0.92]"><X size={20} /></button>
+                  </div>
+                  <div className="p-0 sm:p-5 overflow-y-auto custom-scrollbar flex-grow bg-white dark:bg-slate-900">
+                    <FundEditor fund={editingFundData} onSave={async (fund) => { await handleSaveFund(fund); close(); }} onCancel={close} fundNavs={fundNavs} fetchNavManually={fetchFundNavManually} />
+                  </div>
+                </>
+              )}
+            </AnimatedModal>
           )}
-           {/* 👇 加上这一块：将悬浮聊天框挂载到全局 */}
-          <PortfolioChat 
-             portfolioStats={portfolioStats} 
-             settings={settings} 
-             marketData={marketData} 
-             user={user} 
-             onAddTodo={handleAddTodo} 
-             onUpdateTodo={handleUpdateTodo} 
-             onDeleteTodo={handleDeleteTodo} 
+                     {/* 删除确认弹窗 */}
+          {deleteConfirm && (
+            <AnimatedModal onClose={() => setDeleteConfirm(null)} triggerRect={modalTriggerRect} speed={settings.animationSpeed || 1.0}>
+              {(close) => (
+                <div className="bg-white dark:bg-slate-900 rounded-[1.25rem] shadow-apple-2xl p-6 mx-4 max-w-sm w-full border border-slate-200/60 dark:border-slate-700/40" onClick={e => e.stopPropagation()}>
+                  <p className="text-sm text-slate-700 dark:text-slate-300 mb-4">确认删除该记录吗？此操作无法恢复。<br/>建议使用"归档"功能保留历史收益。</p>
+                  <div className="flex justify-end space-x-2">
+                    <button onClick={close} className="px-4 py-2 rounded-full text-sm text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">取消</button>
+                    <button onClick={() => { confirmDeleteFund(); close(); }} className="px-4 py-2 rounded-full text-sm font-medium text-white bg-red-500 hover:bg-red-600 active:scale-[0.97] transition-all">确认删除</button>
+                  </div>
+                </div>
+              )}
+            </AnimatedModal>
+          )}
+
+          {/* 👇 加上这一块：将悬浮聊天框挂载到全局 */}
+          <PortfolioChat
+             portfolioStats={portfolioStats}
+             settings={settings}
+             marketData={marketData}
+             user={user}
+             onAddTodo={handleAddTodo}
+             onUpdateTodo={handleUpdateTodo}
+             onDeleteTodo={handleDeleteTodo}
+             onSaveSettings={handleSaveSettings}
              todos={todos} 
           />
 

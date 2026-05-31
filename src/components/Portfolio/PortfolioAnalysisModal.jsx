@@ -1,22 +1,25 @@
+// 投资组合分析弹窗组件：AI 驱动的全盘持仓体检，包含 X 光透视、风险评级、相关性分析与优化建议
 import React, { useState, useMemo, useEffect } from 'react';
 import { X, Sparkles, RefreshCw, AlertTriangle, PieChart, Send, Check, Layers, AlertOctagon, Search, Play } from 'lucide-react';
 import { analyzePortfolioWithAI } from '../../utils/ai';
+import { toFeishuMarkdown } from '../../utils/feishuMarkdown';
 import { renderMarkdown } from '../../utils/renderMarkdown';
 import { calculatePortfolioXRay } from '../../utils/helpers';
-import { useScrollLock } from '../../hooks/useScrollLock';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { useModalAnimation } from '../../hooks/useModalAnimation';
 
 import { collection, getDocs } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 import { getAuth } from 'firebase/auth'; // 用于获取当前用户
 
-export const PortfolioAnalysisModal = ({ portfolioStats, settings, marketData, fundProfiles, onClose }) => {
-  useScrollLock(true);
-  const focusRef = useFocusTrap(true);
+export const PortfolioAnalysisModal = ({ portfolioStats, settings, marketData, fundProfiles, onClose, triggerRect }) => {
   const [aiReport, setAiReport] = useState(null);
   const[aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
-  const[isClosing, setIsClosing] = useState(false);
+  const { isOpen, open, close, overlayStyle, panelStyle } = useModalAnimation(onClose, triggerRect, settings.animationSpeed || 1.0);
+  const focusRef = useFocusTrap(isOpen);
+
+  useEffect(() => { open(); }, []);
 
   const [isPushing, setIsPushing] = useState(false);
   const [pushSuccess, setPushSuccess] = useState(false);
@@ -64,10 +67,7 @@ useEffect(() => {
     );
   }, [portfolioStats, liveXRayProfiles]);
 
-  const handleClose = () => {
-    setIsClosing(true);
-    setTimeout(onClose, 250); 
-  };
+  const handleClose = () => close();
 
   const handleRunAiAnalysis = async () => {
     if (!settings.aiApiKey && !settings.geminiApiKey && !settings.deepseekApiKey && !settings.siliconflowApiKey) {
@@ -99,7 +99,7 @@ useEffect(() => {
         await fetch(pushToken, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ msg_type: "interactive", card: { config: { wide_screen_mode: true }, header: { title: { tag: "plain_text", content: titleText }, template: "purple" }, elements:[{ tag: "markdown", content: aiReport }] } })
+          body: JSON.stringify({ msg_type: "interactive", card: { config: { wide_screen_mode: true }, header: { title: { tag: "plain_text", content: titleText }, template: "purple" }, elements:[{ tag: "markdown", content: toFeishuMarkdown(aiReport) }] } })
         });
       } else {
         const topic = encodeURIComponent(pushToken);
@@ -118,14 +118,14 @@ useEffect(() => {
   const aiName = settings.aiProvider === 'siliconflow' ? 'SiliconFlow (DeepSeek)' : (settings.aiProvider === 'deepseek' ? 'DeepSeek 官方' : 'Google Gemini');
 
   return (
-    <div className={`fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity duration-250 ${isClosing ? 'opacity-0' : 'opacity-100'}`} onClick={handleClose}>
-      <div ref={focusRef} className={`bg-white dark:bg-slate-800 rounded-3xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col transform transition-all duration-250 ${isClosing ? 'scale-95 translate-y-4' : 'scale-100 translate-y-0'} animate-in fade-in zoom-in-95`} onClick={e => e.stopPropagation()}>
+    <div style={overlayStyle} onClick={handleClose}>
+      <div ref={focusRef} style={panelStyle} className="bg-white dark:bg-slate-900 rounded-[1.25rem] shadow-apple-2xl w-full max-w-3xl h-[90vh] max-h-[90vh] overflow-hidden flex flex-col border border-slate-200/60 dark:border-slate-700/40" onClick={e => e.stopPropagation()}>
         
-        <div className="flex justify-between items-center p-6 border-b border-slate-100 dark:border-slate-700 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-slate-800 dark:to-slate-800 shrink-0">
-          <h3 className="text-xl font-bold flex items-center text-indigo-900 dark:text-indigo-400">
-             <PieChart className="mr-2" size={24}/> 全盘资产深度体检 (CIO 视角)
+        <div className="flex justify-between items-center p-6 border-b border-slate-200/60 dark:border-slate-700/40 bg-white/80 dark:bg-slate-900/80 backdrop-blur-glass shrink-0">
+          <h3 className="text-lg font-bold flex items-center text-slate-800 dark:text-white tracking-tight">
+             <PieChart className="mr-2 text-blue-500" size={20}/> 全盘资产深度体检
           </h3>
-          <button onClick={handleClose} className="p-2 rounded-full hover:bg-white/50 dark:hover:bg-slate-700 transition-colors active:scale-90"><X size={20} /></button>
+          <button onClick={handleClose} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors active:scale-[0.92]"><X size={20} /></button>
         </div>
 
         <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-white dark:bg-slate-900">
@@ -133,7 +133,7 @@ useEffect(() => {
             {!aiReport && !aiLoading && !aiError && (
                <div className="animate-in fade-in zoom-in">
                  
-                 <div className="bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700 p-5 mb-8">
+                 <div className="apple-card p-5 mb-8">
                     <div className="flex items-center justify-between mb-4">
                       <h4 className="font-bold text-slate-800 dark:text-slate-200 flex items-center">
                         <Layers className="mr-2 text-indigo-500" size={18}/> 底层真实重仓 X-Ray
@@ -141,7 +141,7 @@ useEffect(() => {
                       {!isXRayEnabled ? (
                         <button 
                           onClick={() => setIsXRayEnabled(true)}
-                          className="text-xs flex items-center bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-bold transition-all active:scale-95 shadow-sm"
+                          className="text-xs flex items-center bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-full font-bold transition-all active:scale-95 shadow-sm"
                         >
                           <Play size={12} className="mr-1.5 fill-current"/> 开启深度穿透扫描
                         </button>
@@ -226,7 +226,7 @@ useEffect(() => {
                    <p className="text-slate-500 dark:text-slate-400 text-sm mb-6 max-w-md mx-auto">
                       AI 将读取您的持仓权重、盈亏分布与交易流水，为您出具专业的资产配置报告。
                    </p>
-                   <button onClick={handleRunAiAnalysis} className="px-8 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm shadow-md transition-all active:scale-95 flex items-center justify-center mx-auto">
+                   <button onClick={handleRunAiAnalysis} className="px-8 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full font-bold text-sm shadow-apple-sm transition-all active:scale-[0.97] flex items-center justify-center mx-auto">
                       <Sparkles size={18} className="mr-2" /> 立即唤醒 {aiName} 全盘诊断
                    </button>
                  </div>

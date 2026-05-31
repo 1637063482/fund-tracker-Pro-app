@@ -1,22 +1,42 @@
-// src/components/Dashboard/TodoListCard.jsx
+// 待办事项卡片组件：投资纪律清单，支持添加/完成/删除待办、设置优先级与截止日期
 import React, { useState } from 'react';
 import { CheckCircle2, Circle, Trash2, Plus, Clock, Target, AlertCircle, Flag } from 'lucide-react';
+import { AppleSelect } from '../UI/AppleSelect';
+import { AnimatedModal } from '../UI/AnimatedModal';
 
-export const TodoListCard = ({ todos, onAddTodo, onToggleTodo, onDeleteTodo }) => {
-  const [inputValue, setInputValue] = useState('');
-  const [inputPriority, setInputPriority] = useState('medium'); // 🌟 新增：手动选择优先级
+export const TodoListCard = ({ todos, onAddTodo, onToggleTodo, onDeleteTodo, settings }) => {
+  const [showForm, setShowForm] = useState(false);
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [triggerRect, setTriggerRect] = useState(null);
+  const [formType, setFormType] = useState('buy');
+  const [formCode, setFormCode] = useState('');
+  const [formName, setFormName] = useState('');
+  const [formAmount, setFormAmount] = useState('');
+  const [formCondition, setFormCondition] = useState('');
+  const [formPriority, setFormPriority] = useState('medium');
+  const [formErrors, setFormErrors] = useState({});
+  const [shakeKey, setShakeKey] = useState(0);
 
   const handleManualAdd = (e) => {
     e.preventDefault();
-    if (!inputValue.trim()) return;
+    const errors = {};
+    if (!formCode.trim()) errors.code = '请输入基金代码';
+    if (!formAmount || Number(formAmount) <= 0) errors.amount = '请输入有效金额';
+    if (!formCondition.trim()) errors.condition = '请输入触发条件';
+    if (Object.keys(errors).length > 0) { setFormErrors(errors); setShakeKey(k => k + 1); return false; }
     onAddTodo({
-      text: inputValue.trim(),
-      type: 'manual',
-      priority: inputPriority,
+      type: 'ai_plan',
+      actionType: formType,
+      fundCode: formCode.trim() || '--',
+      fundName: formName.trim() || '自定义计划',
+      amount: formAmount ? Number(formAmount) : null,
+      condition: formCondition.trim() || '待定',
+      priority: formPriority,
       isCompleted: false,
       createdAt: new Date().toISOString()
     });
-    setInputValue('');
+    setFormCode(''); setFormName(''); setFormAmount(''); setFormCondition('');
+    return true;
   };
 
   // 🌟 核心算法：权重映射字典
@@ -44,12 +64,12 @@ export const TodoListCard = ({ todos, onAddTodo, onToggleTodo, onDeleteTodo }) =
   };
 
   const renderTodoItem = (todo) => (
-    <div key={todo.id} className={`group flex items-start p-4 rounded-xl border transition-all duration-300 relative overflow-hidden ${todo.isCompleted ? 'bg-slate-50 dark:bg-slate-800/30 border-transparent opacity-60' : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 hover:shadow-sm hover:-translate-y-px'}`}>
+    <div key={todo.id} className={`group flex items-start p-4 rounded-[0.875rem] border transition-all duration-300 relative overflow-hidden ${todo.isCompleted ? 'bg-slate-50 dark:bg-slate-800/30 border-transparent opacity-60' : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 hover:shadow-sm hover:-translate-y-px'}`}>
       
       {/* 🌟 视觉强化：高优先级左侧给个醒目的红色小边栏 */}
       {!todo.isCompleted && todo.priority === 'high' && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-red-500"></div>}
 
-      <button onClick={() => onToggleTodo(todo.id, !todo.isCompleted)} className="mt-0.5 mr-3 shrink-0 text-slate-400 hover:text-indigo-500 transition-colors">
+      <button onClick={(e) => { setTriggerRect(e.currentTarget.getBoundingClientRect()); setConfirmAction({ type: 'toggle', todo }); }} className="mt-0.5 mr-3 shrink-0 text-slate-400 hover:text-indigo-500 transition-colors">
         {todo.isCompleted ? <CheckCircle2 className="text-green-500" size={20} /> : <Circle size={20} />}
       </button>
 
@@ -77,32 +97,85 @@ export const TodoListCard = ({ todos, onAddTodo, onToggleTodo, onDeleteTodo }) =
           </div>
         )}
       </div>
-      <button onClick={() => onDeleteTodo(todo.id)} className="opacity-100 md:opacity-0 md:group-hover:opacity-100 ml-2 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all touch-target shrink-0">
+      <button onClick={(e) => { setTriggerRect(e.currentTarget.getBoundingClientRect()); setConfirmAction({ type: 'delete', todo }); }} className="opacity-100 md:opacity-0 md:group-hover:opacity-100 ml-2 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-[0.625rem] transition-all touch-target shrink-0">
         <Trash2 size={16} />
       </button>
     </div>
   );
 
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden mt-6 transition-colors duration-500 flex flex-col h-[700px] md:h-[830px]">
+    <div className="apple-card overflow-hidden mt-6 transition-colors duration-500 flex flex-col h-[700px] md:h-[830px]">
       <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 shrink-0">
-        <h3 className="text-base sm:text-lg font-bold flex items-center text-slate-800 dark:text-white">
-          <Clock className="mr-2 text-indigo-500" /> 交易计划与待办事项
-        </h3>
-        <form onSubmit={handleManualAdd} className="mt-3 flex gap-2">
-          {/* 🌟 优化：手动添加时也可以选优先级 */}
-          <select 
-            value={inputPriority} 
-            onChange={e => setInputPriority(e.target.value)}
-            className="px-2 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg outline-none font-medium text-slate-600 dark:text-slate-300 cursor-pointer hover:border-indigo-400 transition-colors"
-          >
-            <option value="high">🔴 紧急</option>
-            <option value="medium">🟡 常规</option>
-            <option value="low">⚪ 远端</option>
-          </select>
-          <input type="text" value={inputValue} onChange={(e) => setInputValue(e.target.value)} placeholder="手动添加一条待办事项..." className="flex-1 px-3 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow" />
-          <button type="submit" disabled={!inputValue.trim()} className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"><Plus size={18} /></button>
-        </form>
+        <div className="flex items-center justify-between">
+          <h3 className="text-base sm:text-lg font-bold flex items-center text-slate-800 dark:text-white">
+            <Clock className="mr-2 text-indigo-500" /> 交易计划与待办事项
+          </h3>
+          <button onClick={(e) => { setTriggerRect(e.currentTarget.getBoundingClientRect()); setShowForm(true); }} className="px-3 py-1.5 text-xs font-medium bg-blue-500 hover:bg-blue-600 text-white rounded-full flex items-center transition-colors active:scale-[0.97]">
+            <Plus size={14} className="mr-1" /> 添加
+          </button>
+        </div>
+
+        {showForm && (
+          <AnimatedModal onClose={() => setShowForm(false)} triggerRect={triggerRect} speed={settings.animationSpeed || 1.0}>
+            {(close) => (
+            <form onSubmit={(e) => { if (handleManualAdd(e)) close(); }} className={`bg-white dark:bg-slate-900 rounded-[1.25rem] shadow-apple-2xl p-6 mx-4 max-w-lg w-full border border-slate-200/60 dark:border-slate-700/40 space-y-3 ${Object.keys(formErrors).length > 0 ? 'animate-shake' : ''}`} onClick={e => e.stopPropagation()} key={shakeKey}>
+              <h3 className="text-base font-bold text-slate-800 dark:text-white">新建交易计划</h3>
+              <div className="flex gap-2">
+                <AppleSelect value={formType} onChange={setFormType} className="w-28"
+                  triggerClassName="px-2 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] font-medium text-slate-700 dark:text-slate-300"
+                  options={[{ value: 'buy', label: '计划买入' }, { value: 'sell', label: '计划卖出' }]}
+                />
+                <div className="flex-1">
+                <input type="text" value={formCode} onChange={e => { setFormCode(e.target.value); setFormErrors({}); }} placeholder="基金代码 *" className={`w-full px-3 py-2 text-sm bg-white dark:bg-slate-900 border rounded-[0.75rem] focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none font-mono uppercase ${formErrors.code ? 'border-red-400 dark:border-red-500' : 'border-slate-200 dark:border-slate-700'}`} />
+                {formErrors.code && <p className="text-[11px] text-red-500 mt-0.5">{formErrors.code}</p>}
+              </div>
+              </div>
+              <input type="text" value={formName} onChange={e => setFormName(e.target.value)} placeholder="基金名称 (可选)" className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none" />
+              <div className="flex gap-2">
+                <div className="flex-1">
+                <input type="number" value={formAmount} onChange={e => { setFormAmount(e.target.value); setFormErrors({}); }} placeholder="金额 *" className={`w-full px-3 py-2 text-sm bg-white dark:bg-slate-900 border rounded-[0.75rem] focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none font-mono ${formErrors.amount ? 'border-red-400 dark:border-red-500' : 'border-slate-200 dark:border-slate-700'}`} />
+                {formErrors.amount && <p className="text-[11px] text-red-500 mt-0.5">{formErrors.amount}</p>}
+              </div>
+                <AppleSelect value={formPriority} onChange={setFormPriority} className="flex-1"
+                  triggerClassName="px-2 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] font-medium text-slate-600 dark:text-slate-300"
+                  options={[{ value: 'high', label: '🔴 紧急' }, { value: 'medium', label: '🟡 常规' }, { value: 'low', label: '⚪ 远端' }]}
+                />
+              </div>
+              <div>
+                <textarea value={formCondition} onChange={e => { setFormCondition(e.target.value); setFormErrors({}); }} placeholder="触发条件 *" rows={3} className={`w-full px-3 py-2 text-sm bg-white dark:bg-slate-900 border rounded-[0.75rem] focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none resize-none ${formErrors.condition ? 'border-red-400 dark:border-red-500' : 'border-slate-200 dark:border-slate-700'}`} />
+                {formErrors.condition && <p className="text-[11px] text-red-500 mt-0.5">{formErrors.condition}</p>}
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button type="button" onClick={close} className="flex-1 py-2.5 text-sm text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">取消</button>
+                <button type="submit" className="flex-1 py-2.5 bg-blue-500 text-white text-sm font-medium rounded-full hover:bg-blue-600 transition-colors active:scale-[0.97]">添加计划</button>
+              </div>
+            </form>
+            )}
+          </AnimatedModal>
+        )}
+
+        {confirmAction && (
+          <AnimatedModal onClose={() => setConfirmAction(null)} triggerRect={triggerRect} speed={settings.animationSpeed || 1.0}>
+            {(close) => (
+            <div className="bg-white dark:bg-slate-900 rounded-[1.25rem] shadow-apple-2xl p-5 mx-4 max-w-md w-full border border-slate-200/60 dark:border-slate-700/40" onClick={e => e.stopPropagation()}>
+              <p className="text-sm text-slate-700 dark:text-slate-300 mb-4">
+                {confirmAction.type === 'delete' ? '确认删除该计划吗？' : confirmAction.todo.isCompleted ? '确认标记为未完成？' : '确认标记为已完成？'}
+              </p>
+              <div className="flex justify-end space-x-2">
+                <button onClick={close} className="px-4 py-2 rounded-full text-sm text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">取消</button>
+                <button onClick={() => {
+                  if (confirmAction.type === 'delete') onDeleteTodo(confirmAction.todo.id);
+                  else onToggleTodo(confirmAction.todo.id, !confirmAction.todo.isCompleted);
+                  close();
+                }} className={`px-4 py-2 rounded-full text-sm font-medium text-white active:scale-[0.97] transition-all ${confirmAction.type === 'delete' ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-500 hover:bg-blue-600'}`}>
+                  {confirmAction.type === 'delete' ? '确认删除' : '确认'}
+                </button>
+              </div>
+            </div>
+            )}
+          </AnimatedModal>
+        )}
+
       </div>
 
       {/* 移动端统一滚动，桌面端左右分栏独立滚动 */}

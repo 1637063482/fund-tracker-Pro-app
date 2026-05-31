@@ -1,4 +1,4 @@
-// 基金净值拉取服务：支持天天基金(盘中估值) / 新浪财经 / 天天历史 / 蛋卷基金四种数据源
+// 基金净值拉取服务：支持天天基金（盘中估值）/ 新浪财经 / 天天历史 / 蛋卷基金四种数据源
 export async function fetchFundNavService({
   codeToFetch = null,
   funds,

@@ -1,3 +1,4 @@
+// 全局常量配置：Firebase 连接参数、代理节点列表、资产分类名称映射
 export const USER_FIREBASE_CONFIG = {
   apiKey: "AIzaSyAHY-z7vomHW6AUVV-a4laSGogcC1BMGM0",
   authDomain: "fund-tracker-66e68.firebaseapp.com",

@@ -1,3 +1,4 @@
+// ESLint 代码规范配置：JS/JSX/TSX 语法检查、React Hooks 规则与全局变量声明
 import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'

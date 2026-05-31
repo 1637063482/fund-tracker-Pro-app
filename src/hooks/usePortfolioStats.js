@@ -1,3 +1,4 @@
+// 投资组合统计 Hook：基于基金数据计算饼图、持仓占比、资产配置、排名等衍生分析指标
 import { useMemo } from 'react';
 
 export function usePortfolioStats(baseFundsData, settings, overallXirr, globalPreCashFlows, xirrMap, fundProfiles) {

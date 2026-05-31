@@ -1,3 +1,4 @@
+// PWA Service Worker：离线缓存策略 — 预缓存静态资源 + 网络优先回退缓存，支持推送通知
 const CACHE_NAME = 'fund-tracker-v4';
 const ASSETS_TO_CACHE = [
   '/',

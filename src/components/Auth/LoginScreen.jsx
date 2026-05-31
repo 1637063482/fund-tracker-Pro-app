@@ -1,3 +1,4 @@
+// 登录界面组件：邮箱密码登录表单，支持 Firebase 认证、主题切换、记住登录状态
 import React, { useState } from 'react';
 import { Sun, Moon, Activity, AlertCircle, Mail, Lock, RefreshCw, LogIn } from 'lucide-react';
 import { signInWithEmailAndPassword } from 'firebase/auth';
@@ -34,9 +35,9 @@ export const LoginScreen = ({ theme, setTheme, dbError }) => {
         </button>
       </div>
       
-      <div className="max-w-md w-full space-y-8 bg-white/80 dark:bg-slate-800/80 backdrop-blur-xl p-10 rounded-3xl shadow-2xl border border-white/20 dark:border-slate-700/50 animate-in fade-in zoom-in-95 duration-500 slide-in-from-bottom-8">
+      <div className="max-w-md w-full space-y-8 bg-white/80 dark:bg-slate-800/80 backdrop-blur-xl p-10 rounded-[1.25rem] shadow-apple-2xl border border-slate-200/60 dark:border-slate-700/40 animate-in fade-in zoom-in-95 duration-500 slide-in-from-bottom-8">
         <div>
-          <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 shadow-lg mb-6 transform transition-transform hover:rotate-12 duration-300">
+          <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-[14px] bg-gradient-to-tr from-blue-500 to-blue-600 shadow-lg mb-6 transform transition-transform hover:rotate-12 duration-300">
             <Activity className="h-8 w-8 text-white" />
           </div>
           <h2 className="text-center text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">Fund Tracker</h2>
@@ -56,20 +57,20 @@ export const LoginScreen = ({ theme, setTheme, dbError }) => {
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 ml-1">授权邮箱</label>
               <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none transition-colors group-focus-within:text-blue-500"><Mail size={18} className="text-slate-400 group-focus-within:text-blue-500 transition-colors" /></div>
-                <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="block w-full pl-11 pr-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:text-white transition-all outline-none hover:border-slate-300 dark:hover:border-slate-600" placeholder="admin@example.com" />
+                <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="block w-full pl-11 pr-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] text-sm focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 dark:text-white transition-all outline-none hover:border-slate-300 dark:hover:border-slate-600" placeholder="admin@example.com" />
               </div>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 ml-1">访问密码</label>
               <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none transition-colors group-focus-within:text-blue-500"><Lock size={18} className="text-slate-400 group-focus-within:text-blue-500 transition-colors" /></div>
-                <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="block w-full pl-11 pr-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:text-white transition-all outline-none hover:border-slate-300 dark:hover:border-slate-600" placeholder="••••••••" />
+                <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="block w-full pl-11 pr-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] text-sm focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 dark:text-white transition-all outline-none hover:border-slate-300 dark:hover:border-slate-600" placeholder="••••••••" />
               </div>
             </div>
           </div>
 
           <div>
-            <button type="submit" disabled={loading} className="group relative w-full flex justify-center py-3.5 px-4 border border-transparent text-sm font-bold rounded-2xl text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 shadow-md hover:shadow-lg transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed overflow-hidden">
+            <button type="submit" disabled={loading} className="group relative w-full flex justify-center py-3.5 px-4 border border-transparent text-sm font-bold rounded-full text-white bg-blue-500 hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 shadow-md hover:shadow-lg transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed overflow-hidden">
               <span className="absolute left-0 inset-y-0 flex items-center pl-3">
                 {loading ? <RefreshCw size={20} className="animate-spin text-blue-300"/> : <LogIn size={20} className="text-blue-300 group-hover:text-blue-200 group-hover:translate-x-1 transition-all duration-300" />}
               </span>

@@ -1,4 +1,4 @@
-// AI 操作卡片处理器：将 handleConfirmAction 按 action.toolType 拆分为独立处理函数
+// AI 操作卡片处理器：按 toolType 分发处理用户确认的 AI 操作（数据入库、备忘录更新、交易记录写入等），将 handleConfirmAction 拆分为独立函数
 import { doc, setDoc, getDocs, collection, query, where, updateDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 import { chatWithPortfolioAI } from '../../utils/ai';

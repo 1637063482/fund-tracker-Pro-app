@@ -1,5 +1,4 @@
-// 工具执行处理器：策略模式替代 if-else 链
-// 每个 handler: async (ctx) => void，其中 ctx = { args, toolCall, settings, body, pendingActions, fullDateTimeStr }
+// AI 工具执行处理器：策略模式替代 if-else 链，每个 handler 为独立异步函数，负责执行 AI 调用的具体工具（搜索、行情、净值等）
 import { buildProxyUrl, buildAllOriginsUrl } from './proxy';
 import { fetchSerperSearch, fetchTavilySearch, fetchExaSearch } from './search-engines';
 import { formatCashFlows } from './market-data';
@@ -195,46 +194,6 @@ const handleGetBatchFundData = async (ctx) => {
   } catch (e) {
     console.error("批量API调用崩溃", e);
     body.messages.push({ role: "tool", tool_call_id: toolCall.id, name: toolCall.function.name, content: "批量查询参数异常，请降级使用单只查询或文字说明。" });
-  }
-};
-
-const handleQuantAnalysisEngine = async (ctx) => {
-  const { args, toolCall, body } = ctx;
-  try {
-    let resultStr = "";
-
-    if (args.calcType === 'future_value') {
-      const ratePerMonth = (args.annualRate / 100) / 12;
-      const fv = args.principal * Math.pow(1 + ratePerMonth, args.months);
-      const profit = fv - args.principal;
-      resultStr = `【量化引擎计算结果】\n投入本金：${args.principal}元\n预设年化：${args.annualRate}%\n投资期限：${args.months}个月\n👉 精确复利终值：${fv.toFixed(2)}元\n👉 预期纯收益：${profit.toFixed(2)}元`;
-    } else if (args.calcType === 'required_rate') {
-      const ratePerMonth = Math.pow(args.targetAmount / args.principal, 1 / args.months) - 1;
-      const requiredAnnualRate = ratePerMonth * 12 * 100;
-      resultStr = `【量化引擎计算结果】\n当前本金：${args.principal}元\n目标金额：${args.targetAmount}元\n剩余期限：${args.months}个月\n👉 要达成此目标，所需的精确年化收益率为：${requiredAnnualRate.toFixed(2)}%`;
-    } else if (args.calcType === 'risk_evaluation' && args.priceArray && args.priceArray.length > 0) {
-      const prices = args.priceArray;
-      let maxDrawdown = 0;
-      let peak = prices[0];
-      let sum = 0;
-
-      for (const p of prices) {
-        sum += p;
-        if (p > peak) peak = p;
-        const drawdown = (peak - p) / peak;
-        if (drawdown > maxDrawdown) maxDrawdown = drawdown;
-      }
-      const currentPrice = prices[prices.length - 1];
-      const ma = sum / prices.length;
-      const currentDrawdownFromPeak = (peak - currentPrice) / peak;
-
-      resultStr = `【量化风控扫描结果】\n该序列区间内极值：最高 ${peak.toFixed(4)}\n区间最大回撤 (Max Drawdown)：${(maxDrawdown * 100).toFixed(2)}%\n当前相对最高点回撤：${(currentDrawdownFromPeak * 100).toFixed(2)}%\n区间均值 (MA)：${ma.toFixed(4)}\n当前净值位：${currentPrice >= ma ? '均线之上(趋势偏强)' : '均线之下(趋势偏弱)'}`;
-    }
-
-    body.messages.push({ role: "tool", tool_call_id: toolCall.id, name: toolCall.function.name, content: resultStr });
-  } catch (e) {
-    console.error("量化计算引擎执行失败", e);
-    body.messages.push({ role: "tool", tool_call_id: toolCall.id, name: toolCall.function.name, content: "运算参数异常，请重新调整调用参数。" });
   }
 };
 
@@ -690,14 +649,14 @@ const handleSearchTools = async (ctx) => {
       const tr = args.timeRange || "qdr:w";
       // Serper/Google 查询增强：限定站点 + 排除 SEO 垃圾
       const enhanced = finalQuery + ' (site:cls.cn OR site:wallstreetcn.com OR site:jin10.com OR site:yicai.com)';
-      searchRes = await fetchSerperSearch(settings.serperApiKey, enhanced, tr);
+      searchRes = await fetchSerperSearch(settings.serperApiKey, enhanced, tr, settings.searchResultCount, settings);
     } else if (toolName === 'tavily_news_search') {
       const recency = args.recency || "d1";
       // 确保查询偏向新闻快讯
       if (!/快讯|突发|政策|新闻|异动/.test(finalQuery)) {
         finalQuery = finalQuery + ' 最新消息';
       }
-      searchRes = await fetchTavilySearch(settings.tavilyApiKey, finalQuery, "news", settings, recency);
+      searchRes = await fetchTavilySearch(settings.tavilyApiKey, finalQuery, "news", settings, recency, settings.searchResultCount);
     } else if (toolName === 'exa_research') {
       // 确保查询偏向深度分析
       if (!/研报|分析|解读|展望|策略|报告/.test(finalQuery)) {
@@ -709,7 +668,7 @@ const handleSearchTools = async (ctx) => {
     // 降级兜底：主节点失败或无结果，触发 Serper 带站点过滤
     if (!searchRes && settings.serperApiKey && toolName !== 'google_macro_search') {
       const fallbackQuery = finalQuery + ' (site:cls.cn OR site:wallstreetcn.com OR site:stcn.com)';
-      searchRes = await fetchSerperSearch(settings.serperApiKey, fallbackQuery, "qdr:w");
+      searchRes = await fetchSerperSearch(settings.serperApiKey, fallbackQuery, "qdr:w", settings.searchResultCount, settings);
     }
 
     const timeWarning = '[系统物理防伪探针] 现在的真实时间是 ' + fullDateTimeStr + '。请严格核对以下搜索结果中的【发布时间】！如果新闻是几个月前甚至几年前的，说明它是过时垃圾信息，绝对禁止作为判断依据！\n\n';
@@ -734,9 +693,24 @@ const handleUpdateLedger = async (ctx) => {
   });
 };
 
+// 相对时间词正则：拦截持久化数据中的"明天/下周/月底"等表达，强制 LLM 使用绝对日期
+const RELATIVE_TIME_RE = /(?:[今明后昨](?:天|日|晚|早|晨|儿)|(?:本|上|下|下下)(?:个)?(?:周|礼拜|星期)[一二三四五六日天]?|(?:本|上|下|下下)(?:个)?(?:月|季度|半年|年)|(?:过)[几两三](?:天|周|个月)|(?:年|月|季|周)(?:初|末|底)|[一二三四五六七八九十两叁\d]+\s*(?:天|周|个月|年|小时)后|近期|短期内)/;
+
 const handleManagePlanTodo = async (ctx) => {
   const { args, toolCall, body, pendingActions } = ctx;
   const plansList = args.plans || [];
+
+  // 校验每个 plan 的 condition 字段
+  for (const plan of plansList) {
+    if (plan.condition && RELATIVE_TIME_RE.test(plan.condition)) {
+      body.messages.push({
+        role: "tool", tool_call_id: toolCall.id, name: toolCall.function.name,
+        content: `【系统拦截】写入失败："${plan.fundName || '未命名'}" 的 condition 字段中检测到相对时间词。请转换为绝对物理日期（如"5/28"或"5月28日"）后重新调用本工具。若基于价格信号触发，直接用价格锚点（如"跌破1.5时买入"）。违规内容："${plan.condition}"`
+      });
+      return;
+    }
+  }
+
   plansList.forEach(plan => pendingActions.push({ ...plan, toolType: 'todo' }));
   body.messages.push({
     role: "tool", tool_call_id: toolCall.id, name: toolCall.function.name,
@@ -746,6 +720,16 @@ const handleManagePlanTodo = async (ctx) => {
 
 const handleUpdateDecisionMemo = async (ctx) => {
   const { args, toolCall, body, pendingActions } = ctx;
+
+  // 校验 coreLogic 字段
+  if (args.coreLogic && RELATIVE_TIME_RE.test(args.coreLogic)) {
+    body.messages.push({
+      role: "tool", tool_call_id: toolCall.id, name: toolCall.function.name,
+      content: `【系统拦截】写入失败："${args.targetName || ''}" 的 coreLogic 字段中检测到相对时间词。请转换为绝对物理日期（如"5/28"或"5月28日"）后重新调用本工具。价格锚点和基本面逻辑（如"跌破1.5清仓""PE<10时加仓"）可直接保留。违规内容："${args.coreLogic}"`
+    });
+    return;
+  }
+
   pendingActions.push({ ...args, toolType: 'memo' });
   body.messages.push({
     role: "tool", tool_call_id: toolCall.id, name: toolCall.function.name,
@@ -770,32 +754,48 @@ const handleGetMarketHistoricalIntraday = async (ctx) => {
       code = (code === '000001' || code.startsWith('5')) ? 'sh' + code : 'sz' + code;
     }
 
-    const targetUrl = `https://ifzq.gtimg.cn/appstock/app/kline/kline?param=${code},day,,,20,`;
+    const period = (args.period || 'day').toLowerCase();
+    const count = Math.min(args.count || (period === 'day' ? 60 : period === 'week' ? 20 : 12), 100);
+
+    const targetUrl = `https://ifzq.gtimg.cn/appstock/app/kline/kline?param=${code},${period},,,${count},`;
     const fetchUrl = settings.proxyMode === 'custom' && settings.customProxyUrl
       ? buildProxyUrl(settings, targetUrl)
       : buildAllOriginsUrl(targetUrl);
 
     const res = await fetch(fetchUrl, { cache: 'no-store' });
     const resData = await res.json();
-    const dayData = resData?.data?.[code]?.day || resData?.data?.[code]?.qfqday;
+    const klineData = resData?.data?.[code]?.[period] || resData?.data?.[code]?.[`qfq${period}`];
 
-    let resultStr = `【资产 ${args.code} 过去 20 个交易日的K线结构微观数据】\n(注：百分比基准为当日开盘价)\n`;
+    const periodLabel = { day: '日K(60日)', week: '周K(20周)', month: '月K(12月)' }[period] || `${period}K`;
+    let resultStr = `【${args.code} ${periodLabel}，共 ${count} 根 OHLC 微观结构数据】\n(注：实体/影线百分比基准为当日开盘价)\n`;
 
-    if (dayData && Array.isArray(dayData)) {
-      dayData.forEach(day => {
+    if (klineData && Array.isArray(klineData)) {
+      // 汇总统计
+      let maxHigh = -Infinity, minLow = Infinity, upBars = 0, downBars = 0, totalBody = 0, totalShadow = 0;
+      klineData.forEach(day => {
+        const open = parseFloat(day[1]), close = parseFloat(day[2]), high = parseFloat(day[3]), low = parseFloat(day[4]);
+        if (high > maxHigh) maxHigh = high;
+        if (low < minLow) minLow = low;
+        if (close >= open) upBars++; else downBars++;
+        totalBody += Math.abs((close - open) / open);
+        totalShadow += (high - Math.max(open, close)) / open + (Math.min(open, close) - low) / open;
+      });
+      const n = klineData.length;
+      resultStr += `📊 统计: 区间[${minLow.toFixed(2)}~${maxHigh.toFixed(2)}] | 振幅${((maxHigh-minLow)/minLow*100).toFixed(1)}% | 阳线${upBars}/${n} 阴线${downBars}/${n} | 均实体${(totalBody/n*100).toFixed(1)}% 均影线${(totalShadow/n*100).toFixed(1)}%\n\n逐根OHLC:\n`;
+
+      klineData.forEach(day => {
         const date = day[0];
         const open = parseFloat(day[1]), close = parseFloat(day[2]), high = parseFloat(day[3]), low = parseFloat(day[4]);
-        const ampPct = ((high - low) / open * 100).toFixed(2);
-        const bodyPct = ((close - open) / open * 100).toFixed(2);
-        const upperPct = ((high - Math.max(open, close)) / open * 100).toFixed(2);
-        const lowerPct = ((Math.min(open, close) - low) / open * 100).toFixed(2);
-        const shapeMath = `(振幅${ampPct}% | 实体${bodyPct > 0 ? '+' + bodyPct : bodyPct}% | 上影${upperPct}% | 下影${lowerPct}%)`;
-        resultStr += `- [${date}] 开:${open} 收:${close} 高:${high} 低:${low} ${shapeMath}\n`;
+        const ampPct = ((high - low) / open * 100);
+        const bodyPct = ((close - open) / open * 100);
+        const upperPct = ((high - Math.max(open, close)) / open * 100);
+        const lowerPct = ((Math.min(open, close) - low) / open * 100);
+        const barType = close >= open ? '阳' : '阴';
+        resultStr += `- [${date}] 开:${open} 高:${high} 低:${low} 收:${close} | ${barType}线 振幅${ampPct.toFixed(2)}% 实体${bodyPct>0?'+'+bodyPct.toFixed(2):bodyPct.toFixed(2)}% 上影${upperPct.toFixed(2)}% 下影${lowerPct.toFixed(2)}%\n`;
       });
     } else {
       resultStr += "暂无历史K线数据。\n";
     }
-
 
     body.messages.push({ role: "tool", tool_call_id: toolCall.id, name: toolCall.function.name, content: resultStr });
   } catch (e) {
@@ -1129,6 +1129,501 @@ const handleFundComparison = async (ctx) => {
   }
 };
 
+// ============================================================================
+// 新增工具 Handler: 指数估值（PE/PB 分位 + 股息率）
+// 数据源: 蛋卷基金 index_eva API（PE/PB/分位）+ 东方财富 push2（现价/涨跌）
+// 蛋卷API返回全量列表，需客户端按 index_code 筛选
+// ============================================================================
+const handleGetIndexValuation = async (ctx) => {
+  const { args, toolCall, body, settings } = ctx;
+  try {
+    const codes = (args.codes || '000300').split(',').map(c => c.trim()).filter(Boolean);
+    if (codes.length === 0) {
+      body.messages.push({ role: "tool", tool_call_id: toolCall.id, name: "get_index_valuation", content: "请指定至少一个指数代码。" });
+      return;
+    }
+    if (codes.length > 8) {
+      body.messages.push({ role: "tool", tool_call_id: toolCall.id, name: "get_index_valuation", content: "单次最多查询8个指数。" });
+      return;
+    }
+
+    const nameMap = {
+      '000300': '沪深300', '000016': '上证50', '000905': '中证500',
+      '399006': '创业板指', '000922': '中证红利', '000001': '上证指数',
+      '399001': '深证成指', '000688': '科创50', '399673': '创业板50',
+      '000852': '中证1000', '000903': '中证100', '931009': '全指消费'
+    };
+
+    // Step 1: 拉取蛋卷全量指数估值列表（一次请求获取所有指数）
+    const evaUrl = `https://danjuanfunds.com/djapi/index_eva/dj?page=1&size=200`;
+    let evaFetchUrl = buildProxyUrl(settings, evaUrl);
+    if (settings.proxyMode !== 'custom' || !settings.customProxyUrl) {
+      evaFetchUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(evaUrl)}`;
+    }
+
+    let evaItems = [];
+    try {
+      const res = await fetch(evaFetchUrl, { cache: 'no-store' });
+      const rawText = await res.text();
+      let evaData;
+      try { evaData = JSON.parse(rawText); } catch (e) {
+        if (rawText.includes('contents')) {
+          const w = JSON.parse(rawText);
+          evaData = typeof w.contents === 'string' ? JSON.parse(w.contents) : w.contents;
+        }
+      }
+      evaItems = evaData?.data?.items || [];
+    } catch (e) {
+      console.warn("蛋卷估值API请求失败", e);
+    }
+
+    // Step 2: 按 index_code 匹配（兼容 SH/SZ/CSI 前缀）
+    const findByCode = (code) => {
+      // 蛋卷 index_code 格式如 "SH000300", "SZ399006"，也可能直接是 "000300"
+      return evaItems.find(item => {
+        const ic = (item.index_code || '').toUpperCase();
+        const c = code.toUpperCase();
+        return ic === c || ic === 'SH' + c || ic === 'SZ' + c || ic === 'CSI' + c;
+      });
+    };
+
+    // Step 3: 获取现价（东财 push2）
+    const prefixMap = {};
+    codes.forEach(c => {
+      prefixMap[c] = (c === '000001' || c.startsWith('000') || c.startsWith('5') || c.startsWith('6') || c.startsWith('9')) ? '1.' : '0.';
+    });
+    const secids = codes.map(c => prefixMap[c] + c).join(',');
+    const priceUrl = `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${secids}&fields=f2,f3`;
+    let priceFetchUrl = buildProxyUrl(settings, priceUrl);
+    if (settings.proxyMode !== 'custom' || !settings.customProxyUrl) {
+      priceFetchUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(priceUrl)}`;
+    }
+
+    let priceData = [];
+    try {
+      const pRes = await fetch(priceFetchUrl, { cache: 'no-store' });
+      const pRaw = await pRes.text();
+      let pData;
+      try { pData = JSON.parse(pRaw); } catch (e) {
+        if (pRaw.includes('contents')) {
+          const w = JSON.parse(pRaw);
+          pData = typeof w.contents === 'string' ? JSON.parse(w.contents) : w.contents;
+        }
+      }
+      priceData = pData?.data?.diff || [];
+    } catch (e) { /* ignore */ }
+
+    // Step 4: 合并结果
+    const results = codes.map((code, i) => {
+      const name = nameMap[code] || code;
+      const eva = findByCode(code);
+      const priceItem = priceData[i] || {};
+
+      const parts = [`${name}(${code})`];
+
+      // 现价
+      if (priceItem.f2 !== undefined) {
+        const price = parseFloat(priceItem.f2);
+        const pct = priceItem.f3 !== undefined ? parseFloat(priceItem.f3) : null;
+        if (!isNaN(price)) parts.push(`现价: ${price.toFixed(2)}`);
+        if (pct !== null && !isNaN(pct)) parts.push(`涨跌: ${pct > 0 ? '+' : ''}${pct.toFixed(2)}%`);
+      }
+
+      if (eva) {
+        // 蛋卷估值数据（注意: yeild 是官方拼写错误，非 bug）
+        const pe = eva.pe !== undefined && eva.pe !== null && eva.pe !== 0 ? parseFloat(eva.pe) : null;
+        const pb = eva.pb !== undefined && eva.pb !== null ? parseFloat(eva.pb) : null;
+        const pePct = eva.pe_percentile !== undefined ? parseFloat(eva.pe_percentile) : null;
+        const pbPct = eva.pb_percentile !== undefined ? parseFloat(eva.pb_percentile) : null;
+        const divYield = eva.yeild !== undefined ? parseFloat(eva.yeild) : null;
+        const roe = eva.roe !== undefined && eva.roe !== 0 ? parseFloat(eva.roe) : null;
+        const evaType = eva.eva_type || '';
+
+        if (pe !== null && pe > 0) parts.push(`PE(TTM): ${pe.toFixed(2)}`);
+        if (pePct !== null) parts.push(`PE分位: ${(pePct * 100).toFixed(1)}%`);
+        if (pb !== null && pb > 0) parts.push(`PB: ${pb.toFixed(2)}`);
+        if (pbPct !== null) parts.push(`PB分位: ${(pbPct * 100).toFixed(1)}%`);
+        if (roe !== null && roe > 0) parts.push(`ROE: ${(roe * 100).toFixed(2)}%`);
+        if (divYield !== null && divYield > 0) parts.push(`股息率: ${(divYield * 100).toFixed(2)}%`);
+
+        // 蛋卷官方评估标签
+        if (evaType === 'low') parts.push('【蛋卷评估: 低估】');
+        else if (evaType === 'mid') parts.push('【蛋卷评估: 正常估值】');
+        else if (evaType === 'high') parts.push('【蛋卷评估: 高估】');
+
+        // PE 温区判断
+        if (pe !== null && pe > 0) {
+          if (code === '000300') {
+            if (pe < 11) parts.push('【PE温区: 低估(历史底部)】');
+            else if (pe < 13) parts.push('【PE温区: 偏低】');
+            else if (pe < 15) parts.push('【PE温区: 合理中枢】');
+            else if (pe < 17) parts.push('【PE温区: 偏高】');
+            else parts.push('【PE温区: 高估(历史高位)】');
+          } else if (code === '000905') {
+            if (pe < 20) parts.push('【PE温区: 低估】');
+            else if (pe < 27) parts.push('【PE温区: 合理】');
+            else if (pe < 35) parts.push('【PE温区: 偏高】');
+            else parts.push('【PE温区: 高估】');
+          } else if (code === '399006') {
+            if (pe < 30) parts.push('【PE温区: 低估】');
+            else if (pe < 45) parts.push('【PE温区: 合理】');
+            else if (pe < 60) parts.push('【PE温区: 偏高】');
+            else parts.push('【PE温区: 高估】');
+          }
+          if (pe < 0) parts.push('【PE为负: 指数整体亏损，PE失效，请用PB辅助判断】');
+        }
+      } else {
+        parts.push('【估值数据未找到，该指数可能不在蛋卷覆盖范围】');
+      }
+
+      return parts.join(' | ');
+    });
+
+    const foundCount = codes.filter(c => findByCode(c)).length;
+    const note = foundCount === 0
+      ? '\n⚠️ 蛋卷基金估值数据未匹配到所请求的指数。已提供现价数据。'
+      : foundCount < codes.length
+        ? `\n⚠️ ${codes.length - foundCount} 个指数在蛋卷库中未找到（仅匹配 ${foundCount}/${codes.length}）。`
+        : '';
+
+    body.messages.push({
+      role: "tool",
+      tool_call_id: toolCall.id,
+      name: "get_index_valuation",
+      content: `【指数估值快照】${note}\n\n${results.join('\n')}`
+    });
+  } catch (e) {
+    console.error("指数估值获取失败", e);
+    body.messages.push({ role: "tool", tool_call_id: toolCall.id, name: "get_index_valuation", content: "指数估值数据获取失败: " + e.message });
+  }
+};
+
+// ============================================================================
+// 新增工具 Handler: 跨资产数据（汇率/商品/黄金）
+// 数据源: 腾讯财经 + 东方财富
+// ============================================================================
+const handleGetCrossAssetData = async (ctx) => {
+  const { toolCall, body, settings } = ctx;
+  try {
+    // 腾讯财经: 人民币汇率 + 国际黄金
+    const fxUrl = `https://qt.gtimg.cn/q=fxUSDCNY,fxEURCNY,spAU9999`;
+    let fetchUrl = buildProxyUrl(settings, fxUrl);
+    if (settings.proxyMode !== 'custom' || !settings.customProxyUrl) {
+      fetchUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(fxUrl)}`;
+    }
+
+    const res = await fetch(fetchUrl, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    let text;
+    if (settings.proxyMode === 'custom') {
+      // 腾讯财经返回 GBK 编码，必须用 TextDecoder 解码
+      const buffer = await res.arrayBuffer();
+      text = new TextDecoder('gbk').decode(buffer);
+    } else {
+      const wrapped = await res.json();
+      const raw = wrapped.contents || '';
+      // allorigins 代理返回的 contents 可能是 GBK 字符串被 JSON 包装
+      // 尝试通过重新编码恢复
+      if (raw.includes('�') || raw.includes('��')) {
+        try {
+          const bytes = new Uint8Array(raw.split('').map(c => c.charCodeAt(0)));
+          text = new TextDecoder('gbk').decode(bytes);
+        } catch (e) {
+          text = raw;
+        }
+      } else {
+        text = raw;
+      }
+    }
+
+    const parts = [];
+    const lines = (text || '').split(';').filter(l => l.includes('v_'));
+
+    lines.forEach(line => {
+      const dataArr = line.substring(line.indexOf('="') + 2, line.length - 1).split('~');
+      if (dataArr.length < 5) return;
+      const name = dataArr[1];
+      const price = parseFloat(dataArr[3]);
+      // 腾讯财经不同证券类型涨跌幅位置不同：股票/index 在[32]，外汇在[13]附近
+      // 统一从昨收价计算涨跌幅，避免字段位置不一致
+      const prevClose = parseFloat(dataArr[4]) || parseFloat(dataArr[6]) || 0;
+      const pct = prevClose > 0 ? ((price - prevClose) / prevClose * 100) : (parseFloat(dataArr[32]) || parseFloat(dataArr[13]) || 0);
+      if (name && !isNaN(price)) {
+        const decimals = name.includes('999') || name.includes('黄金') ? 2 : 4;
+        parts.push(`${name}: ${price.toFixed(decimals)} (${pct > 0 ? '+' : ''}${pct.toFixed(2)}%)`);
+      }
+    });
+
+    // 东方财富期货: 沪铜主力 + 原油主力
+    const futCodes = '8.IMC0,8.SC0'; // 沪铜主力, SC原油主力
+    const futUrl = `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${futCodes}&fields=f2,f3,f4,f12,f14`;
+    let futFetchUrl = buildProxyUrl(settings, futUrl);
+    if (settings.proxyMode !== 'custom' || !settings.customProxyUrl) {
+      futFetchUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(futUrl)}`;
+    }
+
+    try {
+      const futRes = await fetch(futFetchUrl, { cache: 'no-store' });
+      const futRaw = await futRes.text();
+      let futData;
+      try { futData = JSON.parse(futRaw); } catch (e) {
+        if (settings.proxyMode !== 'custom') {
+          const w = JSON.parse(futRaw);
+          futData = typeof w.contents === 'string' ? JSON.parse(w.contents) : w.contents;
+        }
+      }
+      const futItems = futData?.data?.diff;
+      if (futItems && Array.isArray(futItems)) {
+        futItems.forEach(item => {
+          const name = item.f14 || item.f12 || '';
+          const price = parseFloat(item.f2);
+          const pct = parseFloat(item.f3) || 0;
+          if (name && !isNaN(price)) {
+            parts.push(`${name}: ${price.toFixed(2)} (${pct > 0 ? '+' : ''}${pct.toFixed(2)}%)`);
+          }
+        });
+      }
+    } catch (e) {
+      parts.push('期货数据暂时获取失败');
+    }
+
+    body.messages.push({
+      role: "tool",
+      tool_call_id: toolCall.id,
+      name: "get_cross_asset_data",
+      content: `【跨资产宏观快照】\n${parts.join('\n')}\n\n📌 提示：\n- USD/CNY 上行=人民币贬值（利空A股/债市外资流出）\n- 铜价上行=经济复苏预期（利好周期股）\n- 原油上行=通胀压力（利空成长股/债市）\n- 黄金上行=避险情绪升温`
+    });
+  } catch (e) {
+    console.error("跨资产数据获取失败", e);
+    body.messages.push({ role: "tool", tool_call_id: toolCall.id, name: "get_cross_asset_data", content: "跨资产数据获取失败: " + e.message });
+  }
+};
+
+// ============================================================================
+// 新增工具 Handler: 债市深度数据（信用利差 + 期限利差）
+// 大盘雷达已注入 511260/511090 的完整数据，本工具补充信用利差维度
+// ============================================================================
+const handleGetBondMarketData = async (ctx) => {
+  const { toolCall, body, settings } = ctx;
+  try {
+    const parts = [];
+
+    // Step 1: 信用利差 — 国债指数(000012) vs 企债指数(000013)
+    try {
+      const spreadCodes = '1.000012,1.000013';
+      const spreadUrl = `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${spreadCodes}&fields=f2,f3,f4,f9,f23`;
+      let sFetchUrl = buildProxyUrl(settings, spreadUrl);
+      if (settings.proxyMode !== 'custom' || !settings.customProxyUrl) {
+        sFetchUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(spreadUrl)}`;
+      }
+      const sRes = await fetch(sFetchUrl, { cache: 'no-store' });
+      const sRaw = await sRes.text();
+      let sData;
+      try { sData = JSON.parse(sRaw); } catch (e) {
+        if (sRaw.includes('contents')) {
+          const w = JSON.parse(sRaw);
+          sData = typeof w.contents === 'string' ? JSON.parse(w.contents) : w.contents;
+        }
+      }
+      const items = sData?.data?.diff;
+      if (items && Array.isArray(items) && items.length >= 2) {
+        const govPct = parseFloat(items[0]?.f3) || 0;
+        const corpPct = parseFloat(items[1]?.f3) || 0;
+        const spread = corpPct - govPct;
+        const signal = spread > 0.05 ? '🔥 信用利差大幅收窄 → 风险偏好飙升，利好含权资产/可转债/信用债'
+          : spread > 0.01 ? '✅ 信用利差温和收窄 → 风险偏好回升'
+          : spread < -0.05 ? '🚨 信用利差大幅走阔 → 市场恐慌避险，利好利率债/国债，利空信用债/可转债'
+          : spread < -0.01 ? '⚠️ 信用利差温和走阔 → 避险情绪上升'
+          : '➖ 信用利差稳定 → 多空平衡';
+        parts.push(`【信用利差】\n国债指数(000012): ${govPct>0?'+':''}${govPct.toFixed(2)}% | 企债指数(000013): ${corpPct>0?'+':''}${corpPct.toFixed(2)}%\n利差方向: ${signal}`);
+      }
+    } catch (e) {
+      parts.push('信用利差数据暂不可用');
+    }
+
+    // Step 2: 期限利差 — 比较 30Y ETF vs 10Y ETF 的相对强弱（从大盘雷达已有数据推断）
+    parts.push(`\n📌 国债ETF价格数据(511260/511090)已在大盘雷达中注入，请结合分析。`);
+
+    body.messages.push({
+      role: "tool",
+      tool_call_id: toolCall.id,
+      name: "get_bond_market_data",
+      content: `【债市深度数据 — 信用定价】\n${parts.join('\n')}\n\n📌 使用方式：\n- 结合大盘雷达中的国债ETF走势(511260/511090) → 判断利率方向\n- 结合本工具的信用利差 → 判断风险偏好和资金流向\n- 利率↓+利差↓ = 全面债牛(利好纯债/固收) | 利率↑+利差↑ = 债市承压\n- 利率↓+利差↑ = "避险式债牛"(资金从信用债逃向国债)`
+    });
+  } catch (e) {
+    console.error("债市数据获取失败", e);
+    body.messages.push({ role: "tool", tool_call_id: toolCall.id, name: "get_bond_market_data", content: "债市数据获取失败: " + e.message });
+  }
+};
+
+// ============================================================================
+// 新增工具 Handler: 北向资金流向
+// 数据源: 新浪财经 沪深港通额度 API
+// ============================================================================
+const handleGetNorthBoundFlow = async (ctx) => {
+  const { toolCall, body, settings } = ctx;
+  try {
+    // 新浪财经沪深港通资金流向
+    const codes = 'hgt_sh,hgt_sz,ggt_sh,ggt_sz';
+    const nbUrl = `https://hq.sinajs.cn/list=${codes}`;
+    let fetchUrl = buildProxyUrl(settings, nbUrl);
+    if (settings.proxyMode !== 'custom' || !settings.customProxyUrl) {
+      fetchUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(nbUrl)}`;
+    }
+
+    const res = await fetch(fetchUrl, { cache: 'no-store' });
+    let text;
+    if (settings.proxyMode === 'custom') {
+      // 新浪财经返回 GBK 编码
+      const buffer = await res.arrayBuffer();
+      text = new TextDecoder('gbk').decode(buffer);
+    } else {
+      const wrapped = await res.json();
+      text = wrapped.contents || '';
+    }
+
+    if (!text || text.length < 30 || text.includes('=""')) {
+      body.messages.push({ role: "tool", tool_call_id: toolCall.id, name: "get_north_bound_flow", content: "北向资金数据暂不可用（非交易时段/周末/节假日沪深港通休市）。请参考最近交易日的大盘成交量与涨跌家数判断外资动向。" });
+      return;
+    }
+
+    // 解析新浪格式: var hq_str_hgt_sh="余额(亿),额度(亿),状态,日期,时间,..."
+    const parts = [];
+    const lines = text.split(';').filter(l => l.includes('=') && l.includes('"'));
+    lines.forEach(line => {
+      const nameMatch = line.match(/hq_str_(\w+)="(.+)"/);
+      if (!nameMatch) return;
+      const code = nameMatch[1];
+      const data = nameMatch[2].split(',');
+      if (data.length < 5) return;
+
+      let label = '';
+      if (code === 'hgt_sh') label = '沪股通(北向)';
+      else if (code === 'hgt_sz') label = '深股通(北向)';
+      else if (code === 'ggt_sh') label = '港股通(沪)';
+      else if (code === 'ggt_sz') label = '港股通(深)';
+
+      const balance = parseFloat(data[0]) || 0; // 当日剩余额度
+      const quota = parseFloat(data[1]) || 0; // 总额度
+      const used = quota - balance; // 已用额度=净流入
+      const pct = quota > 0 ? (used / quota * 100) : 0;
+      const status = data[2] || '';
+
+      if (label) {
+        const dir = used > 0 ? '净买入' : '净卖出';
+        parts.push(`${label}: ${dir} ${Math.abs(used).toFixed(2)} 亿元 (已用${pct.toFixed(1)}%额度${status?' | 状态:'+status:''})`);
+      }
+    });
+
+    if (parts.length === 0) {
+      body.messages.push({ role: "tool", tool_call_id: toolCall.id, name: "get_north_bound_flow", content: "北向资金数据解析失败，返回格式异常。" });
+      return;
+    }
+
+    // 汇总北向
+    const northParts = parts.filter(p => p.includes('北向'));
+    const northUsed = northParts.reduce((sum, p) => {
+      const m = p.match(/净[买卖入出]+\s+([\d.]+)/);
+      return sum + (m ? parseFloat(m[1]) : 0);
+    }, 0);
+    const northSignal = northUsed > 50 ? '🔥 外资大幅加仓'
+      : northUsed > 10 ? '✅ 外资温和流入'
+      : northUsed < -50 ? '🚨 外资大幅撤离'
+      : northUsed < -10 ? '⚠️ 外资温和流出'
+      : '➖ 小幅波动';
+
+    body.messages.push({
+      role: "tool",
+      tool_call_id: toolCall.id,
+      name: "get_north_bound_flow",
+      content: `【北向资金监控 — 沪深港通额度】\n${parts.join('\n')}\n\n📊 北向合计净买入约: ${northUsed.toFixed(1)} 亿元 | ${northSignal}\n\n📌 提示：\n- 已用额度 = 北向资金当日实际净买入/卖出金额\n- 余额越少 = 北向买入越猛\n- 状态字段: 0=正常交易, 1=额度用尽\n- 数据为盘中实时，收盘后重置`
+    });
+  } catch (e) {
+    console.error("北向资金数据获取失败", e);
+    body.messages.push({ role: "tool", tool_call_id: toolCall.id, name: "get_north_bound_flow", content: "北向资金数据获取失败: " + e.message });
+  }
+};
+
+// ============================================================================
+// 新增工具 Handler: 宏观经济指标（CPI/PMI/M2/社融/LPR）
+// 数据源: 东方财富宏观数据中心
+// ============================================================================
+const handleGetMacroData = async (ctx) => {
+  const { toolCall, body, settings } = ctx;
+  try {
+    // 并行获取多个宏观指标
+    const indicators = [];
+
+    // CPI
+    try {
+      const cpiUrl = `https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_ECONOMY_CPI&columns=ALL&pageNumber=1&pageSize=1&sortColumns=REPORT_DATE&sortTypes=-1`;
+      let fetchUrl = buildProxyUrl(settings, cpiUrl);
+      if (settings.proxyMode !== 'custom' || !settings.customProxyUrl) {
+        fetchUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(cpiUrl)}`;
+      }
+      const res = await fetch(fetchUrl, { cache: 'no-store' });
+      const rawText = await res.text();
+      let data;
+      try { data = JSON.parse(rawText); } catch (e) {
+        if (rawText.includes('contents')) {
+          const w = JSON.parse(rawText);
+          data = typeof w.contents === 'string' ? JSON.parse(w.contents) : w.contents;
+        }
+      }
+      const item = data?.result?.data?.[0];
+      if (item) {
+        const cpiVal = item.NATIONAL_SAME ?? item.CPI_GR ?? item.CPI_SAME ?? '未知';
+        indicators.push(`CPI 同比: ${cpiVal}% | 全国居民消费价格指数 | 日期: ${item.REPORT_DATE || '未知'}`);
+      }
+    } catch (e) { /* ignore */ }
+
+    // PMI
+    try {
+      const pmiUrl = `https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_ECONOMY_PMI&columns=ALL&pageNumber=1&pageSize=1&sortColumns=REPORT_DATE&sortTypes=-1`;
+      let fetchUrl = buildProxyUrl(settings, pmiUrl);
+      if (settings.proxyMode !== 'custom' || !settings.customProxyUrl) {
+        fetchUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(pmiUrl)}`;
+      }
+      const res = await fetch(fetchUrl, { cache: 'no-store' });
+      const rawText = await res.text();
+      let data;
+      try { data = JSON.parse(rawText); } catch (e) {
+        if (rawText.includes('contents')) {
+          const w = JSON.parse(rawText);
+          data = typeof w.contents === 'string' ? JSON.parse(w.contents) : w.contents;
+        }
+      }
+      const item = data?.result?.data?.[0];
+      if (item) {
+        const pmi = item.PMI_GR ?? item.PMI ?? item.MAKE_INDEX ?? item.MANUFACTURING_PMI;
+        if (pmi !== undefined && pmi !== null) {
+          const pmiVal = parseFloat(pmi);
+          const pmiSignal = pmiVal > 50 ? '扩张区间(经济向好)' : pmiVal < 50 ? '收缩区间(经济承压)' : '荣枯线';
+          indicators.push(`制造业 PMI: ${pmiVal} | ${pmiSignal} | 日期: ${item.REPORT_DATE || '未知'}`);
+        }
+      }
+    } catch (e) { /* ignore */ }
+
+    // M2 同比 — 东财 datacenter 暂无此报表，标记为需联网搜索
+    indicators.push(`M2 同比: 需联网搜索获取 | 广义货币供应量 | 提示: 请使用 google_macro_search 或 tavily_news_search 查询最新M2数据`);
+
+    if (indicators.length === 0) {
+      indicators.push('所有宏观指标获取失败。请在联网搜索中补充查询最新宏观数据。');
+    }
+
+    body.messages.push({
+      role: "tool",
+      tool_call_id: toolCall.id,
+      name: "get_macro_data",
+      content: `【宏观经济指标快照】\n⚠️ 宏观数据发布频率较低（月度/季度），以下为最新可用数据：\n\n${indicators.join('\n\n')}\n\n📌 解读框架：\n- CPI<2%: 低通胀(货币宽松空间大) | CPI>3%: 警惕通胀约束\n- PMI>50: 经济扩张 | PMI<50: 经济收缩\n- M2增速>10%: 宽货币(利好资产价格) | M2增速<8%: 紧货币(利空资产)\n- 注意: LPR/社融等数据请补充联网搜索获取`
+    });
+  } catch (e) {
+    console.error("宏观数据获取失败", e);
+    body.messages.push({ role: "tool", tool_call_id: toolCall.id, name: "get_macro_data", content: "宏观数据获取失败: " + e.message });
+  }
+};
+
 const HANDLER_MAP = {
   'get_fund_history_data': handleGetFundHistoryData,
   'get_realtime_fund_data': handleGetRealtimeFundData,
@@ -1147,6 +1642,11 @@ const HANDLER_MAP = {
   'update_fof_dictionary': handleUpdateFofDictionary,
   'get_market_historical_intraday': handleGetMarketHistoricalIntraday,
   'get_fund_transaction_history': handleGetFundTransactionHistory,
+  'get_index_valuation': handleGetIndexValuation,
+  'get_cross_asset_data': handleGetCrossAssetData,
+  'get_bond_market_data': handleGetBondMarketData,
+  'get_north_bound_flow': handleGetNorthBoundFlow,
+  'get_macro_data': handleGetMacroData,
 };
 
 // 分发入口：根据 toolName 调用对应 handler

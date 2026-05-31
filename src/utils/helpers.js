@@ -1,3 +1,4 @@
+// 通用工具函数集：安全数学求值、资金格式化、百分比格式化、XIRR 年化收益计算、交易时间判定
 import { isHolidayToday } from './holidayCalendar';
 
 // 安全的四则运算求值器（不依赖 eval / new Function）

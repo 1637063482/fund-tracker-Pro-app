@@ -1,7 +1,22 @@
-// 统一的 Provider 配置解析，消除 3 处重复代码
+// AI 供应商配置解析模块：统一解析各 AI 供应商的 API Key、模型名称与端点地址，消除多处重复代码
 export const resolveProvider = (settings) => {
-  const provider = settings.aiProvider || 'gemini';
+  const providerId = settings.aiProvider || 'gemini';
 
+  // 自定义提供商（ID 以 custom_ 开头）
+  if (providerId.startsWith('custom_')) {
+    const customs = settings.customAiProviders || [];
+    const custom = customs.find(p => p.id === providerId);
+    if (custom) {
+      return {
+        provider: 'openai',
+        apiKey: custom.key || '',
+        targetModel: custom.model || '',
+        apiBase: custom.apiBase || ''
+      };
+    }
+  }
+
+  let provider = providerId;
   let apiKey = '';
   let targetModel = '';
 
@@ -14,6 +29,9 @@ export const resolveProvider = (settings) => {
   } else if (provider === 'siliconflow') {
     apiKey = settings.siliconflowApiKey;
     targetModel = settings.siliconflowModel || 'deepseek-ai/DeepSeek-V3';
+  } else if (provider === 'openai') {
+    apiKey = settings.openaiApiKey;
+    targetModel = settings.openaiModel || 'gpt-4o';
   }
 
   if (!apiKey) {

@@ -1,3 +1,4 @@
+// 基金基础数据计算 Hook：汇总每只基金的净投入、持仓市值、盈亏、XIRR 与简单收益率等核心指标
 import { useMemo } from 'react';
 import { evaluateExpression } from '../utils/helpers';
 

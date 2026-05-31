@@ -98,6 +98,110 @@
 | Markdown | 自研解析器 + DOMPurify 安全净化 |
 | 安全 | Web Worker 沙箱执行 JS / DOMPurify XSS 防护 |
 
+## 目录架构
+
+```
+fund-tracker-pro/
+├── index.html                     # 应用 HTML 入口：viewport、PWA manifest、React 挂载点
+├── package.json                   # NPM 依赖与脚本声明
+├── vite.config.js                 # Vite 构建配置：React 插件、路径别名、代理与 PWA
+├── tailwind.config.js             # Tailwind CSS 主题：自定义色板、字体、毛玻璃与 Apple 动画
+├── postcss.config.js              # PostCSS 构建配置：Tailwind + Autoprefixer
+├── eslint.config.js               # ESLint 代码规范：JS/JSX/TSX 语法检查与 React Hooks 规则
+├── capacitor.config.json          # Capacitor 移动端打包配置（Android APK）
+│
+├── public/                        # 静态资源目录（构建时直接复制）
+│   ├── sw.js                      # PWA Service Worker：离线缓存策略与推送通知
+│   ├── manifest.json              # PWA 清单：应用名、图标、启动屏配置
+│   ├── manifest.webmanifest       # Web App Manifest 副本
+│   ├── favicon.svg                # 浏览器标签页图标
+│   ├── icons.svg                  # SVG 图标精灵集
+│   └── icon-*.png                 # PWA 各尺寸应用图标
+│
+├── .github/workflows/
+│   └── main.yml                   # GitHub Actions CI：推送 main 分支自动构建 Android APK
+│
+├── assets/                        # 项目设计素材与原始图标资源
+├── icons/                         # Capacitor 原生应用图标集
+├── android/                       # Capacitor Android 原生壳工程
+│
+└── src/                           # 前端源代码
+    ├── main.jsx                   # 应用入口：挂载 React 根组件 + ErrorBoundary
+    ├── App.jsx                    # 应用主组件：全局状态管理、业务编排、子组件调度
+    ├── worker.js                  # Cloudflare Worker 云端定时巡检脚本
+    ├── index.css                  # 全局样式：基础重置、Apple 风格变量、滚动条与动画
+    │
+    ├── config/
+    │   ├── constants.js           # 全局常量：Firebase 配置、代理节点列表、资产名称映射
+    │   └── firebase.js            # Firebase SDK 初始化：auth（认证）、db（Firestore）
+    │
+    ├── hooks/
+    │   ├── useBaseFundsData.js    # 基金基础数据计算：净投入、市值、盈亏、XIRR 汇总
+    │   ├── usePortfolioStats.js   # 投资组合统计：饼图、占比、排名、资产配置衍生指标
+    │   ├── useScrollLock.js       # 滚动锁定：弹窗打开时禁止背景滚动（嵌套调用安全）
+    │   ├── useFocusTrap.js        # 焦点陷阱：模态框内 Tab 键焦点循环锁定（无障碍）
+    │   └── useModalAnimation.js   # FLIP 动画 Hook：模态框弹出/关闭弹性过渡
+    │
+    ├── services/
+    │   ├── navFetcher.js          # 基金净值服务：天天/新浪/蛋卷四源多批次智能调度
+    │   ├── marketFetcher.js       # 市场行情服务：腾讯/新浪/雪球三源轮换 + CORS 代理
+    │   └── fileParser.js          # 文件解析服务：Gemini OCR 引擎（图片截图 + PDF 季报）
+    │
+    ├── utils/
+    │   ├── helpers.js             # 通用工具集：安全求值、格式化、XIRR 计算、交易时间判定
+    │   ├── holidayCalendar.js     # 节假日日历：判定 A 股非交易日（周末 + 法定假日）
+    │   ├── renderMarkdown.jsx     # Markdown 渲染：AI 输出转 React 组件 + XSS 防护
+    │   ├── ai.js                  # AI 模块重导出入口（向后兼容）
+    │   └── ai/                    # AI 引擎子模块（10 个文件）
+    │       ├── index.js           #   子模块统一导出聚合入口
+    │       ├── core.js            #   核心对话引擎：单基诊断、组合体检、聊天主循环
+    │       ├── providers.js       #   AI 供应商解析：Gemini / DeepSeek / SiliconFlow
+    │       ├── proxy.js           #   代理 URL 构建：CORS 前缀 + 基金代码转换
+    │       ├── fifo.js            #   FIFO 风控：7 日内短线赎回惩罚费计算
+    │       ├── prompts.js         #   提示词模板：系统角色 + 分层场景 Prompt 构建
+    │       ├── market-data.js     #   行情抓取：腾讯分时、多周期 K 线、东财情绪
+    │       ├── tool-handlers.js   #   工具执行器：策略模式分发 17 个 AI Function Call
+    │       ├── tools-definitions.js # 工具注册表：所有 Function Calling JSON Schema
+    │       ├── search-engines.js  #   搜索适配器：Tavily / Exa / Serper 统一封装
+    │       └── financial-news.js  #   财经快讯聚合：新浪 + 搜索引擎并行拉取去重
+    │
+    └── components/
+        ├── Auth/
+        │   └── LoginScreen.jsx    # 登录界面：邮箱密码 + Firebase 认证 + 主题切换
+        │
+        ├── Chat/
+        │   ├── PortfolioChat.jsx  # AI 对话面板：多轮聊天、联网搜索、文件上传、记忆库
+        │   ├── ActionCard.jsx     # AI 操作卡片：数据确认 / 交易录入 / 备忘录交互表单
+        │   └── actionHandlers.js  # 操作处理器：按 toolType 分发写入 Firestore
+        │
+        ├── Dashboard/
+        │   ├── FundTable.jsx      # 持仓表格：双 Tab 表格（投资组合 + 清仓历史）+ 排序
+        │   ├── TodoListCard.jsx   # 待办清单：投资纪律卡片（增/删/改/优先级）
+        │   └── MarketTimeIndicator.jsx # 市场时钟：A 股交易时段状态 + 收盘提醒
+        │
+        ├── Fund/
+        │   ├── FundEditor.jsx     # 基金编辑器：手动/自动双模式录入、交易流水、清仓归档
+        │   ├── FundProfileModal.jsx # 基金详情弹窗：AI 深度分析报告（缓存 + 重新生成）
+        │   └── SmartBadges.jsx    # 智能标签：基金类型/指标自动渲染分类徽章
+        │
+        ├── Portfolio/
+        │   └── PortfolioAnalysisModal.jsx # 组合分析弹窗：AI 全盘体检 + X 光透视 + 风险评级
+        │
+        ├── Settings/
+        │   └── ProxySettingsModal.jsx # 全局设置面板：AI/数据源/代理/刷新/通知等参数配置
+        │
+        └── UI/                    # 通用 UI 组件库（10 个组件）
+            ├── AnimatedNumber.jsx #   数字动画：滚动渐变过渡 + 自定义格式化
+            ├── DonutChart.jsx     #   环形图：纯 SVG 饼图/圆环 + 中心标签 + 悬停交互
+            ├── SmartInput.jsx     #   智能输入：公式计算（= 开头）+ 日期输入 + 失焦评估
+            ├── ErrorBoundary.jsx  #   错误边界：未处理异常捕获 + 友好降级 UI + 重试
+            ├── ImageModal.jsx     #   图片预览：双指缩放 + 滚轮缩放 + 拖拽平移
+            ├── AppleSelect.jsx    #   选择器：Portal 自定义下拉 + 键盘导航 + 外部点击关闭
+            ├── Toast.jsx          #   全局通知：success/error/info + 自动排队 + 定时消失
+            ├── AnimatedModal.jsx  #   通用模态框：FLIP 过渡遮罩层 + 面板容器封装
+            └── Tooltip.jsx        #   悬浮提示：Portal 渲染淡黄色气泡 + 智能定位
+```
+
 ## 快速开始
 
 ```bash

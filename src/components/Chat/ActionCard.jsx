@@ -1,3 +1,4 @@
+// AI 操作卡片组件：渲染 AI 生成的确认/执行卡片（数据确认、交易记录、备忘录更新等），支持表单交互
 import React, { useState } from 'react';
 import { Activity } from 'lucide-react';
 
@@ -29,10 +30,10 @@ export const ActionCard = ({ action, onConfirm, onCancel, todos = [] }) => {
   };
 
   return (
-    <div className={`mt-3 border rounded-xl p-4 shadow-sm select-none transition-all duration-500 ${
-      action.status === 'completed' ? 'bg-green-50/50 dark:bg-green-900/10 border-green-200 dark:border-green-800/50 opacity-90' :
-      action.status === 'cancelled' ? 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 opacity-60 grayscale' :
-      'bg-indigo-50 dark:bg-slate-900 border-indigo-200 dark:border-indigo-700'
+    <div className={`mt-3 border rounded-[0.875rem] p-4 select-none transition-all duration-500 ${
+      action.status === 'completed' ? 'bg-green-50/50 dark:bg-green-900/10 border-green-200/60 dark:border-green-800/40 opacity-90' :
+      action.status === 'cancelled' ? 'bg-slate-50 dark:bg-slate-800/50 border-slate-200/60 dark:border-slate-700/40 opacity-60 grayscale' :
+      'bg-blue-50/50 dark:bg-slate-900 border-blue-200/60 dark:border-blue-700/40'
     }`}>
       <div className="flex justify-between items-center mb-3">
         <span className={`font-bold flex items-center ${action.status === 'completed' ? 'text-green-700 dark:text-green-400' : action.status === 'cancelled' ? 'text-slate-500 dark:text-slate-400' : 'text-slate-800 dark:text-slate-200'}`}>
@@ -72,7 +73,7 @@ export const ActionCard = ({ action, onConfirm, onCancel, todos = [] }) => {
         {action.toolType === 'ledger' && <div>目标金额：<span className={isPending ? 'font-bold text-slate-800 dark:text-slate-200' : ''}>{action.amount} 元</span></div>}
 
         {action.toolType === 'todo' && (
-          <div className="mt-2 bg-amber-50 dark:bg-amber-900/10 p-3 rounded-lg border border-amber-100 dark:border-amber-800/30 relative overflow-hidden">
+          <div className="mt-2 bg-amber-50 dark:bg-amber-900/10 p-3 rounded-[0.875rem] border border-amber-200/60 dark:border-amber-800/30 relative overflow-hidden">
 
             {action.manageType !== 'delete' && (
               <div className={`absolute top-0 right-0 px-2 py-1 rounded-bl-lg text-[10px] font-bold text-white shadow-sm ${action.priority === 'high' ? 'bg-red-500' : action.priority === 'low' ? 'bg-slate-400' : 'bg-amber-500'}`}>
@@ -105,14 +106,14 @@ export const ActionCard = ({ action, onConfirm, onCancel, todos = [] }) => {
         )}
 
         {action.toolType === 'memo' && (
-          <div className="mt-2 bg-purple-50 dark:bg-purple-900/20 p-2 rounded-lg border border-purple-200 dark:border-purple-800/50">
+          <div className="mt-2 bg-purple-50 dark:bg-purple-900/20 p-2 rounded-[0.875rem] border border-purple-200/60 dark:border-purple-800/40">
             <div className="text-purple-700 dark:text-purple-300 mb-1">战略方向：<span className="font-bold">{action.decisionType}</span></div>
             <div className="text-slate-600 dark:text-slate-400 whitespace-normal leading-relaxed">核心逻辑：{action.coreLogic}</div>
           </div>
         )}
 
         {action.toolType === 'fof_dict' && (
-          <div className="mt-2 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-200 dark:border-blue-800/50">
+          <div className="mt-2 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-[0.875rem] border border-blue-200/60 dark:border-blue-800/40">
             <div className="text-blue-700 dark:text-blue-300 font-bold mb-2 border-b border-blue-200/50 pb-1">
               真实权益仓位：<span className="text-lg">{(action.equityRatio * 100).toFixed(2)}%</span>
             </div>
@@ -134,7 +135,7 @@ export const ActionCard = ({ action, onConfirm, onCancel, todos = [] }) => {
               涉及真实资金决策，请务必核对下方 OCR 提取的内容，您可直接修改修正：
             </div>
             {action.previewUrl && (
-              <img src={action.previewUrl} alt="原始图片" className="max-h-32 object-contain rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm mb-2 opacity-90" />
+              <img src={action.previewUrl} alt="原始图片" className="max-h-32 object-contain rounded-[0.875rem] border border-slate-200 dark:border-slate-700 shadow-sm mb-2 opacity-90" />
             )}
             <textarea
               disabled={action.status !== 'pending'}
@@ -146,24 +147,24 @@ export const ActionCard = ({ action, onConfirm, onCancel, todos = [] }) => {
         )}
 
         {isPending && action.toolType === 'ledger' && action.actionType !== 'delete' && (
-          <div className="mt-3 p-3 bg-white/50 dark:bg-slate-950/30 rounded-lg border border-indigo-100 dark:border-indigo-800/50 space-y-2.5">
+          <div className="mt-3 p-3 bg-white/50 dark:bg-slate-950/30 rounded-[0.875rem] border border-slate-200/60 dark:border-slate-700/40 space-y-2.5">
             <div className="flex items-center justify-between text-xs">
               <span className="text-slate-600 dark:text-slate-400 font-medium">交易日期:</span>
-              <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="border border-slate-200 dark:border-slate-700 rounded px-2 py-1 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 w-[130px] outline-none" />
+              <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="border border-slate-200 dark:border-slate-700 rounded-[0.75rem] px-2 py-1 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 w-[130px] outline-none" />
             </div>
             <div className="flex items-center justify-between text-xs">
               <div className="flex items-center text-slate-600 dark:text-slate-400 font-medium">
                 预估手续费:
-                <button onClick={() => setFeeMode(feeMode === 'rate' ? 'amount' : 'rate')} className="ml-2 px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-400 hover:bg-indigo-200 active:scale-95">{feeMode === 'rate' ? '按费率(%) ⇄' : '按金额(元) ⇄'}</button>
+                <button onClick={() => setFeeMode(feeMode === 'rate' ? 'amount' : 'rate')} className="ml-2 px-1.5 py-0.5 rounded-[0.625rem] bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400 hover:bg-blue-200 active:scale-[0.97]">{feeMode === 'rate' ? '按费率(%) ⇄' : '按金额(元) ⇄'}</button>
               </div>
               <div className="relative">
-                <input type="number" placeholder={feeMode === 'rate' ? "0.15" : "0.00"} value={form.feeInput} onChange={e => setForm({ ...form, feeInput: e.target.value })} className="border border-slate-200 dark:border-slate-700 rounded py-1 pl-2 pr-6 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 w-[90px] outline-none text-right" />
+                <input type="number" placeholder={feeMode === 'rate' ? "0.15" : "0.00"} value={form.feeInput} onChange={e => setForm({ ...form, feeInput: e.target.value })} className="border border-slate-200 dark:border-slate-700 rounded-[0.75rem] py-1 pl-2 pr-6 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 w-[90px] outline-none text-right" />
                 <span className="absolute right-2 top-1 text-slate-400">{feeMode === 'rate' ? '%' : '元'}</span>
               </div>
             </div>
             <div className="flex items-center justify-between text-xs">
               <span className="font-bold text-indigo-600 dark:text-indigo-400">实际确认份额:</span>
-              <input type="number" placeholder="留空按净值估算" value={form.shares} onChange={e => setForm({ ...form, shares: e.target.value })} className="border border-indigo-200 dark:border-indigo-700 rounded px-2 py-1 bg-indigo-50/50 text-indigo-700 w-32 outline-none font-bold text-right" />
+              <input type="number" placeholder="留空按净值估算" value={form.shares} onChange={e => setForm({ ...form, shares: e.target.value })} className="border border-indigo-200 dark:border-indigo-700 rounded-[0.75rem] px-2 py-1 bg-indigo-50/50 text-indigo-700 w-32 outline-none font-bold text-right" />
             </div>
           </div>
         )}
@@ -171,13 +172,13 @@ export const ActionCard = ({ action, onConfirm, onCancel, todos = [] }) => {
 
       {isPending && (
         <div className="flex space-x-3 mt-4">
-          <button onClick={() => onCancel(action)} className="flex-1 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">驳回修改</button>
-          <button onClick={handleConfirmClick} className={`flex-1 py-1.5 rounded-lg text-white text-sm font-medium shadow-md transition-colors ${
-            action.toolType === 'data_confirmation' ? 'bg-teal-600 hover:bg-teal-700' :
-            action.toolType === 'memo' ? 'bg-purple-600 hover:bg-purple-700' :
-            action.toolType === 'fof_dict' ? 'bg-blue-600 hover:bg-blue-700' :
+          <button onClick={() => onCancel(action)} className="flex-1 py-1.5 rounded-[0.625rem] border border-slate-200 dark:border-slate-600 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors active:scale-[0.97]">驳回修改</button>
+          <button onClick={handleConfirmClick} className={`flex-1 py-1.5 rounded-[0.625rem] text-white text-sm font-medium shadow-apple-sm transition-all active:scale-[0.97] ${
+            action.toolType === 'data_confirmation' ? 'bg-teal-500 hover:bg-teal-600' :
+            action.toolType === 'memo' ? 'bg-blue-500 hover:bg-blue-600' :
+            action.toolType === 'fof_dict' ? 'bg-blue-500 hover:bg-blue-600' :
             action.toolType === 'todo' ? (action.manageType === 'delete' ? 'bg-red-500 hover:bg-red-600' : 'bg-amber-500 hover:bg-amber-600') :
-            (action.actionType === 'delete' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700')
+            (action.actionType === 'delete' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-blue-500 hover:bg-blue-600')
           }`}>
             {action.toolType === 'data_confirmation' ? '✅ 数据无误，请求深度分析' :
              action.toolType === 'memo' ? '确认写入长期记忆' :

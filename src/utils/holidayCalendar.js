@@ -1,3 +1,4 @@
+// 节假日日历工具：判定指定日期是否为 A 股非交易日（周末 + 法定节假日）
 export function isHolidayToday(date = new Date()) {
   const day = date.getDay();
   if (day === 0 || day === 6) return true;

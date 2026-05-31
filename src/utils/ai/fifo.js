@@ -1,4 +1,4 @@
-// FIFO 先进先出 7天惩罚费风控拦截
+// FIFO 风控模块：基于先进先出原则计算 7 日内短线赎回惩罚费，拦截高频交易
 export const calculate7DayPenalty = (transactions, currentDateStr) => {
   if (!transactions || !Array.isArray(transactions) || transactions.length === 0) {
     return { lockedAmount: 0, penaltyFee: 0 };

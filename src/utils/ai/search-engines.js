@@ -1,7 +1,7 @@
-// 搜索引擎适配器：Tavily、Exa、Serper
+// 搜索引擎适配器模块：统一封装 Tavily、Exa、Serper 三家搜索 API 的调用接口，供 AI 联网搜索使用
 import { buildProxyUrl } from './proxy';
 
-export const fetchTavilySearch = async (apiKey, query, searchType = "news", settings = {}, timeRange = "d1") => {
+export const fetchTavilySearch = async (apiKey, query, searchType = "news", settings = {}, timeRange = "d1", maxResults = 4) => {
   if (!apiKey) return "";
   try {
     const targetUrl = 'https://api.tavily.com/search';
@@ -9,7 +9,7 @@ export const fetchTavilySearch = async (apiKey, query, searchType = "news", sett
       api_key: apiKey,
       query,
       search_depth: "basic",
-      max_results: 4,
+      max_results: maxResults,
       topic: "news",
       days: timeRange === "d1" ? 1 : (timeRange === "w1" ? 7 : (timeRange === "d3" ? 3 : 1)),
       include_domains: ["cls.cn", "wallstreetcn.com", "jin10.com", "yicai.com", "stcn.com", "caixin.com"],
@@ -27,7 +27,7 @@ export const fetchTavilySearch = async (apiKey, query, searchType = "news", sett
   } catch (e) { return ""; }
 };
 
-export const fetchExaSearch = async (apiKey, query, settings = {}) => {
+export const fetchExaSearch = async (apiKey, query, settings = {}, maxResults = 2) => {
   if (!apiKey) return "";
   try {
     const targetUrl = 'https://api.exa.ai/search';
@@ -42,7 +42,7 @@ export const fetchExaSearch = async (apiKey, query, settings = {}) => {
       headers: { 'accept': 'application/json', 'content-type': 'application/json', 'x-api-key': apiKey },
       body: JSON.stringify({
         query,
-        numResults: 2,
+        numResults: maxResults,
         useAutoprompt: true,
         startPublishedDate: sixMonthsAgo.toISOString(),
         contents: {
@@ -70,15 +70,17 @@ export const fetchExaSearch = async (apiKey, query, settings = {}) => {
   }
 };
 
-export const fetchSerperSearch = async (apiKey, query, timeRange = "qdr:d") => {
+export const fetchSerperSearch = async (apiKey, query, timeRange = "qdr:d", maxResults = 4, settings) => {
   if (!apiKey) return "";
   try {
-    const bodyPayload = { q: query, num: 4 };
+    const bodyPayload = { q: query, num: maxResults };
     if (timeRange && timeRange !== "all") {
       bodyPayload.tbs = timeRange;
     }
 
-    const res = await fetch('https://google.serper.dev/search', {
+    const serperUrl = 'https://google.serper.dev/search';
+    const fetchUrl = settings ? buildProxyUrl(settings, serperUrl) : serperUrl;
+    const res = await fetch(fetchUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-KEY': apiKey },
       body: JSON.stringify(bodyPayload)

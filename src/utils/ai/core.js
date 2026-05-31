@@ -1,4 +1,4 @@
-// 核心逻辑：单基诊断、全盘体检、聊天对话引擎
+// AI 核心对话引擎：单基金分析、全盘组合体检、多轮聊天对话的主循环，含工具调用递归与流式响应处理
 import { resolveProvider } from './providers';
 import { fetchAdvancedMarketData } from './market-data';
 import { fetchTavilySearch } from './search-engines';
@@ -39,6 +39,12 @@ const TOOL_LABELS = {
   'manage_plan_todo': '正在更新交易计划…',
   'update_decision_memo': '正在更新战略备忘录…',
   'update_fof_dictionary': '正在更新FOF字典…',
+  'get_index_valuation': '正在获取指数估值…',
+  'get_cross_asset_data': '正在获取跨资产数据…',
+  'get_bond_market_data': '正在获取债市深度数据…',
+  'get_north_bound_flow': '正在获取北向资金流向…',
+  'get_sector_ranking': '正在获取行业板块排名…',
+  'get_macro_data': '正在获取宏观经济指标…',
 };
 
 // Token 估算工具（中文约1.8字符/token，用于开发调试和生产监控）
@@ -63,8 +69,12 @@ const estimateTokens = (body) => {
 // ============================================================================
 // 1. 底层 HTTP 请求封装
 // ============================================================================
-const executeAIRequest = async (settings, provider, apiKey, modelName, prompt, targetTemp = 0.1, targetTopP = 0.1) => {
+const executeAIRequest = async (settings, provider, apiKey, modelName, prompt, targetTemp, targetTopP, apiBase = '') => {
   try {
+    const temperature = targetTemp ?? settings.temperature ?? 0.1;
+    const topP = targetTopP ?? settings.topP ?? 0.1;
+    const maxTokens = settings.maxOutputTokens || 8192;
+
     let url = '';
     let body = {};
     let headers = { 'Content-Type': 'application/json' };
@@ -74,7 +84,7 @@ const executeAIRequest = async (settings, provider, apiKey, modelName, prompt, t
       body = {
         contents: [{ parts: [{ text: prompt }] }],
         tools: [{ googleSearch: {} }],
-        generationConfig: { temperature: targetTemp, topP: targetTopP, maxOutputTokens: 8192 },
+        generationConfig: { temperature, topP, maxOutputTokens: maxTokens },
         safetySettings: [
           { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
           { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
@@ -82,16 +92,26 @@ const executeAIRequest = async (settings, provider, apiKey, modelName, prompt, t
           { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" }
         ]
       };
+    } else if (provider === 'openai') {
+      url = apiBase.replace(/\/+$/, '') + '/chat/completions';
+      headers['Authorization'] = `Bearer ${apiKey}`;
+      body = {
+        model: modelName,
+        messages: [{ role: 'user', content: prompt }],
+        temperature,
+        top_p: topP,
+        max_tokens: maxTokens
+      };
     } else {
       url = provider === 'deepseek' ? 'https://api.deepseek.com/chat/completions' : 'https://api.siliconflow.cn/v1/chat/completions';
       headers['Authorization'] = `Bearer ${apiKey}`;
       body = {
         model: modelName,
         messages: [{ role: 'user', content: prompt }],
-        temperature: targetTemp,
-        top_p: targetTopP,
-        max_tokens: 8192,
-        ...(provider === 'deepseek' && buildReasoningConfig(settings.reasoningEffort))
+        temperature,
+        top_p: topP,
+        max_tokens: maxTokens,
+        ...((provider === 'deepseek' || provider === 'siliconflow') && buildReasoningConfig(settings.reasoningEffort))
       };
     }
 
@@ -103,7 +123,7 @@ const executeAIRequest = async (settings, provider, apiKey, modelName, prompt, t
 
     // Token 估算日志
     const estTokens = estimateTokens(body);
-    const reasoningLabel = provider === 'deepseek' ? (settings.reasoningEffort || 'max') : 'n/a';
+    const reasoningLabel = (provider === 'deepseek' || provider === 'siliconflow') ? (settings.reasoningEffort || 'max') : 'n/a';
     console.log('%c📊 [Token 估算] ' + provider + ' | 推理: ' + reasoningLabel + ' | 预估输入: ≈' + estTokens + ' tokens | 模型: ' + modelName, 'color: #10b981; font-weight: bold;');
 
     if (provider === 'gemini') {
@@ -140,16 +160,16 @@ const executeAIRequest = async (settings, provider, apiKey, modelName, prompt, t
 // 2. 单基诊断引擎
 // ============================================================================
 export const analyzeFundWithAI = async (settings, fund, profile, marketData) => {
-  const { provider, apiKey, targetModel } = resolveProvider(settings);
+  const { provider, apiKey, targetModel, apiBase } = resolveProvider(settings);
 
   const marketEnv = await fetchAdvancedMarketData(settings);
 
   let searchContext = "";
-  if (provider !== 'gemini' && settings.tavilyApiKey) {
+  if (settings.tavilyApiKey) {
     const isBondFund = (fund?.name || '').includes('债');
     const marketFocus = isBondFund ? "中国债券市场 央行公开市场操作 市场利率走势" : "A股走势 宏观经济";
     const query = `今日 ${marketFocus} ${fund?.name || ''} 最新新闻 利空 利好`;
-    const searchRes = await fetchTavilySearch(settings.tavilyApiKey, query);
+    const searchRes = await fetchTavilySearch(settings.tavilyApiKey, query, 'news', settings, 'd1', settings.searchResultCount);
     if (searchRes) {
       searchContext = `\n【实时联网搜索结果 (来自 Tavily Search)】\n${searchRes}\n`;
     }
@@ -157,23 +177,19 @@ export const analyzeFundWithAI = async (settings, fund, profile, marketData) => 
 
   const prompt = buildFundAnalysisPrompt(fund, profile, settings, marketEnv, searchContext);
 
-  return await executeAIRequest(settings, provider, apiKey, targetModel, prompt, 0.2, 0.2);
+  return await executeAIRequest(settings, provider, apiKey, targetModel, prompt, undefined, undefined, apiBase);
 };
-
-// ============================================================================
-// 3. 全盘体检引擎
-// ============================================================================
 export const analyzePortfolioWithAI = async (settings, portfolioStats, marketData) => {
-  const { provider, apiKey, targetModel } = resolveProvider(settings);
+  const { provider, apiKey, targetModel, apiBase } = resolveProvider(settings);
 
   const marketEnv = marketData && marketData.length > 0
     ? `\n【今日实时大盘与基准行情】\n${marketData.map(m => `- ${m.name}: ${m.price} (${m.change > 0 ? '+' : ''}${(m.percent * 100).toFixed(2)}%)`).join('\n')}`
     : '\n【今日实时大盘与基准行情】\n大盘数据未获取。';
 
   let searchContext = "";
-  if (provider !== 'gemini' && settings.tavilyApiKey) {
+  if (settings.tavilyApiKey) {
     const query = `当前中国央行货币政策 债券市场走势 A股大盘走势 美联储降息预期 宏观经济`;
-    const searchRes = await fetchTavilySearch(settings.tavilyApiKey, query);
+    const searchRes = await fetchTavilySearch(settings.tavilyApiKey, query, 'news', settings, 'd1', settings.searchResultCount);
     if (searchRes) {
       searchContext = `\n【实时联网搜索结果 (来自 Tavily Search)】\n${searchRes}\n`;
     }
@@ -181,14 +197,14 @@ export const analyzePortfolioWithAI = async (settings, portfolioStats, marketDat
 
   const prompt = buildPortfolioAnalysisPrompt(portfolioStats, settings, marketEnv, searchContext);
 
-  return await executeAIRequest(settings, provider, apiKey, targetModel, prompt, 0.4, 0.5);
+  return await executeAIRequest(settings, provider, apiKey, targetModel, prompt, undefined, undefined, apiBase);
 };
 
 // ============================================================================
-// 4. 持续交互对话引擎 (聊天框专用) — 核心重构
+// 3. 持续交互对话引擎 (聊天框专用) — 核心重构
 // ============================================================================
 export const chatWithPortfolioAI = async (settings, portfolioStats, chatHistory, newMessage, marketData, useWebSearch = true, todos = [], memos = [], onStatus = null) => {
-  const { provider, apiKey, targetModel } = resolveProvider(settings);
+  const { provider, apiKey, targetModel, apiBase } = resolveProvider(settings);
 
   const idleFunds = Number(settings.idleFunds) || 0;
 
@@ -260,8 +276,10 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
 
   // === 获取大盘数据 ===
   let marketStr = "";
+  let radarOverride = "";
   if (marketData === "FETCH_NOW") {
     marketStr = await fetchAdvancedMarketData(settings);
+    radarOverride = `🚨 【状态变更】大盘雷达已开启！此前的"纯净模式"指令已作废。你必须基于下方注入的实时盘口数据进行全面的大盘分析与多因子打分。\n\n`;
   } else {
     marketStr = marketData;
   }
@@ -270,7 +288,7 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
   const systemPrompt = buildChatSystemPrompt(provider);
 
   // === 构建最新状态注入（通过 prompts.js 统一模板构建） ===
-  const latestStateWrapper = buildLatestStateWrapper(marketStr, memosText, portfolioStats, settings, activeFundsDetail, todosContext, newMessage);
+  const latestStateWrapper = buildLatestStateWrapper(radarOverride + marketStr, memosText, portfolioStats, settings, activeFundsDetail, todosContext, newMessage);
 
   try {
     let url = '';
@@ -278,7 +296,7 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
     let headers = { 'Content-Type': 'application/json' };
 
     // 历史消息窗口
-    const MAX_HISTORY_MESSAGES = 20;
+    const MAX_HISTORY_MESSAGES = settings.maxHistoryMessages || 20;
     const recentHistory = chatHistory.slice(-MAX_HISTORY_MESSAGES);
 
     // 清洗历史中的 HTML 思考标签
@@ -299,11 +317,38 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
       }));
       geminiMessages.push({ role: 'user', parts: [{ text: latestStateWrapper }] });
 
+      // 转换 OpenAI 工具格式为 Gemini functionDeclarations（并清洗不兼容字段）
+      const openaiTools = defineTools(settings);
+      const sanitizeSchema = (node) => {
+        if (!node || typeof node !== 'object') return node;
+        if (Array.isArray(node)) return node.map(sanitizeSchema);
+        const out = {};
+        for (const key of Object.keys(node)) {
+          if (key === 'additionalProperties') continue;       // Gemini 不支持
+          if (key === 'enum' && Array.isArray(node.enum) && node.enum.some(v => typeof v === 'number')) {
+            out[key] = node.enum.map(String);                 // Gemini 要求 enum 值为字符串
+          } else if (key === 'properties' || key === 'items') {
+            out[key] = sanitizeSchema(node[key]);
+          } else {
+            out[key] = node[key];
+          }
+        }
+        return out;
+      };
+      const geminiDeclarations = openaiTools.map(t => ({
+        name: t.function.name,
+        description: t.function.description,
+        parameters: sanitizeSchema(t.function.parameters)
+      }));
+
       body = {
         systemInstruction: { parts: [{ text: systemPrompt }] },
         contents: geminiMessages,
-        tools: useWebSearch ? [{ googleSearch: {} }] : [],
-        generationConfig: { temperature: 0.1, topP: 0.1, maxOutputTokens: 8192 },
+        tools: geminiDeclarations.length > 0
+          ? [{ functionDeclarations: geminiDeclarations }]
+          : (useWebSearch ? [{ googleSearch: {} }] : []),
+        ...(geminiDeclarations.length > 0 ? { toolConfig: { functionCallingConfig: { mode: 'AUTO' } } } : {}),
+        generationConfig: { temperature: settings.temperature ?? 0.1, topP: settings.topP ?? 0.1, maxOutputTokens: settings.maxOutputTokens || 8192 },
         safetySettings: [
           { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
           { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
@@ -311,11 +356,27 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
           { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" }
         ]
       };
+    } else if (provider === 'openai') {
+      url = (apiBase || '').replace(/\/+$/, '') + '/chat/completions';
+      headers['Authorization'] = `Bearer ${apiKey}`;
+
+      const openaiMessages = [
+        { role: 'system', content: systemPrompt },
+        ...cleanHistory.map(msg => ({ role: msg.role, content: msg.content })),
+        { role: 'user', content: latestStateWrapper }
+      ];
+
+      body = {
+        model: targetModel,
+        messages: openaiMessages,
+        temperature: settings.temperature ?? 0.1,
+        top_p: settings.topP ?? 0.1,
+        max_tokens: settings.maxOutputTokens || 8192,
+        tools: defineTools(settings)
+      };
     } else {
       url = provider === 'deepseek' ? 'https://api.deepseek.com/chat/completions' : 'https://api.siliconflow.cn/v1/chat/completions';
       headers['Authorization'] = `Bearer ${apiKey}`;
-
-      const isReasoner = targetModel.toLowerCase().includes('reasoner') || targetModel.toLowerCase().includes('r1');
 
       const openaiMessages = [
         { role: 'system', content: systemPrompt + `\n\n12. 【数据洁癖与交叉验证】：当你调用搜索工具获取基金净值或排名时，必须严格审视返回结果的【时间戳】！如果搜索返回的是过时数据，你必须回答"无法获取可靠的最新数据"，或者换个更精确的关键词再搜一次！` },
@@ -326,16 +387,12 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
       body = {
         model: targetModel,
         messages: openaiMessages,
-        temperature: 0.1,
-        top_p: 0.1,
-        max_tokens: 8192,
-        ...(provider === 'deepseek' && buildReasoningConfig(settings.reasoningEffort))
+        temperature: settings.temperature ?? 0.1,
+        top_p: settings.topP ?? 0.1,
+        max_tokens: settings.maxOutputTokens || 8192,
+        tools: defineTools(settings),
+        ...((provider === 'deepseek' || provider === 'siliconflow') && buildReasoningConfig(settings.reasoningEffort))
       };
-
-      // 加载工具定义（推理模型不支持 function calling，需移除 tools 字段）
-      if (!isReasoner) {
-        body.tools = defineTools(settings);
-      }
     }
 
     // 状态通知：开始思考
@@ -349,12 +406,12 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
 
     // Token 估算日志
     const estTokens = estimateTokens(body);
-    const reasoningLabel = provider === 'deepseek' ? (settings.reasoningEffort || 'max') : 'n/a';
+    const reasoningLabel = (provider === 'deepseek' || provider === 'siliconflow') ? (settings.reasoningEffort || 'max') : 'n/a';
     console.log('%c📊 [Token 估算] ' + provider + ' | 推理: ' + reasoningLabel + ' | 预估输入: ≈' + estTokens + ' tokens | 模型: ' + targetModel, 'color: #10b981; font-weight: bold;');
 
     let accumulatedReasoning = '';
     let accumulatedContent = '';
-    let maxLoops = 12;
+    let maxLoops = settings.maxToolLoops || 12;
     let pendingActions = [];
     let roundNum = 0;
 
@@ -414,16 +471,112 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
       if (data.message && !data.choices) throw new Error(data.message);
     }
 
-    // === 最终组装返回 ===
+    // === Gemini 工具调用循环（functionCall / functionResponse 协议） ===
     if (provider === 'gemini') {
+      let geminiAccumulatedContent = '';
+      let geminiMaxLoops = settings.maxToolLoops || 12;
+      let geminiRoundNum = 0;
+      body.messages = [];
+
+      while (geminiMaxLoops > 0) {
+        geminiMaxLoops--;
+        geminiRoundNum++;
+
+        if (!data.candidates || data.candidates.length === 0) {
+          if (data.promptFeedback?.blockReason) {
+            throw new Error(`内容被 Google 安全策略拦截 (${data.promptFeedback.blockReason})`);
+          }
+          if (geminiAccumulatedContent) return geminiAccumulatedContent;
+          throw new Error("Google API 未返回有效文本");
+        }
+
+        const parts = data.candidates[0].content?.parts || [];
+        const functionCalls = parts.filter(p => p.functionCall);
+
+        if (functionCalls.length === 0) break;
+
+        // 收集本轮文本
+        const textParts = parts.filter(p => p.text);
+        if (textParts.length > 0) {
+          geminiAccumulatedContent += textParts.map(p => p.text).join('\n') + '\n\n';
+        }
+
+        // 添加 model 消息（含 functionCall parts）
+        body.contents.push({ role: 'model', parts });
+
+        // 执行每项工具调用
+        const functionResponseParts = [];
+        for (const part of functionCalls) {
+          const fc = part.functionCall;
+          const toolName = fc.name;
+          const toolArgs = fc.args || {};
+
+          const label = TOOL_LABELS[toolName] || '正在调用 ' + toolName + '…';
+          onStatus && onStatus({ type: 'tool', label, tool: toolName, round: geminiRoundNum });
+
+          const fakeToolCall = {
+            id: `gc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            function: { name: toolName, arguments: JSON.stringify(toolArgs) }
+          };
+
+          const prevLen = body.messages.length;
+          const ctx = {
+            args: toolArgs,
+            toolCall: fakeToolCall,
+            settings,
+            body,
+            pendingActions,
+            portfolioStats,
+            fullDateTimeStr: fullDateTimeStr(),
+            todayStr: new Date().toISOString().split('T')[0]
+          };
+
+          await dispatchToolCall(toolName, ctx);
+
+          const newResults = body.messages.splice(prevLen);
+          const resultContent = newResults.map(m => m.content).join('\n\n');
+
+          functionResponseParts.push({
+            functionResponse: {
+              name: toolName,
+              response: { result: resultContent }
+            }
+          });
+        }
+
+        // 添加 user 消息（含 functionResponse parts）
+        if (functionResponseParts.length > 0) {
+          body.contents.push({ role: 'user', parts: functionResponseParts });
+          body.messages = [];
+        }
+
+        // 下一轮思考状态
+        if (geminiMaxLoops > 0) {
+          onStatus && onStatus({ type: 'thinking', label: '正在综合分析第 ' + (geminiRoundNum + 1) + ' 轮结果…', round: geminiRoundNum + 1 });
+        }
+
+        delete body.messages;
+        response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+        body.messages = [];
+        data = await response.json();
+        if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+      }
+
+      // 提取最终文本响应
       if (!data.candidates || data.candidates.length === 0) {
+        if (geminiAccumulatedContent) return geminiAccumulatedContent;
         throw new Error("Google API 未返回有效文本");
       }
-      const parts = data.candidates[0].content?.parts;
-      if (!parts || parts.length === 0 || !parts[0].text) {
-        throw new Error("Google API 返回了非标准文本数据");
+      const finalParts = data.candidates[0].content?.parts || [];
+      const finalText = finalParts.filter(p => p.text).map(p => p.text).join('\n');
+
+      if (!finalText && geminiAccumulatedContent) return geminiAccumulatedContent;
+
+      const geminiResult = finalText || geminiAccumulatedContent;
+      if (pendingActions.length > 0) {
+        return { type: 'ACTION_REQUIRED', payload: pendingActions, text: geminiResult };
       }
-      return parts[0].text;
+      return geminiResult;
     } else {
       const msg = data.choices[0].message;
       let finalContent = accumulatedContent + (msg.content || '');
@@ -442,7 +595,8 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
 
       if (!finalContent) {
         if (msg.tool_calls) {
-          finalContent = "⚠️ 警报：AI 已经连续进行了 12 轮地毯式深度检索，触及了系统最大允许的安全运算深度，进程已被强制中断。";
+          const configuredMax = settings.maxToolLoops || 12;
+          finalContent = `⚠️ 警报：AI 已经连续进行了 ${configuredMax} 轮地毯式深度检索，触及了系统最大允许的安全运算深度，进程已被强制中断。`;
         } else if (accumulatedReasoning) {
           finalContent = "*(系统提示：AI 思考过程过长导致正文被截断，请直接阅读上方的深度思考过程，或让 AI “精简总结一下”)*";
           thinkingBoxClass = thinkingBoxClass.replace("max-h-[300px] overflow-y-auto custom-scrollbar ", "");

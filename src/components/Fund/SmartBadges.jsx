@@ -1,3 +1,4 @@
+// 基金智能标签组件：根据基金类型和指标自动渲染颜色标签（如指数型、主动型、债券型等分类徽章）
 import React from 'react';
 
 export function SmartBadges({ fund, fundTab, fundProfiles }) {

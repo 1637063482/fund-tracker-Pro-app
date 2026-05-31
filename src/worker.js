@@ -1,5 +1,4 @@
-// === Cloudflare Worker 云端定时巡检 (纯数据推送：盘中/收盘/每日/每周) ===
-
+// Cloudflare Worker 云端定时巡检脚本：通过 Cron 触发器在盘中/收盘/每日/每周自动执行数据抓取与推送通知
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
