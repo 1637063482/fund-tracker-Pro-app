@@ -4,13 +4,17 @@ import { PieChart, Archive, Plus, Edit3, Trash2, RefreshCcw } from 'lucide-react
 import { AnimatedNumber } from '../UI/AnimatedNumber';
 import { SmartBadges } from '../Fund/SmartBadges';
 import { Tooltip } from '../UI/Tooltip';
+import { usePrivacyFormat } from '../../hooks/usePrivacyFormat';
+import { formatPercent, formatMoney } from '../../utils/helpers';
 
 export const FundTable = ({
   sortedFunds, fundTab, setFundTab, setEditingFundId,
   requestSort, getSortIcon, handleViewProfile, handleDeleteFund,
   fundProfiles, fundNavs, fetchingNavCodes, fetchFundNavManually,
-  formatPercent, formatMoney, onCaptureRect
-}) => (
+  formatPercent: _fpct, formatMoney: _fmoney, onCaptureRect
+}) => {
+  const fmt = usePrivacyFormat();
+  return (
   <div className="apple-card overflow-hidden flex flex-col transition-colors duration-500">
     <div className="flex justify-between items-end border-b dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/20 px-3 sm:px-5 pt-4 sm:pt-5 relative overflow-x-auto no-scrollbar">
       <div className="flex space-x-0 sm:space-x-4 h-full relative shrink-0">
@@ -82,18 +86,18 @@ export const FundTable = ({
                       <span className="text-indigo-600 dark:text-indigo-400 font-mono font-medium tracking-wide whitespace-nowrap">{fund.fundCode}</span>
                       <span className="text-slate-300 dark:text-slate-600">|</span>
                       <span className="text-slate-600 dark:text-slate-400 flex items-center whitespace-nowrap">
-                        净值: <span className="font-bold text-indigo-600 dark:text-indigo-400 font-mono ml-1 whitespace-nowrap">{fundNavs[fund.fundCode]?.nav || fund.lastNav || '--'}</span>
+                        净值: <span className="font-bold text-indigo-600 dark:text-indigo-400 font-mono ml-1 whitespace-nowrap">{fmt.raw(fundNavs[fund.fundCode]?.nav || fund.lastNav || '--')}</span>
                         <span className="text-[10px] text-slate-400 ml-1.5 opacity-80 whitespace-nowrap">({fundNavs[fund.fundCode]?.date || fund.lastNavDate || '未知'})</span>
                       </span>
                       <span className="text-slate-300 dark:text-slate-600">|</span>
-                      <span className="text-slate-600 dark:text-slate-400 whitespace-nowrap">份额: <span className="font-mono whitespace-nowrap">{fund.shares || 0}</span></span>
+                      <span className="text-slate-600 dark:text-slate-400 whitespace-nowrap">份额: <span className="font-mono whitespace-nowrap">{fmt.raw(fund.shares || 0)}</span></span>
                     </div>
                   )}
                 </div>
               </td>
               <td className="p-4 sm:p-5 text-center font-mono font-medium text-blue-600 dark:text-blue-400 whitespace-nowrap">
-                <div className="text-base sm:text-lg xl:text-xl whitespace-nowrap">{fundTab==='archived' ? (fund.exitValue ? formatMoney(fund.exitValue) : '-') : <AnimatedNumber value={fund.currentValue} />}</div>
-                <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100 whitespace-nowrap">净本金: {formatMoney(fund.netInvested)}</div>
+                <div className="text-base sm:text-lg xl:text-xl whitespace-nowrap">{fundTab==='archived' ? (fund.exitValue ? fmt.money(fund.exitValue) : '-') : <AnimatedNumber value={fund.currentValue} />}</div>
+                <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100 whitespace-nowrap">净本金: {fmt.money(fund.netInvested)}</div>
               </td>
               {fundTab === 'active' && (
                 <td className="p-4 sm:p-5 text-center whitespace-nowrap">
@@ -105,7 +109,7 @@ export const FundTable = ({
               )}
               <td className="p-4 sm:p-5 text-center whitespace-nowrap">
                 <div className={`font-mono font-medium text-base sm:text-lg xl:text-xl transition-colors duration-500 whitespace-nowrap ${fund.profit >= 0 ? 'text-red-500' : 'text-green-500'}`}><AnimatedNumber value={fund.profit} /></div>
-                <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100 whitespace-nowrap">占比: {formatPercent(fund.profitWeight)}</div>
+                <div className="text-[10px] sm:text-xs text-slate-400 font-normal mt-1 transition-opacity opacity-70 group-hover:opacity-100 whitespace-nowrap">占比: {fmt.percent(fund.profitWeight)}</div>
               </td>
               <td className={`p-4 sm:p-5 text-center font-mono font-bold text-base sm:text-lg xl:text-xl transition-colors duration-500 whitespace-nowrap ${fund.xirr >= 0 ? 'text-red-500' : 'text-green-500'}`}>
                 <AnimatedNumber value={fund.xirr} formatter={formatPercent} />
@@ -116,7 +120,7 @@ export const FundTable = ({
               <td className="p-4 sm:p-5 text-center whitespace-nowrap touch-visible-actions opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity duration-200">
                 <div className="flex justify-center items-center">
                   <Tooltip content="编辑这笔投资">
-                    <button type="button" onClick={() => setEditingFundId(fund.id)} className="text-slate-400 hover:text-blue-500 mx-0.5 sm:mx-1 p-2 rounded-[0.625rem] hover:bg-blue-50 dark:hover:bg-slate-700 transition-all active:scale-[0.92] whitespace-nowrap touch-target">
+                    <button type="button" onClick={(e) => { if (onCaptureRect) onCaptureRect(e.currentTarget.getBoundingClientRect()); setEditingFundId(fund.id); }} className="text-slate-400 hover:text-blue-500 mx-0.5 sm:mx-1 p-2 rounded-[0.625rem] hover:bg-blue-50 dark:hover:bg-slate-700 transition-all active:scale-[0.92] whitespace-nowrap touch-target">
                       <Edit3 size={18}/>
                     </button>
                   </Tooltip>
@@ -133,4 +137,5 @@ export const FundTable = ({
       </table>
     </div>
   </div>
-);
+  );
+};

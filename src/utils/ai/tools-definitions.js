@@ -151,7 +151,7 @@ export const defineTools = (settings) => {
           },
           horizontalLines: {
             type: "array",
-            description: "水平参考线（均线、净值、支撑阻力位、技术指标等），根据分析需要自行选择。⚠️ 只画关键内容，标注总数控制在≤5个，保持图表可读性。",
+            description: "水平参考线（均线、净值、支撑阻力位、技术指标等），根据分析需要自行选择。⚠️ 只画关键内容，标注总数控制在≤7个，保持图表可读性。",
             items: {
               type: "object",
               properties: {
@@ -451,19 +451,6 @@ export const defineTools = (settings) => {
     }
   });
 
-  // ========== 新增: 北向资金工具 ==========
-  tools.push({
-    type: "function",
-    function: {
-      name: "get_north_bound_flow",
-      description: "获取沪深港通额度数据（沪股通/深股通/港股通），反映外资流向和强度。用于双核打分因子3（量价验证）的增量信息。⚠️ 仅交易日盘中可用，非交易时段/周末/节假日返回空数据属正常现象。",
-      parameters: {
-        type: "object",
-        properties: {},
-        required: []
-      }
-    }
-  });
 
   // ========== 新增: 宏观经济指标工具 ==========
   tools.push({

@@ -19,7 +19,7 @@ export const ProxySettingsModal = ({ settings, onSave, onClose, triggerRect }) =
   const[siliconflowModel, setSiliconflowModel] = useState(settings.siliconflowModel || 'deepseek-ai/DeepSeek-V3');
   const[reasoningEffort, setReasoningEffort] = useState(settings.reasoningEffort || 'max');
   const[marketRefreshInterval, setMarketRefreshInterval] = useState(settings.marketRefreshInterval || 5000);
-  const[autoLogoutMinutes, setAutoLogoutMinutes] = useState(settings.autoLogoutMinutes ?? 15);
+  const[autoLogoutMinutes, setAutoLogoutMinutes] = useState(String(settings.autoLogoutMinutes ?? 15));
   const[searchResultCount, setSearchResultCount] = useState(settings.searchResultCount || 6);
   const[tavilyKey, setTavilyKey] = useState(settings.tavilyApiKey || '');
   const[exaKey, setExaKey] = useState(settings.exaApiKey || '');
@@ -57,7 +57,7 @@ export const ProxySettingsModal = ({ settings, onSave, onClose, triggerRect }) =
       siliconflowModel: siliconflowModel,
       reasoningEffort: reasoningEffort,
       marketRefreshInterval: parseInt(marketRefreshInterval) || 5000,
-      autoLogoutMinutes: parseInt(autoLogoutMinutes) ?? 15,
+      autoLogoutMinutes: (() => { const v = parseInt(autoLogoutMinutes); return isNaN(v) ? 15 : v; })(),
       searchResultCount: parseInt(searchResultCount) || 6,
       tavilyApiKey: tavilyKey,
       exaApiKey: exaKey,

@@ -2,7 +2,7 @@
 import React from 'react';
 import { useModalAnimation } from '../../hooks/useModalAnimation';
 
-export const AnimatedModal = ({ onClose, triggerRect, speed = 1.0, closeMultiplier = 1.0, children, className = '' }) => {
+export const AnimatedModal = ({ onClose, triggerRect, speed = 1.0, closeMultiplier = 2.0, children, className = '' }) => {
   const { isOpen, open, close, overlayStyle, panelStyle } = useModalAnimation(onClose, triggerRect, speed, closeMultiplier);
 
   React.useEffect(() => { open(); }, []);

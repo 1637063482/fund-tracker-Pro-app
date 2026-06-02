@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useScrollLock } from './useScrollLock';
 
-export function useModalAnimation(onClose, triggerRect, speed = 1.0, closeMultiplier = 1.0) {
+export function useModalAnimation(onClose, triggerRect, speed = 1.0, closeMultiplier = 2.0) {
   const [phase, setPhase] = useState('closed');
   const [mounted, setMounted] = useState(false);
 
@@ -74,6 +74,7 @@ export function useModalAnimation(onClose, triggerRect, speed = 1.0, closeMultip
       ? 'translate(0, 0) scale(1)'
       : `translate(${flip.tx}px, ${flip.ty}px) scale(${flip.scale})`,
     opacity: phase === 'open' ? 1 : 0,
+    visibility: (phase === 'open' || phase === 'closing') ? 'visible' : 'hidden',
   };
 
   return { isOpen, open, close, overlayStyle, panelStyle };

@@ -1,8 +1,10 @@
 // 环形图组件：纯 SVG 实现的圆环/饼图，用于展示持仓占比、资产配置等分布数据
 import React from 'react';
 import { formatMoney, formatPercent } from '../../utils/helpers';
+import { usePrivacyFormat } from '../../hooks/usePrivacyFormat';
 
 export const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "总计" }) => {
+  const fmt = usePrivacyFormat();
   const COLORS = ['#007AFF', '#34C759', '#FF9500', '#FF3B30', '#AF52DE', '#FF2D55', '#5AC8FA', '#FF9F0A', '#30D158', '#64D2FF'];
   const total = data.reduce((sum, item) => sum + Math.max(0, item.value), 0);
   
@@ -52,7 +54,7 @@ export const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "
                 className="transition-all duration-300 hover:stroke-[0.45] hover:opacity-80 cursor-pointer origin-center"
                 style={{ transformOrigin: '0 0' }}
               >
-                <title>{slice.name}: {valueFormatter(slice.value)} ({formatPercent(percent)})</title>
+                <title>{slice.name}: {valueFormatter(slice.value)} ({fmt.percent(percent)})</title>
               </path>
             );
           })}
@@ -60,7 +62,7 @@ export const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none transition-transform duration-300 group-hover:scale-105">
            <span className="text-xs sm:text-sm font-semibold tracking-wider text-slate-500 dark:text-slate-400">{centerLabel}</span>
            <span className="text-lg sm:text-xl font-bold font-mono text-slate-800 dark:text-slate-100 tabular-nums">
-             {valueFormatter === formatMoney && total >= 10000 ? (total / 10000).toFixed(2) + '万' : valueFormatter(total)}
+             {fmt.raw(valueFormatter === formatMoney && total >= 10000 ? (total / 10000).toFixed(2) + '万' : valueFormatter(total))}
            </span>
         </div>
       </div>
@@ -74,7 +76,7 @@ export const DonutChart = ({ data, valueFormatter = formatMoney, centerLabel = "
                 <div className="w-2.5 h-2.5 rounded-sm mr-1.5 shrink-0 shadow-sm" style={{backgroundColor: COLORS[i % COLORS.length]}}></div>
                 <span className="truncate text-slate-700 dark:text-slate-300 font-medium" title={slice.name}>{slice.name}</span>
               </div>
-              <span className="font-mono text-slate-800 dark:text-slate-100 font-semibold pl-4 tabular-nums">{formatPercent(slice.value/total)}</span>
+              <span className="font-mono text-slate-800 dark:text-slate-100 font-semibold pl-4 tabular-nums">{fmt.percent(slice.value/total)}</span>
             </div>
           );
         })}

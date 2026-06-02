@@ -119,7 +119,7 @@ useEffect(() => {
 
   return (
     <div style={overlayStyle} onClick={handleClose}>
-      <div ref={focusRef} style={panelStyle} className="bg-white dark:bg-slate-900 rounded-[1.25rem] shadow-apple-2xl w-full max-w-3xl h-[90vh] max-h-[90vh] overflow-hidden flex flex-col border border-slate-200/60 dark:border-slate-700/40" onClick={e => e.stopPropagation()}>
+      <div ref={focusRef} style={panelStyle} className="bg-white dark:bg-slate-900 rounded-[1.25rem] shadow-apple-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col border border-slate-200/60 dark:border-slate-700/40" onClick={e => e.stopPropagation()}>
         
         <div className="flex justify-between items-center p-6 border-b border-slate-200/60 dark:border-slate-700/40 bg-white/80 dark:bg-slate-900/80 backdrop-blur-glass shrink-0">
           <h3 className="text-lg font-bold flex items-center text-slate-800 dark:text-white tracking-tight">

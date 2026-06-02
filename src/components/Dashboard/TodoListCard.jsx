@@ -3,8 +3,10 @@ import React, { useState } from 'react';
 import { CheckCircle2, Circle, Trash2, Plus, Clock, Target, AlertCircle, Flag } from 'lucide-react';
 import { AppleSelect } from '../UI/AppleSelect';
 import { AnimatedModal } from '../UI/AnimatedModal';
+import { usePrivacyFormat } from '../../hooks/usePrivacyFormat';
 
 export const TodoListCard = ({ todos, onAddTodo, onToggleTodo, onDeleteTodo, settings }) => {
+  const fmt = usePrivacyFormat();
   const [showForm, setShowForm] = useState(false);
   const [confirmAction, setConfirmAction] = useState(null);
   const [triggerRect, setTriggerRect] = useState(null);
@@ -87,7 +89,7 @@ export const TodoListCard = ({ todos, onAddTodo, onToggleTodo, onDeleteTodo, set
             </div>
             <p className={`text-xs leading-relaxed break-words ${todo.isCompleted ? 'text-slate-400' : 'text-slate-600 dark:text-slate-400'}`}>
               <Target size={12} className="inline mr-1 text-amber-500 shrink-0" />
-              条件: <span className={!todo.isCompleted && todo.priority==='high' ? 'font-bold text-red-600 dark:text-red-400' : ''}>{todo.condition}</span> {todo.amount ? `| 预备金额: ${todo.amount}元` : ''}
+              条件: <span className={!todo.isCompleted && todo.priority==='high' ? 'font-bold text-red-600 dark:text-red-400' : ''}>{todo.condition}</span> {todo.amount ? `| 预备金额: ${fmt.raw(todo.amount, '元')}` : ''}
             </p>
           </div>
         ) : (

@@ -524,28 +524,30 @@ const handleGenerateTrendChart = async (ctx) => {
       },
     };
 
-    let finalChartUrl = "";
-    try {
-      const chartHeight = safeDatasets.length > 5 ? 520 : 420;
-      const qcPayload = { chart: chartConfig, width: 800, height: chartHeight, backgroundColor: 'white', devicePixelRatio: 2 };
-      const qcRes = await fetch('https://quickchart.io/chart/create', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(qcPayload),
-      });
-      const qcText = await qcRes.text();
-      let qcData;
-      try { qcData = JSON.parse(qcText); }
-      catch (parseErr) { throw new Error(`QuickChart 返回非JSON: ${qcText.substring(0, 100)}`); }
+    // POST 短链接更可靠；简单图表退到 GET。降 DPR+webp 减小体积加速国内加载
+    let finalChartUrl = '';
+    const chartHeight = safeDatasets.length > 5 ? 520 : 420;
+    const configStr = JSON.stringify(chartConfig);
+    const getUrl = `https://quickchart.io/chart?c=${encodeURIComponent(configStr)}&bkg=white&w=800&h=${chartHeight}&f=webp&devicePixelRatio=1`;
 
-      if (qcData.success && qcData.url) {
-        finalChartUrl = qcData.url;
-      } else {
-        throw new Error(`QuickChart API 内部报错: ${JSON.stringify(qcData)}`);
+    if (getUrl.length <= 3500) {
+      finalChartUrl = getUrl;
+    } else {
+      try {
+        const qcPayload = { chart: chartConfig, width: 800, height: chartHeight, backgroundColor: 'white', format: 'webp', devicePixelRatio: 1 };
+        const qcRes = await fetch('https://quickchart.io/chart/create', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(qcPayload),
+        });
+        const qcData = await qcRes.json();
+        if (qcData.success && qcData.url) {
+          finalChartUrl = qcData.url;
+        } else {
+          throw new Error(`QuickChart POST 失败: ${JSON.stringify(qcData)}`);
+        }
+      } catch (e) {
+        console.error('🚨 [画图] POST 失败，退回 GET:', e.message);
+        finalChartUrl = getUrl;
       }
-    } catch (qcError) {
-      console.error("🚨 [画图探针] POST 请求失败:", qcError.message);
-      const fallbackConfig = encodeURIComponent(JSON.stringify(chartConfig));
-      const chartHeight = safeDatasets.length > 5 ? 520 : 420;
-      finalChartUrl = `https://quickchart.io/chart?c=${fallbackConfig}&bkg=white&w=800&h=${chartHeight}&devicePixelRatio=2`;
     }
 
     // ---- 7. 返回结果 ----
@@ -1468,95 +1470,7 @@ const handleGetBondMarketData = async (ctx) => {
 };
 
 // ============================================================================
-// 新增工具 Handler: 北向资金流向
-// 数据源: 新浪财经 沪深港通额度 API
-// ============================================================================
-const handleGetNorthBoundFlow = async (ctx) => {
-  const { toolCall, body, settings } = ctx;
-  try {
-    // 新浪财经沪深港通资金流向
-    const codes = 'hgt_sh,hgt_sz,ggt_sh,ggt_sz';
-    const nbUrl = `https://hq.sinajs.cn/list=${codes}`;
-    let fetchUrl = buildProxyUrl(settings, nbUrl);
-    if (settings.proxyMode !== 'custom' || !settings.customProxyUrl) {
-      fetchUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(nbUrl)}`;
-    }
-
-    const res = await fetch(fetchUrl, { cache: 'no-store' });
-    let text;
-    if (settings.proxyMode === 'custom') {
-      // 新浪财经返回 GBK 编码
-      const buffer = await res.arrayBuffer();
-      text = new TextDecoder('gbk').decode(buffer);
-    } else {
-      const wrapped = await res.json();
-      text = wrapped.contents || '';
-    }
-
-    if (!text || text.length < 30 || text.includes('=""')) {
-      body.messages.push({ role: "tool", tool_call_id: toolCall.id, name: "get_north_bound_flow", content: "北向资金数据暂不可用（非交易时段/周末/节假日沪深港通休市）。请参考最近交易日的大盘成交量与涨跌家数判断外资动向。" });
-      return;
-    }
-
-    // 解析新浪格式: var hq_str_hgt_sh="余额(亿),额度(亿),状态,日期,时间,..."
-    const parts = [];
-    const lines = text.split(';').filter(l => l.includes('=') && l.includes('"'));
-    lines.forEach(line => {
-      const nameMatch = line.match(/hq_str_(\w+)="(.+)"/);
-      if (!nameMatch) return;
-      const code = nameMatch[1];
-      const data = nameMatch[2].split(',');
-      if (data.length < 5) return;
-
-      let label = '';
-      if (code === 'hgt_sh') label = '沪股通(北向)';
-      else if (code === 'hgt_sz') label = '深股通(北向)';
-      else if (code === 'ggt_sh') label = '港股通(沪)';
-      else if (code === 'ggt_sz') label = '港股通(深)';
-
-      const balance = parseFloat(data[0]) || 0; // 当日剩余额度
-      const quota = parseFloat(data[1]) || 0; // 总额度
-      const used = quota - balance; // 已用额度=净流入
-      const pct = quota > 0 ? (used / quota * 100) : 0;
-      const status = data[2] || '';
-
-      if (label) {
-        const dir = used > 0 ? '净买入' : '净卖出';
-        parts.push(`${label}: ${dir} ${Math.abs(used).toFixed(2)} 亿元 (已用${pct.toFixed(1)}%额度${status?' | 状态:'+status:''})`);
-      }
-    });
-
-    if (parts.length === 0) {
-      body.messages.push({ role: "tool", tool_call_id: toolCall.id, name: "get_north_bound_flow", content: "北向资金数据解析失败，返回格式异常。" });
-      return;
-    }
-
-    // 汇总北向
-    const northParts = parts.filter(p => p.includes('北向'));
-    const northUsed = northParts.reduce((sum, p) => {
-      const m = p.match(/净[买卖入出]+\s+([\d.]+)/);
-      return sum + (m ? parseFloat(m[1]) : 0);
-    }, 0);
-    const northSignal = northUsed > 50 ? '🔥 外资大幅加仓'
-      : northUsed > 10 ? '✅ 外资温和流入'
-      : northUsed < -50 ? '🚨 外资大幅撤离'
-      : northUsed < -10 ? '⚠️ 外资温和流出'
-      : '➖ 小幅波动';
-
-    body.messages.push({
-      role: "tool",
-      tool_call_id: toolCall.id,
-      name: "get_north_bound_flow",
-      content: `【北向资金监控 — 沪深港通额度】\n${parts.join('\n')}\n\n📊 北向合计净买入约: ${northUsed.toFixed(1)} 亿元 | ${northSignal}\n\n📌 提示：\n- 已用额度 = 北向资金当日实际净买入/卖出金额\n- 余额越少 = 北向买入越猛\n- 状态字段: 0=正常交易, 1=额度用尽\n- 数据为盘中实时，收盘后重置`
-    });
-  } catch (e) {
-    console.error("北向资金数据获取失败", e);
-    body.messages.push({ role: "tool", tool_call_id: toolCall.id, name: "get_north_bound_flow", content: "北向资金数据获取失败: " + e.message });
-  }
-};
-
-// ============================================================================
-// 新增工具 Handler: 宏观经济指标（CPI/PMI/M2/社融/LPR）
+// 宏观经济指标 Handler（CPI/PMI/M2/社融/LPR）
 // 数据源: 东方财富宏观数据中心
 // ============================================================================
 const handleGetMacroData = async (ctx) => {
@@ -1655,7 +1569,6 @@ const HANDLER_MAP = {
   'get_index_valuation': handleGetIndexValuation,
   'get_cross_asset_data': handleGetCrossAssetData,
   'get_bond_market_data': handleGetBondMarketData,
-  'get_north_bound_flow': handleGetNorthBoundFlow,
   'get_macro_data': handleGetMacroData,
 };
 

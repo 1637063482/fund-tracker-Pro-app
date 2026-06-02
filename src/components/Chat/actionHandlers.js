@@ -26,14 +26,21 @@ function appendAiReply(prevMessages, reply) {
   return finalMessages;
 }
 
-async function syncChatToCloud(user, messages) {
-  if (user && db) {
-    await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'chat', 'history'), { messages }, { merge: true }).catch(() => {});
-  }
+async function syncChatToCloud(user, messages, activeConvId) {
+  if (!user || !db) return;
+  const convId = activeConvId || 'default';
+  // 写入 chat_convs/{convId}（新版多对话路径）
+  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+  const title = lastUserMsg ? lastUserMsg.content.substring(0, 30) : '新对话';
+  await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'chat_convs', convId), {
+    messages,
+    title,
+    createdAt: new Date().toISOString()
+  }, { merge: true }).catch(() => {});
 }
 
 // ---- 1. 数据确认处理器 ----
-export async function handleDataConfirmation({ action, formData, setMessages, setIsLoading, settings, portfolioStats, useWebSearch, enableMacroRadar, messages, todos, memos, user }) {
+export async function handleDataConfirmation({ action, formData, setMessages, settings, portfolioStats, useWebSearch, enableMacroRadar, messages, todos, memos, user, activeConvId }) {
   setMessages(prev => markActionStatus(prev, action.cardId, 'completed'));
 
   const activeMarketData = enableMacroRadar ? "FETCH_NOW" : "【纯净模式】";
@@ -44,10 +51,9 @@ export async function handleDataConfirmation({ action, formData, setMessages, se
 
   setMessages(prev => {
     const finalMessages = appendAiReply(prev, reply);
-    syncChatToCloud(user, finalMessages);
+    syncChatToCloud(user, finalMessages, activeConvId);
     return finalMessages;
   });
-  setIsLoading(false);
 }
 
 // ---- 2. 备忘录写入处理器 ----
@@ -207,7 +213,7 @@ export async function handleLedgerTransaction({ action, formData, user, settings
 
 // ---- 分发器：根据 action.toolType 路由 ----
 export async function dispatchAction(action, formData, ctx) {
-  const { setMessages, setIsLoading, user } = ctx;
+  const { setMessages, user } = ctx;
 
   if (action.toolType === 'data_confirmation') {
     await handleDataConfirmation({ action, formData, ...ctx });
@@ -226,9 +232,10 @@ export async function dispatchAction(action, formData, ctx) {
   }
 
   // 统一标记 action 为 completed 并同步云端
+  const activeConvId = ctx.activeConvId || 'default';
   setMessages(prev => {
     const newMsgs = markActionStatus(prev, action.cardId, 'completed');
-    syncChatToCloud(user, newMsgs);
+    syncChatToCloud(user, newMsgs, activeConvId);
     return newMsgs;
   });
 }

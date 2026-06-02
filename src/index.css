@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 防止弹窗开关时滚动条显隐导致的界面横向跳动 */
+html {
+  scrollbar-gutter: stable;
+}
+
 /* ==========================================
    Design Tokens
    ========================================== */
@@ -243,18 +248,48 @@
 }
 .animate-flash { animation: flash-highlight 1s ease-out; }
 
-/* Market data tick animation */
-@keyframes tick-up {
-  0% { background-color: transparent; }
-  30% { background-color: rgba(239, 68, 68, 0.22); }
-  100% { background-color: rgba(239, 68, 68, 0.10); }
+/* Market data tick — 双图层透明度蒙版 */
+/* 底层：持久涨跌色，直接作用于卡片背景 */
+.bg-tick-up   { background-color: rgba(239, 68, 68, 0.10); }
+.bg-tick-down { background-color: rgba(34, 197, 94, 0.10); }
+
+/* 顶层蒙版：::after 伪元素，独立图层做闪烁，透明度 1→0 淡出 */
+@keyframes tick-flash-fade {
+  0%   { opacity: 1; }
+  100% { opacity: 0; }
 }
-@keyframes tick-down {
-  0% { background-color: transparent; }
-  30% { background-color: rgba(34, 197, 94, 0.22); }
-  100% { background-color: rgba(34, 197, 94, 0.10); }
+
+.animate-tick-up,
+.animate-tick-down {
+  position: relative;
+  isolation: isolate;
 }
-.animate-tick-up { animation: tick-up 0.8s ease-in-out forwards; }
+
+.animate-tick-up::after,
+.animate-tick-down::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.animate-tick-up::after {
+  background-color: rgba(239, 68, 68, 0.30);
+  animation: tick-flash-fade 1.2s ease-out forwards;
+}
+.animate-tick-down::after {
+  background-color: rgba(34, 197, 94, 0.30);
+  animation: tick-flash-fade 1.2s ease-out forwards;
+}
+
+/* 卡片内容置于蒙版之上 */
+.animate-tick-up > *,
+.animate-tick-down > * {
+  position: relative;
+  z-index: 1;
+}
 
 @keyframes shake {
   0%, 100% { transform: translateX(0); }
@@ -264,9 +299,6 @@
   80% { transform: translateX(3px); }
 }
 .animate-shake { animation: shake 0.4s ease; }
-.animate-tick-down { animation: tick-down 0.8s ease-in-out forwards; }
-.bg-tick-up { background-color: rgba(239, 68, 68, 0.10); }
-.bg-tick-down { background-color: rgba(34, 197, 94, 0.10); }
 
 /* ==========================================
    Date Input Styling

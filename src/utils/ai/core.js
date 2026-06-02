@@ -20,31 +20,31 @@ const buildReasoningConfig = (effort) => {
   return { thinking: { type: "enabled" }, reasoning_effort: "max" }; // default/max
 };
 
-// 工具名称 → 用户友好状态提示
+// 工具名称 → 用户友好状态提示 · Apple 风格
 const TOOL_LABELS = {
-  'get_realtime_fund_data': '正在获取基金净值…',
-  'get_batch_fund_data': '正在批量获取基金数据…',
-  'get_fund_history_data': '正在获取历史净值序列…',
-  'get_fund_comparison': '正在执行多基金横向对比…',
-  'get_financial_news': '正在获取最新财经快讯…',
-  'google_macro_search': '正在搜索宏观政策资讯…',
-  'tavily_news_search': '正在搜索相关新闻…',
-  'exa_research': '正在检索深度研报…',
-  'get_fund_holdings_penetration': '正在穿透底层持仓…',
-  'get_fund_transaction_history': '正在查询交易流水…',
-  'get_market_historical_intraday': '正在获取历史K线…',
-  'generate_trend_chart': '正在生成走势图表…',
-  'execute_javascript': '正在执行量化计算…',
-  'update_ledger': '正在写入交易记录…',
-  'manage_plan_todo': '正在更新交易计划…',
-  'update_decision_memo': '正在更新战略备忘录…',
-  'update_fof_dictionary': '正在更新FOF字典…',
-  'get_index_valuation': '正在获取指数估值…',
-  'get_cross_asset_data': '正在获取跨资产数据…',
-  'get_bond_market_data': '正在获取债市深度数据…',
-  'get_north_bound_flow': '正在获取北向资金流向…',
-  'get_sector_ranking': '正在获取行业板块排名…',
-  'get_macro_data': '正在获取宏观经济指标…',
+  'get_realtime_fund_data': '📊 读取实时净值…',
+  'get_batch_fund_data': '📊 批量拉取基金数据…',
+  'get_fund_history_data': '📈 回溯历史走势…',
+  'get_fund_comparison': '⚖️ 多维度对比分析…',
+  'get_financial_news': '📰 速览财经快讯…',
+  'google_macro_search': '🌐 检索宏观政策…',
+  'tavily_news_search': '🔍 搜索相关资讯…',
+  'exa_research': '📚 研读深度研报…',
+  'get_fund_holdings_penetration': '🔬 透视底层持仓…',
+  'get_fund_transaction_history': '🧾 查阅交易流水…',
+  'get_market_historical_intraday': '📉 加载 K 线数据…',
+  'generate_trend_chart': '🎨 渲染走势图表…',
+  'execute_javascript': '⚡ 执行量化演算…',
+  'update_ledger': '📝 记录交易明细…',
+  'manage_plan_todo': '✅ 同步交易计划…',
+  'update_decision_memo': '🗂️ 更新战略备忘…',
+  'update_fof_dictionary': '📖 维护 FOF 字典…',
+  'get_index_valuation': '📊 评估指数估值…',
+  'get_cross_asset_data': '🌍 加载跨资产全景…',
+  'get_bond_market_data': '🏦 解析债市数据…',
+
+  'get_sector_ranking': '🏭 扫描行业板块…',
+  'get_macro_data': '📡 采集宏观指标…',
 };
 
 // Token 估算工具（中文约1.8字符/token，用于开发调试和生产监控）
@@ -396,7 +396,7 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
     }
 
     // 状态通知：开始思考
-    onStatus && onStatus({ type: 'thinking', label: '正在深度思考…' });
+    onStatus && onStatus({ type: 'thinking', label: '🧠 深度思考中…' });
 
     let response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
     let data = await response.json();
@@ -434,7 +434,7 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
       // 策略模式分派每个工具调用
       for (const toolCall of responseMsg.tool_calls) {
         const toolName = toolCall.function.name;
-        const label = TOOL_LABELS[toolName] || '正在调用 ' + toolName + '…';
+        const label = TOOL_LABELS[toolName] || '⚙️ 调用 ' + toolName + '…';
         const roundTag = responseMsg.tool_calls.length > 1 ? ' (' + (responseMsg.tool_calls.indexOf(toolCall) + 1) + '/' + responseMsg.tool_calls.length + ')' : '';
         onStatus && onStatus({ type: 'tool', label: label + roundTag, tool: toolName, round: roundNum });
 
@@ -461,7 +461,7 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
 
       // 状态通知：进入下一轮
       if (maxLoops > 0) {
-        onStatus && onStatus({ type: 'thinking', label: '正在综合分析第 ' + (roundNum + 1) + ' 轮结果…', round: roundNum + 1 });
+        onStatus && onStatus({ type: 'thinking', label: '🧠 综合研判 · 第 ' + (roundNum + 1) + ' 轮…', round: roundNum + 1 });
       }
 
       response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
@@ -511,7 +511,7 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
           const toolName = fc.name;
           const toolArgs = fc.args || {};
 
-          const label = TOOL_LABELS[toolName] || '正在调用 ' + toolName + '…';
+          const label = TOOL_LABELS[toolName] || '⚙️ 调用 ' + toolName + '…';
           onStatus && onStatus({ type: 'tool', label, tool: toolName, round: geminiRoundNum });
 
           const fakeToolCall = {
@@ -552,7 +552,7 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
 
         // 下一轮思考状态
         if (geminiMaxLoops > 0) {
-          onStatus && onStatus({ type: 'thinking', label: '正在综合分析第 ' + (geminiRoundNum + 1) + ' 轮结果…', round: geminiRoundNum + 1 });
+          onStatus && onStatus({ type: 'thinking', label: '🧠 综合研判 · 第 ' + (geminiRoundNum + 1) + ' 轮…', round: geminiRoundNum + 1 });
         }
 
         delete body.messages;

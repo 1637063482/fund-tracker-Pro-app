@@ -1,9 +1,9 @@
 // 应用主组件：管理全局状态（用户认证、基金数据、行情、设置、主题），编排所有子组件与业务逻辑
-import React, { useState, useEffect, useMemo, useRef, Fragment, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef, Fragment, useCallback, useContext } from 'react';
 import {
   Activity, Download, CloudOff, RefreshCw, Sun, Moon, LogOut, Settings, Pause, Play,
   AlertCircle, TrendingUp, TrendingDown, PieChart, ArrowUpDown, ArrowUp, ArrowDown,
-  Plus, Edit3, Award, Target, CheckCircle2, Sparkles, X, Cloud
+  Plus, Edit3, Award, Target, CheckCircle2, Sparkles, X, Cloud, Eye, EyeOff
 } from 'lucide-react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 // 注意检查 firebase/firestore 导入中是否有 addDoc (如果没有请补上)
@@ -31,7 +31,19 @@ import { useModalAnimation } from './hooks/useModalAnimation';
 import { AnimatedModal } from './components/UI/AnimatedModal';
 import { Tooltip } from './components/UI/Tooltip';
 import { toast, ToastContainer } from './components/UI/Toast';
+import { PrivacyModeContext } from './contexts/PrivacyModeContext';
 
+// 金额隐私开关按钮
+const PrivacyEyeButton = () => {
+  const { showAmounts, togglePrivacy } = useContext(PrivacyModeContext);
+  return (
+    <Tooltip content={showAmounts ? '隐藏金额' : '显示金额'}>
+      <button type="button" onClick={togglePrivacy} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors active:scale-90" aria-label={showAmounts ? '隐藏金额' : '显示金额'}>
+        {showAmounts ? <Eye size={20} className="text-slate-500" /> : <EyeOff size={20} className="text-amber-500" />}
+      </button>
+    </Tooltip>
+  );
+};
 
 // 提取移除函数（核打击版：绝对防止移动端放大镜图层穿透）
 const removeGlobalSplash = () => {
@@ -164,25 +176,47 @@ export default function App() {
   const[marketError, setMarketError] = useState('');
   const [activeProxyIndex, setActiveProxyIndex] = useState(0);
 
-  // 检测行情数值变化方向，触发跳动动画
+  // 检测行情数值变化方向，逐卡片独立计时触发跳动动画
+  const tickTimersRef = useRef({}); // { [id]: timer }
   useEffect(() => {
     if (marketData.length === 0) return;
-    const newDirs = {};
+    const newDirs = { ...tickDirs };
     marketData.forEach(d => {
       const prev = prevPricesRef.current[d.id];
       if (prev !== undefined && prev !== d.price) {
         newDirs[d.id] = d.price > prev ? 'up' : 'down';
+        // 该卡片已有动画在跑：先清除旧的，再写入新的（方向可能反转）
+        if (tickTimersRef.current[d.id]) {
+          clearTimeout(tickTimersRef.current[d.id]);
+          delete tickTimersRef.current[d.id];
+        }
+        tickTimersRef.current[d.id] = setTimeout(() => {
+          setTickDirs(prev => {
+            const next = { ...prev };
+            delete next[d.id];
+            return next;
+          });
+          delete tickTimersRef.current[d.id];
+        }, 1250);
       }
       prevPricesRef.current[d.id] = d.price;
     });
-    if (Object.keys(newDirs).length > 0) {
+    if (Object.keys(newDirs).length !== Object.keys(tickDirs).length
+        || Object.keys(newDirs).some(k => newDirs[k] !== tickDirs[k])) {
       setTickDirs(newDirs);
-      const timer = setTimeout(() => setTickDirs({}), 800);
-      return () => clearTimeout(timer);
     }
+    // 清理：组件卸载时清除全部未完成的定时器
+    return () => {
+      Object.values(tickTimersRef.current).forEach(clearTimeout);
+    };
   }, [marketData]);
+  // 组件卸载时兜底清理
+  useEffect(() => () => {
+    Object.values(tickTimersRef.current).forEach(clearTimeout);
+  }, []);
 
   const isFetchingRef = useRef(false);
+  const [settingsReady, setSettingsReady] = useState(false); // 防止 Firestore settings 未就绪时提前 fetch
   // 【关键修改1】初始状态默认开启，把控制权完全交给用户
   const [isAutoRefresh, setIsAutoRefresh] = useState(true); 
 
@@ -205,13 +239,24 @@ export default function App() {
   const[fundProfiles, setFundProfiles] = useState({});
   const[viewingProfileCode, setViewingProfileCode] = useState(null);
 
-  const INACTIVITY_LIMIT = (settings.autoLogoutMinutes ?? 15) * 60 * 1000;
+  const [showAmounts, setShowAmounts] = useState(true);
+  const togglePrivacy = useCallback(() => setShowAmounts(prev => !prev), []);
+  const fmt = useMemo(() => ({
+    money: (val) => showAmounts ? formatMoney(val) : '****',
+    percent: (val) => showAmounts ? formatPercent(val) : '**.**%',
+    raw: (val, suffix = '') => showAmounts ? `${val}${suffix}` : `***${suffix}`,
+  }), [showAmounts]);
+
+  const INACTIVITY_LIMIT = useMemo(
+    () => (settings.autoLogoutMinutes ?? 15) * 60 * 1000,
+    [settings.autoLogoutMinutes]
+  );
   const logoutTimerRef = useRef(null);
-  const targetAmountTimeoutRef = useRef(null); 
+  const targetAmountTimeoutRef = useRef(null);
   const targetDateTimeoutRef = useRef(null);
   const targetRateTimeoutRef = useRef(null);
 
- 
+
 // ==========================================
   // 【核心修复区 1】恢复昼夜模式的 CSS 类名切换驱动
   // ==========================================
@@ -281,7 +326,9 @@ export default function App() {
     }
   },[]);
 
-  const resetLogoutTimer = useCallback(() => {
+  // 自动登出：通过 ref 保证事件监听器只挂载一次，回调始终读取最新 INACTIVITY_LIMIT
+  const resetLogoutTimerRef = useRef(() => {});
+  resetLogoutTimerRef.current = () => {
     if (logoutTimerRef.current) clearTimeout(logoutTimerRef.current);
     if (user && INACTIVITY_LIMIT > 0) {
       logoutTimerRef.current = setTimeout(() => {
@@ -289,22 +336,22 @@ export default function App() {
         handleSignOut();
       }, INACTIVITY_LIMIT);
     }
-  }, [user, handleSignOut, INACTIVITY_LIMIT]);
+  };
 
   useEffect(() => {
-    const events =['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
-    const handleActivity = () => resetLogoutTimer();
-    
+    const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
+    const handleActivity = () => resetLogoutTimerRef.current();
+
     if (user) {
       events.forEach(e => window.addEventListener(e, handleActivity));
-      resetLogoutTimer(); 
+      resetLogoutTimerRef.current();
     }
 
     return () => {
       events.forEach(e => window.removeEventListener(e, handleActivity));
       if (logoutTimerRef.current) clearTimeout(logoutTimerRef.current);
     };
-  },[user, resetLogoutTimer]);
+  }, [user]);
 
   useEffect(() => {
     const fallbackTimer = setTimeout(() => {
@@ -355,6 +402,7 @@ export default function App() {
 
     const settingsDocRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'general');
     const unsubSettings = onSnapshot(settingsDocRef, (docSnap) => {
+      setSettingsReady(true);
       if (docSnap.exists()) {
          setSettings(prev => ({ ...prev, ...docSnap.data() }));
       }
@@ -461,9 +509,11 @@ export default function App() {
 
    useEffect(() => {
     if (!user) return;
-    manualFetch(); 
-    
-    if (!isAutoRefresh) return; 
+    // 等待 Firestore settings 就绪后再执行首次行情拉取，避免默认配置导致的虚假失败
+    if (!settingsReady) return;
+    manualFetch();
+
+    if (!isAutoRefresh) return;
     const intervalId = setInterval(() => {
       // 【关键修改2】底层时钟动态拦截：即使用户开着自动刷新，只要当前是休市/节假日，就静默跳过请求，绝不浪费资源！
       if (checkIsTradingTime()) {
@@ -471,7 +521,7 @@ export default function App() {
       }
     }, settings.marketRefreshInterval || 5000);
     return () => clearInterval(intervalId);
-  },[isAutoRefresh, manualFetch, user, settings.marketRefreshInterval]);
+  },[isAutoRefresh, manualFetch, user, settings.marketRefreshInterval, settingsReady]);
 
   const handleCloseEditor = () => {
     setEditingFundId(null);
@@ -685,6 +735,7 @@ export default function App() {
   },[editingFundId, funds]);
 
   return (
+    <PrivacyModeContext.Provider value={{ showAmounts, togglePrivacy }}>
     <>
       <ToastContainer />
       {viewingProfileCode && (
@@ -762,6 +813,7 @@ export default function App() {
                 <button type="button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors active:scale-90">
                   {theme === 'dark' ? <Sun size={20} className="text-yellow-400"/> : <Moon size={20}/>}
                 </button>
+                <PrivacyEyeButton />
                 <div className="flex items-center bg-slate-100 dark:bg-slate-700 rounded-full pr-1 pl-3 py-1 transition-colors shadow-sm">
                   <span className="text-xs text-slate-600 dark:text-slate-300 mr-2 sm:mr-3 truncate max-w-[80px] sm:max-w-xs">{user.email || 'Admin'}</span>
                   <button type="button" onClick={handleSignOut} className="flex items-center text-xs bg-white dark:bg-slate-600 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/50 dark:hover:text-red-400 transition-colors rounded-full px-2 py-1 font-medium shadow-sm border border-slate-200 dark:border-slate-600 active:scale-[0.97]">
@@ -821,7 +873,7 @@ export default function App() {
                       <div key={data.id} className={`apple-card-hover p-4 sm:p-5 transition-all duration-300 cursor-default hover:[transform:translateY(-8px)_scale(1.02)] ${tickDirs[data.id] === 'up' ? 'animate-tick-up' : tickDirs[data.id] === 'down' ? 'animate-tick-down' : ''} ${data.change > 0 ? 'bg-tick-up' : data.change < 0 ? 'bg-tick-down' : ''}`}>
                         <div className="text-sm sm:text-base text-slate-600 dark:text-slate-400 mb-1.5 font-bold tracking-wide truncate">{data.name}</div>
                         <div className={`text-xl sm:text-2xl lg:text-3xl font-bold font-mono ${textColor} transition-colors duration-300 truncate w-full block`}>
-                          <AnimatedNumber value={data.price} formatter={(v) => v.toFixed(3)} />
+                          <AnimatedNumber value={data.price} formatter={(v) => v.toFixed(3)} privacy={false} />
                         </div>
                         <div className={`text-sm sm:text-base flex items-center mt-1.5 font-mono font-medium ${textColor} transition-colors duration-300 truncate`}>
                           {isPositive ? <TrendingUp size={16} className="mr-1 shrink-0"/> : (data.change < 0 ? <TrendingDown size={16} className="mr-1 shrink-0"/> : null)}
@@ -851,8 +903,6 @@ export default function App() {
                   fundNavs={fundNavs}
                   fetchingNavCodes={fetchingNavCodes}
                   fetchFundNavManually={fetchFundNavManually}
-                  formatPercent={formatPercent}
-                  formatMoney={formatMoney}
                   onCaptureRect={setModalTriggerRect}
                 />
 
@@ -888,7 +938,7 @@ export default function App() {
                             <span className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full text-white text-xs sm:text-sm flex items-center justify-center mr-3 sm:mr-4 transition-transform hover:scale-110 ${i===0?'bg-gradient-to-br from-yellow-400 to-yellow-600 shadow-md':i===1?'bg-gradient-to-br from-slate-300 to-slate-500 shadow-sm':i===2?'bg-gradient-to-br from-amber-600 to-amber-800 shadow-sm':'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>{i+1}</span>
                             <span className="truncate" title={f.name}>{f.name}</span>
                           </span>
-                          <span className={`font-mono font-bold shrink-0 text-base sm:text-lg tabular-nums ${f.xirr>=0?'text-red-500':'text-green-500'}`}>{formatPercent(f.xirr)}</span>
+                          <span className={`font-mono font-bold shrink-0 text-base sm:text-lg tabular-nums ${f.xirr>=0?'text-red-500':'text-green-500'}`}>{fmt.percent(f.xirr)}</span>
                         </div>
                       ))}
                     </div>
@@ -906,7 +956,7 @@ export default function App() {
                             <span className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full text-white text-xs sm:text-sm flex items-center justify-center mr-3 sm:mr-4 transition-transform hover:scale-110 ${i===0?'bg-gradient-to-br from-yellow-400 to-yellow-600 shadow-md':i===1?'bg-gradient-to-br from-slate-300 to-slate-500 shadow-sm':i===2?'bg-gradient-to-br from-amber-600 to-amber-800 shadow-sm':'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>{i+1}</span>
                             <span className="truncate" title={f.name}>{f.name}</span>
                           </span>
-                          <span className={`font-mono font-bold shrink-0 text-base sm:text-lg tabular-nums ${f.profit>=0?'text-red-500':'text-green-500'}`}>{formatMoney(f.profit)}</span>
+                          <span className={`font-mono font-bold shrink-0 text-base sm:text-lg tabular-nums ${f.profit>=0?'text-red-500':'text-green-500'}`}>{fmt.money(f.profit)}</span>
                         </div>
                       ))}
                     </div>
@@ -924,7 +974,7 @@ export default function App() {
                             <span className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full text-white text-xs sm:text-sm flex items-center justify-center mr-3 sm:mr-4 transition-transform hover:scale-110 ${i===0?'bg-gradient-to-br from-yellow-400 to-yellow-600 shadow-md':i===1?'bg-gradient-to-br from-slate-300 to-slate-500 shadow-sm':i===2?'bg-gradient-to-br from-amber-600 to-amber-800 shadow-sm':'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>{i+1}</span>
                             <span className="truncate" title={f.name}>{f.name}</span>
                           </span>
-                          <span className={`font-mono font-bold shrink-0 text-base sm:text-lg tabular-nums ${f.simpleReturn>=0?'text-red-500':'text-green-500'}`}>{formatPercent(f.simpleReturn)}</span>
+                          <span className={`font-mono font-bold shrink-0 text-base sm:text-lg tabular-nums ${f.simpleReturn>=0?'text-red-500':'text-green-500'}`}>{fmt.percent(f.simpleReturn)}</span>
                         </div>
                       ))}
                     </div>
@@ -979,23 +1029,25 @@ export default function App() {
                       {/* 【新增】空闲资金输入框 */}
                       <div className="sm:col-span-2 mb-1">
                         <label className="text-sm font-bold text-indigo-600 dark:text-indigo-400 mb-1 block flex items-center"><Sparkles size={14} className="mr-1"/> 当前子弹 (可用空闲资金)</label>
-                        <input 
-                          type="number" 
-                          value={settings.idleFunds === '' ? '' : settings.idleFunds} 
+                        <input
+                          type={showAmounts ? 'number' : 'password'}
+                          value={settings.idleFunds === '' ? '' : settings.idleFunds}
                           onChange={handleIdleFundsChange}
                           onBlur={handleIdleFundsBlur}
-                          placeholder="例如: 10000"
-                          className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] dark:bg-slate-900 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 focus:outline-none transition-all duration-300 shadow-sm font-mono text-indigo-700 dark:text-indigo-300 font-bold bg-indigo-50 dark:bg-indigo-900/20" 
+                          placeholder={showAmounts ? '例如: 10000' : '****'}
+                          readOnly={!showAmounts}
+                          className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] dark:bg-slate-900 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 focus:outline-none transition-all duration-300 shadow-sm font-mono text-indigo-700 dark:text-indigo-300 font-bold bg-indigo-50 dark:bg-indigo-900/20"
                         />
                       </div>
                       <div>
                         <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 block">总目标金额 (元)</label>
-                        <input 
-                          type="number" 
-                          value={settings.targetAmount === '' ? '' : settings.targetAmount} 
+                        <input
+                          type={showAmounts ? 'number' : 'password'}
+                          value={settings.targetAmount === '' ? '' : settings.targetAmount}
                           onChange={handleTargetAmountChange}
                           onBlur={handleTargetAmountBlur}
-                          className="w-full px-3 py-2 border border-slate-200 rounded-[0.75rem] dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 focus:outline-none transition-all duration-300" 
+                          readOnly={!showAmounts}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-[0.75rem] dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 focus:outline-none transition-all duration-300"
                         />
                       </div>
                       <div>
@@ -1025,7 +1077,7 @@ export default function App() {
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-slate-600 dark:text-slate-400">对比设定基准的超额收益 (Alpha):</span>
                         <span className={`font-mono font-bold tabular-nums text-base bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded shadow-inner ${portfolioStats.alpha >= 0 ? 'text-red-500' : 'text-green-500'}`}>
-                          {portfolioStats.alpha >= 0 ? '+' : ''}{formatPercent(portfolioStats.alpha)}
+                          {portfolioStats.alpha >= 0 ? '+' : ''}{fmt.percent(portfolioStats.alpha)}
                         </span>
                       </div>
                       
@@ -1034,7 +1086,7 @@ export default function App() {
                       <div className="flex justify-between text-sm">
                         <span className="text-slate-600 dark:text-slate-400">当前资产偏离基准轨迹:</span>
                         <span className={`font-mono font-bold tabular-nums ${portfolioStats.deviationAmount >= 0 ? 'text-red-500' : 'text-green-500'}`}>
-                          {portfolioStats.deviationAmount >= 0 ? '+' : ''}{formatMoney(portfolioStats.deviationAmount)}
+                          {portfolioStats.deviationAmount >= 0 ? '+' : ''}{fmt.money(portfolioStats.deviationAmount)}
                         </span>
                       </div>
                       
@@ -1074,7 +1126,7 @@ export default function App() {
                   </h3>
                   <div className="space-y-4 relative z-10">
                     <div className="text-slate-300 text-sm sm:text-base leading-relaxed">
-                      基于当前 <span className="font-bold text-white tabular-nums text-base sm:text-lg bg-white/10 px-2 py-0.5 rounded-[0.625rem] ml-1 mr-1">{formatPercent(portfolioStats.overallXirr)}</span> 综合年化收益率推演：
+                      基于当前 <span className="font-bold text-white tabular-nums text-base sm:text-lg bg-white/10 px-2 py-0.5 rounded-[0.625rem] ml-1 mr-1">{fmt.percent(portfolioStats.overallXirr)}</span> 综合年化收益率推演：
                     </div>
                     <div className="pt-2 border-t border-white/10 mt-2">
                       <div className="text-slate-400 text-sm sm:text-base mb-1">至目标日期预计总持仓将达到:</div>
@@ -1152,5 +1204,6 @@ export default function App() {
         </div>
       )}
     </>
+    </PrivacyModeContext.Provider>
   );
 }

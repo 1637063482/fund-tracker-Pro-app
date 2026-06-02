@@ -11,7 +11,7 @@ const SANITIZE_CONFIG = {
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'caption', 'colgroup', 'col',
     'code', 'pre', 'blockquote', 'a', 'img', 'hr', 'sub', 'sup'],
-  ALLOWED_ATTR: ['href', 'src', 'alt', 'class', 'target', 'rel', 'loading', 'width', 'height', 'colspan', 'rowspan', 'data-zoomable'],
+  ALLOWED_ATTR: ['href', 'src', 'alt', 'class', 'target', 'rel', 'loading', 'width', 'height', 'colspan', 'rowspan', 'data-zoomable', 'style'],
   ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i
 };
 const sanitizeHtml = (html) => DOMPurify.sanitize(html, SANITIZE_CONFIG);
@@ -269,7 +269,142 @@ const groupIntoCards = (blocks) => {
 };
 
 // ========================
-// 主渲染函数
+// Print/PDF 渲染 — 输出纯 HTML 字符串，所有样式内联，不依赖 Tailwind CSS
+// ========================
+
+const applyInlineForPrint = (text) => {
+  let html = text;
+  // 图片
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
+    const safeUrl = url.trim();
+    if (/^https?:\/\//i.test(safeUrl)) {
+      return `<img src="${safeUrl}" alt="${alt}" style="max-width:100%;height:auto;object-fit:contain;border-radius:12px;border:1px solid #e2e8f0;margin:12px 0;background:#fff;display:block;" />`;
+    }
+    return '[图片已屏蔽]';
+  });
+  // 行内代码
+  html = html.replace(/`([^`]+)`/g, '<code style="background:#f1f5f9;color:#e11d48;padding:1px 4px;border-radius:3px;font-size:10px;font-family:Menlo,Monaco,Consolas,monospace;">$1</code>');
+  // 粗体
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong style="font-weight:700;color:#0f172a;">$1</strong>');
+  // 斜体
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  // 涨跌幅着色
+  html = html.replace(/(\+[\d.]+%)/g, '<span style="color:#ef4444;font-weight:600;">$1</span>');
+  html = html.replace(/(-[\d.]+%)/g, '<span style="color:#22c55e;font-weight:600;">$1</span>');
+  html = html.replace(/([\s(（])(\+[\d.]+)([\s,，。)）]|$)/g, '$1<span style="color:#ef4444;font-weight:600;">$2</span>$3');
+  html = html.replace(/([\s(（])(-[\d.]+)([\s,，。)）]|$)/g, '$1<span style="color:#22c55e;font-weight:600;">$2</span>$3');
+  return html;
+};
+
+const headingStyle = {
+  h1: 'font-size:15px;font-weight:900;color:#0f172a;margin:16px 0 8px 0;padding-bottom:5px;border-bottom:2px solid #a5b4fc;',
+  h2: 'font-size:13px;font-weight:700;color:#1e293b;margin:12px 0 5px 0;padding-left:8px;border-left:3px solid #6366f1;',
+  h3: 'font-size:12px;font-weight:700;color:#4338ca;margin:8px 0 5px 0;padding:2px 6px;background:#eef2ff;border-radius:6px;display:inline-block;',
+  h4: 'font-size:11px;font-weight:600;color:#334155;margin:5px 0 2px 0;',
+  h5: 'font-size:10px;font-weight:600;color:#475569;margin:4px 0 2px 0;',
+  h6: 'font-size:10px;font-weight:600;color:#64748b;margin:3px 0 1px 0;',
+};
+
+const renderTableForPrint = (table) => {
+  const thead = '<thead><tr style="background:#eef2ff;border-bottom:2px solid #a5b4fc;">' +
+    table.headers.map(h => '<th style="padding:5px 8px;text-align:left;font-size:10px;font-weight:700;color:#4338ca;white-space:nowrap;">' + applyInlineForPrint(h) + '</th>').join('') +
+    '</tr></thead>';
+  const tbody = '<tbody>' + table.rows.map((row, ri) =>
+    '<tr style="border-bottom:1px solid #f1f5f9;' + (ri % 2 === 0 ? 'background:#fff;' : 'background:#f8fafc;') + '">' +
+    row.map(cell => '<td style="padding:5px 8px;font-size:10px;color:#334155;line-height:1.45;">' + applyInlineForPrint(cell) + '</td>').join('') +
+    '</tr>'
+  ).join('') + '</tbody>';
+  return sanitizeHtml(
+    '<div style="overflow-x:auto;margin:8px 0;border-radius:8px;border:1px solid #e2e8f0;">' +
+    '<table style="width:100%;border-collapse:collapse;font-size:10px;">' + thead + tbody + '</table></div>'
+  );
+};
+
+const renderBlockForPrint = (block, key) => {
+  switch (block.type) {
+    case 'heading': {
+      const tag = 'h' + block.level;
+      const style = headingStyle[tag] || 'font-size:11px;font-weight:600;margin:5px 0 2px 0;';
+      return '<' + tag + ' style="' + style + '">' + applyInlineForPrint(block.content) + '</' + tag + '>';
+    }
+    case 'paragraph': {
+      return '<p style="color:#334155;line-height:1.65;margin-bottom:6px;word-wrap:break-word;">' + applyInlineForPrint(block.content) + '</p>';
+    }
+    case 'table': {
+      return renderTableForPrint(block.table);
+    }
+    case 'ul': {
+      const items = block.items.map(item =>
+        '<li style="color:#334155;line-height:1.65;margin-left:20px;margin-bottom:3px;list-style-type:disc;">' + applyInlineForPrint(item) + '</li>'
+      ).join('');
+      return '<ul style="margin:6px 0;padding-left:0;">' + items + '</ul>';
+    }
+    case 'ol': {
+      const items = block.items.map((item, ii) =>
+        '<li style="color:#334155;line-height:1.65;margin-left:20px;margin-bottom:3px;list-style-type:decimal;">' + applyInlineForPrint(item) + '</li>'
+      ).join('');
+      return '<ol style="margin:8px 0;padding-left:0;">' + items + '</ol>';
+    }
+    case 'code': {
+      const escaped = block.content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return '<pre style="background:#1e293b;color:#e2e8f0;border-radius:8px;padding:10px;margin:8px 0;overflow-x:auto;font-size:10px;line-height:1.5;font-family:Menlo,Monaco,Consolas,monospace;border:1px solid #334155;"><code>' + escaped + '</code></pre>';
+    }
+    case 'blockquote': {
+      return '<blockquote style="border-left:3px solid #f59e0b;padding:8px 12px;margin:10px 0;color:#475569;font-style:italic;background:#fffbeb;border-radius:8px;overflow:hidden;line-height:1.5;font-size:11px;">' + applyInlineForPrint(block.content) + '</blockquote>';
+    }
+    case 'hr': {
+      return '<hr style="margin:16px 0;border:none;border-top:1px solid #e2e8f0;" />';
+    }
+    default: {
+      return '<p style="color:#334155;line-height:1.65;word-wrap:break-word;">' + applyInlineForPrint(String(block.content || block)) + '</p>';
+    }
+  }
+};
+
+/**
+ * 将 Markdown 文本渲染为适合打印/PDF 的纯 HTML 字符串。
+ * 所有样式内联，不依赖 Tailwind CSS，可直接嵌入任意 HTML 文档。
+ * AI 深度思考过程会被自动剥离，仅保留最终回复内容。
+ * @param {string} text - 原始 Markdown 文本
+ * @returns {string} 完整的 HTML 片段字符串
+ */
+export function renderMarkdownForPrint(text) {
+  if (!text || typeof text !== 'string') return '';
+
+  // 剥离 AI 思考过程 HTML 块（分享 PDF 时不需要暴露内部推理过程）
+  let mainText = text.replace(/^### (🧠 AI[\s\S]*?<\/div>\n\n)/, '');
+
+  if (mainText.trim().length < 20) {
+    return '<p style="color:#94a3b8;font-style:italic;font-size:10px;">' + mainText.trim() + '</p>';
+  }
+
+  const blocks = parseBlocks(mainText);
+  const cards = groupIntoCards(blocks);
+
+  let output = '';
+
+  // 渲染卡片
+  cards.forEach((card, ci) => {
+    if (card.heading) {
+      output += '<div style="background:#fff;border-radius:16px;border:1px solid #e2e8f0;padding:16px 20px;margin-bottom:16px;">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #f1f5f9;">' +
+        '<div style="width:6px;height:20px;background:#6366f1;border-radius:999px;flex-shrink:0;"></div>' +
+        '<h3 style="font-size:15px;font-weight:700;color:#1e293b;margin:0;">' + card.heading + '</h3>' +
+        '</div>' +
+        '<div>' + card.blocks.map((b, bi) => renderBlockForPrint(b, 'cb' + ci + '-' + bi)).join('') + '</div>' +
+        '</div>';
+    } else {
+      card.blocks.forEach((b, bi) => {
+        output += renderBlockForPrint(b, 'free' + bi);
+      });
+    }
+  });
+
+  return sanitizeHtml(output);
+}
+
+// ========================
+// 主渲染函数 (React)
 // ========================
 // 可折叠的 AI 思考过程组件
 const CollapsibleThink = ({ html }) => {
