@@ -21,6 +21,29 @@ const renderMemoText = (text) => {
   return renderMarkdown(text);
 };
 
+// 消息时间格式化：今天显示"今天 HH:mm"，昨天显示"昨天 HH:mm"，更早显示"M月D日 HH:mm"
+const formatMessageTime = (timestamp) => {
+  if (!timestamp) return '';
+  const date = new Date(timestamp);
+  if (isNaN(date.getTime())) return '';
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today.getTime() - 86400000);
+  const msgDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const timeStr = `${hours}:${minutes}`;
+
+  if (msgDate.getTime() === today.getTime()) {
+    return `今天 ${timeStr}`;
+  } else if (msgDate.getTime() === yesterday.getTime()) {
+    return `昨天 ${timeStr}`;
+  } else {
+    return `${date.getMonth() + 1}月${date.getDate()}日 ${timeStr}`;
+  }
+};
+
 export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAddTodo, onUpdateTodo, onDeleteTodo, onSaveSettings, todos }) => {
   // 🌟 核心修复：状态声明正确移入组件内部
   const [memos, setMemos] = useState([]);
@@ -210,7 +233,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   }, [convListTriggerRect]);
 
   const [messages, setMessages] = useState([
-    { role: 'assistant', content: '您好！我是您的私人基金copilot。我已经读取了您当前的全部持仓和流水，以及您手握的空闲资金。请问有什么可以帮您？' }
+    { role: 'assistant', content: '您好！我是您的私人基金copilot。我已经读取了您当前的全部持仓和流水，以及您手握的空闲资金。请问有什么可以帮您？', timestamp: new Date().toISOString() }
   ]);
   const[input, setInput] = useState('');
   const [loadingConvs, setLoadingConvs] = useState({}); // 🌟 按对话追踪加载状态，支持多对话并发
@@ -322,7 +345,8 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
             role: 'assistant',
             content: activeConvId === 'default'
                 ? '您好！我是您的私人基金copilot。我已经读取了您当前的全部持仓和流水，以及您手握的空闲资金。请问有什么可以帮您？'
-                : '新对话已开启。我已加载您的最新持仓数据，请问有什么可以帮您？'
+                : '新对话已开启。我已加载您的最新持仓数据，请问有什么可以帮您？',
+            timestamp: new Date().toISOString()
         }]);
       }
     }, (err) => {
@@ -391,7 +415,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
     const defaultTitle = `新对话 ${dateLabel} ${timeLabel}`;
     activeConvIdRef.current = newId; // 🌟 同步更新 ref
     setActiveConvId(newId);
-    const welcomeMsg = [{ role: 'assistant', content: '新对话已开启。我已加载您的最新持仓数据，请问有什么可以帮您？' }];
+    const welcomeMsg = [{ role: 'assistant', content: '新对话已开启。我已加载您的最新持仓数据，请问有什么可以帮您？', timestamp: createdAt }];
     setMessages(welcomeMsg);
     // 立即写入 Firestore 确保对话出现在列表中
     if (user && db) {
@@ -466,22 +490,26 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
     pendingConvIdRef.current = requestConvId; // 🌟 标记在途请求，切回时恢复loading状态
 
     // 生成用户消息
-    const newMessages = [...messages, { role: 'user', content: userMessage || '请帮我分析这张图片中的数据。' }];
+    const newMessages = [...messages, { role: 'user', content: userMessage || '请帮我分析这张图片中的数据。', timestamp: new Date().toISOString() }];
     setMessages(newMessages);
     setConvLoading(requestConvId, true);
 
     // 🌟 保存用户消息到发起请求的对话（直接用 requestConvId，不用闭包中的 activeConvId）
     if (user && db) {
       const reqMsgRef = doc(db, 'artifacts', appId, 'users', user.uid, 'chat_convs', requestConvId);
-      const lastUserMsg = [...newMessages].reverse().find(m => m.role === 'user');
-      const title = lastUserMsg
-        ? lastUserMsg.content.substring(0, 30) + (lastUserMsg.content.length > 30 ? '...' : '')
-        : '新对话';
-      setDoc(reqMsgRef, {
-        messages: newMessages,
-        title,
-        createdAt: conversations[requestConvId]?.createdAt || new Date().toISOString()
-      }, { merge: true }).catch(err => console.error('❌ 保存用户消息失败:', err));
+      const existingCreatedAt = conversations[requestConvId]?.createdAt;
+      const payload = { messages: newMessages };
+      // title 仅在新建对话时写入；已存在的对话保留用户手动编辑的标题
+      if (!existingCreatedAt) {
+        const lastUserMsg = [...newMessages].reverse().find(m => m.role === 'user');
+        payload.title = lastUserMsg
+          ? lastUserMsg.content.substring(0, 30) + (lastUserMsg.content.length > 30 ? '...' : '')
+          : '新对话';
+        payload.createdAt = new Date().toISOString();
+      } else {
+        payload.createdAt = existingCreatedAt;
+      }
+      setDoc(reqMsgRef, payload, { merge: true }).catch(err => console.error('❌ 保存用户消息失败:', err));
     }
 
     // 🌟 核心拦截层：如果有附件，先走 OCR/解析，不调用 AI
@@ -511,7 +539,8 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
                 role: 'assistant',
                 content: `我已经为您解析了上传的文件。为确保交易决策基于**绝对真实的数据**，请您先核对以下提取内容，确认无误后再交由大脑进行深度分析：`,
                 isAction: true,
-                actions: [actionCard]
+                actions: [actionCard],
+                timestamp: new Date().toISOString()
             }];
 
             setMessages(finalMessages);
@@ -524,7 +553,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
         } catch (e) {
             console.error(`❌ 文件解析失败 [${requestConvId}]:`, e);
             if (activeConvIdRef.current === requestConvId) {
-              setMessages([...newMessages, { role: 'assistant', content: `❌ 文件解析失败: ${e.message}` }]);
+              setMessages([...newMessages, { role: 'assistant', content: `❌ 文件解析失败: ${e.message}`, timestamp: new Date().toISOString() }]);
             }
         } finally {
             pendingConvIdRef.current = null;
@@ -551,14 +580,21 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
         try {
           let replyMessages;
           if (typeof reply === 'object' && reply !== null && reply.type === 'ACTION_REQUIRED') {
-            replyMessages = [...newMessages, { role: 'assistant', content: reply.text || '已为您生成操作卡片', isAction: true, actions: (reply.payload || []).map((act, idx) => ({ ...act, cardId: `act_${Date.now()}_${idx}`, status: 'pending' })) }];
+            replyMessages = [...newMessages, { role: 'assistant', content: reply.text || '已为您生成操作卡片', isAction: true, actions: (reply.payload || []).map((act, idx) => ({ ...act, cardId: `act_${Date.now()}_${idx}`, status: 'pending' })), timestamp: new Date().toISOString() }];
           } else {
-            replyMessages = [...newMessages, { role: 'assistant', content: typeof reply === 'string' ? reply : String(reply || '') }];
+            replyMessages = [...newMessages, { role: 'assistant', content: typeof reply === 'string' ? reply : String(reply || ''), timestamp: new Date().toISOString() }];
           }
           const origRef = doc(db, 'artifacts', appId, 'users', user.uid, 'chat_convs', requestConvId);
-          const lastUserMsg2 = [...replyMessages].reverse().find(m => m.role === 'user');
-          const title2 = lastUserMsg2 ? lastUserMsg2.content.substring(0, 30) + (lastUserMsg2.content.length > 30 ? '...' : '') : '新对话';
-          setDoc(origRef, { messages: replyMessages, title: title2, createdAt: conversations[requestConvId]?.createdAt || new Date().toISOString() }, { merge: true }).catch(err => console.error('❌ 归档AI回复失败:', err));
+          const existingCreatedAt2 = conversations[requestConvId]?.createdAt;
+          const archivePayload = { messages: replyMessages };
+          if (!existingCreatedAt2) {
+            const lastUserMsg2 = [...replyMessages].reverse().find(m => m.role === 'user');
+            archivePayload.title = lastUserMsg2 ? lastUserMsg2.content.substring(0, 30) + (lastUserMsg2.content.length > 30 ? '...' : '') : '新对话';
+            archivePayload.createdAt = new Date().toISOString();
+          } else {
+            archivePayload.createdAt = existingCreatedAt2;
+          }
+          setDoc(origRef, archivePayload, { merge: true }).catch(err => console.error('❌ 归档AI回复失败:', err));
         } catch (archiveErr) {
           console.error('❌ 归档AI回复时异常:', archiveErr);
         }
@@ -579,25 +615,34 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
               role: 'assistant',
               content: reply.text || `已为您生成以下操作卡片，请逐一核对：`,
               isAction: true,
-              actions: actionsWithStatus
+              actions: actionsWithStatus,
+              timestamp: new Date().toISOString()
           }];
       } else {
-          finalMessages = [...newMessages, { role: 'assistant', content: typeof reply === 'string' ? reply : String(reply || '') }];
+          finalMessages = [...newMessages, { role: 'assistant', content: typeof reply === 'string' ? reply : String(reply || ''), timestamp: new Date().toISOString() }];
       }
       setMessages(finalMessages);
 
       // 写入 Firestore（用 requestConvId 直写，不依赖 saveMessages 闭包中的 activeConvId）
       if (user && db) {
         const finalRef = doc(db, 'artifacts', appId, 'users', user.uid, 'chat_convs', requestConvId);
-        const lastUserFinal = [...finalMessages].reverse().find(m => m.role === 'user');
-        const finalTitle = lastUserFinal ? lastUserFinal.content.substring(0, 30) + (lastUserFinal.content.length > 30 ? '...' : '') : '新对话';
-        setDoc(finalRef, { messages: finalMessages, title: finalTitle, createdAt: conversations[requestConvId]?.createdAt || new Date().toISOString() }, { merge: true }).catch(err => console.error('❌ 保存AI回复失败:', err));
+        const existingCreatedAt3 = conversations[requestConvId]?.createdAt;
+        const finalPayload = { messages: finalMessages };
+        // title 仅在新建对话时写入；已存在的对话保留用户手动编辑的标题
+        if (!existingCreatedAt3) {
+          const lastUserFinal = [...finalMessages].reverse().find(m => m.role === 'user');
+          finalPayload.title = lastUserFinal ? lastUserFinal.content.substring(0, 30) + (lastUserFinal.content.length > 30 ? '...' : '') : '新对话';
+          finalPayload.createdAt = new Date().toISOString();
+        } else {
+          finalPayload.createdAt = existingCreatedAt3;
+        }
+        setDoc(finalRef, finalPayload, { merge: true }).catch(err => console.error('❌ 保存AI回复失败:', err));
       }
     } catch (e) {
       console.error(`❌ AI 对话异常 [${requestConvId}]:`, e);
       // 🌟 始终在当前对话显示错误（仅当用户未切走时）
       if (activeConvIdRef.current === requestConvId) {
-        const errorMessages = [...newMessages, { role: 'assistant', content: `❌ 抱歉，连接大脑失败：${e.message}` }];
+        const errorMessages = [...newMessages, { role: 'assistant', content: `❌ 抱歉，连接大脑失败：${e.message}`, timestamp: new Date().toISOString() }];
         setMessages(errorMessages);
         if (user && db) {
           const errRef = doc(db, 'artifacts', appId, 'users', user.uid, 'chat_convs', requestConvId);
@@ -631,7 +676,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
           if (m.isAction && m.actions) return { ...m, actions: m.actions.map(a => a.cardId === action.cardId ? { ...a, status: 'cancelled' } : a) };
           return m;
         });
-        return [...newMsgs, { role: 'assistant', content: `❌ 操作失败: ${e.message}` }];
+        return [...newMsgs, { role: 'assistant', content: `❌ 操作失败: ${e.message}`, timestamp: new Date().toISOString() }];
       });
     } finally {
       setConvLoading(confirmConvId, false);
@@ -658,7 +703,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
     setConfirmAction({
       message: '确定要清空记忆吗？这会清空之前的聊天上下文。',
       onConfirm: () => {
-        const resetMsg = [{ role: 'assistant', content: '记忆已清空。我已经重新加载了您的最新账本底表，我们重新开始吧！' }];
+        const resetMsg = [{ role: 'assistant', content: '记忆已清空。我已经重新加载了您的最新账本底表，我们重新开始吧！', timestamp: new Date().toISOString() }];
         setMessages(resetMsg);
         if (user && db) {
           saveMessages(resetMsg);
@@ -670,7 +715,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   // 【核心性能修复】使用 useMemo 阻断打字时触发的无效历史消息渲染
   const renderedMessages = useMemo(() => {
     return messages.map((msg, idx) => (
-      <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+      <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} group`}>
         <div className={`flex max-w-[90%] sm:max-w-[90%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
           <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 shadow-sm ring-2 ring-white dark:ring-slate-900 ${msg.role === 'user' ? 'bg-blue-500 text-white ml-2 sm:ml-3' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 mr-2 sm:mr-3'}`}>
             {msg.role === 'user' ? <User size={14} /> : <Bot size={15} />}
@@ -700,6 +745,10 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
               </div>
             )}
           </div>
+        </div>
+        {/* 消息时间戳 — 默认隐藏，鼠标悬浮显示 */}
+        <div className={`text-[10px] text-slate-400 dark:text-slate-500 mt-1 px-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 select-none ${msg.role === 'user' ? 'text-right mr-1' : 'text-left ml-1'}`}>
+          {formatMessageTime(msg.timestamp)}
         </div>
       </div>
     ));

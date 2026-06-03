@@ -74,6 +74,8 @@ const removeGlobalSplash = () => {
 
 // 【新增】引入对话副驾驶组件
 import { PortfolioChat } from './components/Chat/PortfolioChat';
+// 烟花粒子背景动画
+import FireworksBackground from './components/Effects/FireworksBackground';
 
 export default function App() {
   const[user, setUser] = useState(null); 
@@ -1118,6 +1120,7 @@ export default function App() {
                 </div>
 
                 <div className="bg-gradient-to-br from-slate-800 to-slate-900 dark:from-slate-900 dark:to-black rounded-[0.875rem] shadow-apple-lg border border-slate-700/60 p-6 sm:p-8 relative overflow-hidden text-white transition-all hover:shadow-xl hover:-translate-y-1 duration-300">
+                  <FireworksBackground />
                   <div className="absolute -right-6 -bottom-6 text-white/5 pointer-events-none transform-gpu"><TrendingUp size={140}/></div>
                   <h3 className="text-lg sm:text-xl font-bold mb-4 flex items-center relative z-10 text-blue-400">
                     <TrendingUp className="mr-2" size={24}/> 静态复利推演
