@@ -127,7 +127,7 @@ export const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually 
         {localFund.mode === 'manual' ? (
           <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-[0.875rem] border border-slate-200/60 dark:border-slate-700/40 animate-in zoom-in-95 duration-300">
             <label className="text-sm font-bold mb-1.5 block text-slate-700 dark:text-slate-300 pl-1">现持仓总市值 (元)</label>
-            <SmartInput value={localFund.currentValueRaw} onChange={(raw) => setLocalFund({...localFund, currentValueRaw: raw})} placeholder="请输入现在的账面总价值，支持简单公式如 =10000+500" className="w-full py-3 shadow-sm bg-white tabular-nums" />
+            <SmartInput value={localFund.currentValueRaw} onChange={(raw) => setLocalFund({...localFund, currentValueRaw: raw})} placeholder="请输入现在的账面总价值，支持简单公式如 =10000+500" className="w-full py-2.5 shadow-sm bg-white tabular-nums" />
           </div>
         ) : (
           <div className="apple-card p-5 border-l-4 border-l-blue-500 animate-in zoom-in-95 duration-300 space-y-4 shadow-sm">
@@ -208,13 +208,13 @@ export const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually 
               </div>
 
               <div className="flex-1 flex flex-col lg:flex-row gap-2 lg:gap-4">
-                 <SmartInput isDate={true} value={tx.date} onChange={(val) => handleUpdateTx(index, 'date', val)} className="w-full lg:w-36 py-2 text-sm bg-slate-50 dark:bg-slate-800/50 border-transparent hover:border-slate-300 focus:bg-white dark:focus:bg-slate-900" />
+                 <SmartInput isDate={true} value={tx.date} onChange={(val) => handleUpdateTx(index, 'date', val)} className="w-full lg:w-[8.5rem]" />
                  <div className="flex flex-1 gap-2">
                    <AppleSelect
                      value={tx.type || (evaluateExpression(tx.amountRaw) < 0 ? 'buy' : 'sell')}
                      onChange={(val) => handleUpdateTx(index, 'type', val)}
                      className="w-32"
-                     triggerClassName="text-sm border-transparent bg-slate-50 dark:bg-slate-800/50 rounded-[0.75rem] py-4 px-1 sm:px-2 focus:ring-blue-500/40 focus:border-blue-500 font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                     triggerClassName="text-sm border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-[0.75rem] py-2.5 px-2 sm:px-2.5 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 font-bold text-slate-600 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600 transition-colors"
                      options={[
                        { value: 'buy', label: '买入建仓' },
                        { value: 'sell', label: '卖出提现' },
@@ -230,7 +230,7 @@ export const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually 
                         value={tx.amountRaw} 
                        onChange={(raw) => handleUpdateTx(index, 'amountRaw', raw)} 
                        placeholder="输入金额 (绝对值即可)" 
-                       className={`w-full py-2 pl-9 font-mono font-medium text-base sm:text-lg bg-slate-50 dark:bg-slate-800/50 border-transparent hover:border-slate-300 focus:bg-white dark:focus:bg-slate-900 ${meta.color}`} 
+                       className={`w-full py-2.5 pl-9 pr-3 font-mono font-medium text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 focus:outline-none transition-all duration-300 hover:border-slate-300 dark:hover:border-slate-600 ${meta.color}`}
                       />
                    </div>
                  </div>
@@ -240,7 +240,7 @@ export const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually 
             </div>
           )})}
 
-          <button type="button" onClick={() => setLocalFund({...localFund, transactions:[...localFund.transactions, { id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }]})} className="w-full mt-2 py-3.5 border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-600 rounded-[0.875rem] flex items-center justify-center text-sm font-bold text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 transition-all bg-slate-50/50 hover:bg-blue-50/50 dark:bg-slate-800/20 dark:hover:bg-blue-900/20 active:scale-[0.99]">
+          <button type="button" onClick={() => setLocalFund({...localFund, transactions:[...localFund.transactions, { id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }]})} className="w-full mt-2 py-2.5 border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-600 rounded-[0.875rem] flex items-center justify-center text-sm font-bold text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 transition-all bg-slate-50/50 hover:bg-blue-50/50 dark:bg-slate-800/20 dark:hover:bg-blue-900/20 active:scale-[0.99]">
             <Plus size={18} className="mr-2" /> 继续添加交易记录
           </button>
         </div>

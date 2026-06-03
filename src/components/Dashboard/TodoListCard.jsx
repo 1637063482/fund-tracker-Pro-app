@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { CheckCircle2, Circle, Trash2, Plus, Clock, Target, AlertCircle, Flag } from 'lucide-react';
 import { AppleSelect } from '../UI/AppleSelect';
 import { AnimatedModal } from '../UI/AnimatedModal';
+import { Tooltip } from '../UI/Tooltip';
 import { usePrivacyFormat } from '../../hooks/usePrivacyFormat';
 
 export const TodoListCard = ({ todos, onAddTodo, onToggleTodo, onDeleteTodo, settings }) => {
@@ -18,6 +19,23 @@ export const TodoListCard = ({ todos, onAddTodo, onToggleTodo, onDeleteTodo, set
   const [formPriority, setFormPriority] = useState('medium');
   const [formErrors, setFormErrors] = useState({});
   const [shakeKey, setShakeKey] = useState(0);
+
+  // 重置表单字段到初始状态
+  const resetForm = () => {
+    setFormCode('');
+    setFormName('');
+    setFormAmount('');
+    setFormCondition('');
+    setFormPriority('medium');
+    setFormType('buy');
+    setFormErrors({});
+  };
+
+  // 关闭表单弹窗（同时重置状态）
+  const closeForm = () => {
+    resetForm();
+    setShowForm(false);
+  };
 
   const handleManualAdd = (e) => {
     e.preventDefault();
@@ -37,7 +55,7 @@ export const TodoListCard = ({ todos, onAddTodo, onToggleTodo, onDeleteTodo, set
       isCompleted: false,
       createdAt: new Date().toISOString()
     });
-    setFormCode(''); setFormName(''); setFormAmount(''); setFormCondition('');
+    resetForm();
     return true;
   };
 
@@ -47,27 +65,36 @@ export const TodoListCard = ({ todos, onAddTodo, onToggleTodo, onDeleteTodo, set
   // 🌟 核心算法：双重排序 (先按优先级从高到低，同优先级按创建时间从新到旧)
   const sortTodos = (list) => {
       return list.sort((a, b) => {
-          const weightA = priorityWeight[a.priority] || 2; 
+          const weightA = priorityWeight[a.priority] || 2;
           const weightB = priorityWeight[b.priority] || 2;
-          if (weightA !== weightB) return weightB - weightA; 
-          return new Date(b.createdAt) - new Date(a.createdAt); 
+          if (weightA !== weightB) return weightB - weightA;
+          return new Date(b.createdAt) - new Date(a.createdAt);
       });
   };
 
   const pendingTodos = sortTodos(todos.filter(t => !t.isCompleted));
   const completedTodos = sortTodos(todos.filter(t => t.isCompleted));
 
-  // 优先级小旗帜组件
+  // 优先级小旗帜组件 — 使用项目统一的 Tooltip 替代原生 title 属性
   const PriorityBadge = ({ priority, isCompleted }) => {
-      if (isCompleted) return null; 
-      if (priority === 'high') return <span className="flex shrink-0 items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 shadow-sm" title="高优先级"><Flag size={12}/></span>;
-      if (priority === 'low') return <span className="flex shrink-0 items-center justify-center w-5 h-5 rounded-full bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" title="低优先级"><Flag size={12}/></span>;
-      return <span className="flex shrink-0 items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400" title="中优先级"><Flag size={12}/></span>;
+      if (isCompleted) return null;
+      const config = {
+        high:   { color: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 shadow-sm', label: '高优先级 — 紧急处理，置顶显示' },
+        medium: { color: 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400 shadow-sm', label: '中优先级 — 常规跟进' },
+        low:    { color: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 shadow-sm', label: '低优先级 — 远端观察' },
+      }[priority] || { color: 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400 shadow-sm', label: '中优先级 — 常规跟进' };
+      return (
+        <Tooltip content={config.label}>
+          <span className={`flex shrink-0 items-center justify-center w-5 h-5 rounded-full ${config.color} cursor-default`}>
+            <Flag size={12}/>
+          </span>
+        </Tooltip>
+      );
   };
 
   const renderTodoItem = (todo) => (
     <div key={todo.id} className={`group flex items-start p-4 rounded-[0.875rem] border transition-all duration-300 relative overflow-hidden ${todo.isCompleted ? 'bg-slate-50 dark:bg-slate-800/30 border-transparent opacity-60' : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 hover:shadow-sm hover:-translate-y-px'}`}>
-      
+
       {/* 🌟 视觉强化：高优先级左侧给个醒目的红色小边栏 */}
       {!todo.isCompleted && todo.priority === 'high' && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-red-500"></div>}
 
@@ -118,7 +145,7 @@ export const TodoListCard = ({ todos, onAddTodo, onToggleTodo, onDeleteTodo, set
         </div>
 
         {showForm && (
-          <AnimatedModal onClose={() => setShowForm(false)} triggerRect={triggerRect} speed={settings.animationSpeed || 1.0}>
+          <AnimatedModal onClose={closeForm} triggerRect={triggerRect} speed={settings.animationSpeed || 1.0}>
             {(close) => (
             <form onSubmit={(e) => { if (handleManualAdd(e)) close(); }} className={`bg-white dark:bg-slate-900 rounded-[1.25rem] shadow-apple-2xl p-6 mx-4 max-w-lg w-full border border-slate-200/60 dark:border-slate-700/40 space-y-3 ${Object.keys(formErrors).length > 0 ? 'animate-shake' : ''}`} onClick={e => e.stopPropagation()} key={shakeKey}>
               <h3 className="text-base font-bold text-slate-800 dark:text-white">新建交易计划</h3>
@@ -148,7 +175,7 @@ export const TodoListCard = ({ todos, onAddTodo, onToggleTodo, onDeleteTodo, set
                 {formErrors.condition && <p className="text-[11px] text-red-500 mt-0.5">{formErrors.condition}</p>}
               </div>
               <div className="flex gap-2 pt-1">
-                <button type="button" onClick={close} className="flex-1 py-2.5 text-sm text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">取消</button>
+                <button type="button" onClick={closeForm} className="flex-1 py-2.5 text-sm text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">取消</button>
                 <button type="submit" className="flex-1 py-2.5 bg-blue-500 text-white text-sm font-medium rounded-full hover:bg-blue-600 transition-colors active:scale-[0.97]">添加计划</button>
               </div>
             </form>

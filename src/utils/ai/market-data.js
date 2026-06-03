@@ -1,5 +1,6 @@
 // 行情数据抓取模块：腾讯分时图、多周期 K 线数据、东方财富市场情绪指标聚合拉取
 import { buildProxyUrl } from './proxy';
+import { PROXY_NODES } from '../../config/constants';
 
 // 格式化现金流数据
 export const formatCashFlows = (transactions) => {
@@ -132,49 +133,107 @@ export const fetchAdvancedMarketData = async (settings) => {
   let upCount = 0;
   let downCount = 0;
 
-  // 动作 1：获取全市场涨跌家数 (东财)
-  try {
+  // =========================================================================
+  // 动作 1：获取全市场涨跌家数 (东财) — 三级容灾策略
+  // 问题根因：单一 allorigins.win 代理被东财 Cloudflare 返回 HTTP 522
+  // 修复方案：A 自定义代理 → B JSONP 原生绕过 → C 五节点轮询
+  // =========================================================================
+  {
     const emUrl = 'https://push2.eastmoney.com/api/qt/ulist.np/get?secids=1.000001,0.399001&fields=f104,f105,f106';
-    let emFetchUrl = buildProxyUrl(settings, emUrl);
-    if (settings.proxyMode !== 'custom' || !settings.customProxyUrl) {
-      emFetchUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(emUrl)}`;
-    }
-
-    const emRes = await fetch(emFetchUrl, { cache: 'no-store' });
-    if (!emRes.ok) throw new Error(`HTTP ${emRes.status}`);
-
-    const rawText = await emRes.text();
-    if (!rawText) throw new Error("空响应");
-
-    let emData;
-    try { emData = JSON.parse(rawText); } catch (e) {
-      console.error("🚨 [情绪探针] JSON 解析失败！原始内容为:", rawText.substring(0, 200) + "...");
-      throw new Error("非有效 JSON");
-    }
-
     let actualEmData = null;
-    if (settings.proxyMode === 'custom') {
-      actualEmData = emData;
-    } else if (emData.contents) {
+
+    // 策略 A：自定义代理（用户配置了专用代理时优先，延迟最低）
+    if (settings.proxyMode === 'custom' && settings.customProxyUrl) {
       try {
-        actualEmData = typeof emData.contents === 'string' ? JSON.parse(emData.contents) : emData.contents;
-      } catch (e) { /* ignore */ }
+        const emFetchUrl = buildProxyUrl(settings, emUrl);
+        console.log('🔍 [情绪探针-A] 尝试自定义代理...');
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 8000);
+        const emRes = await fetch(emFetchUrl, { cache: 'no-store', signal: ctrl.signal });
+        clearTimeout(timer);
+        if (emRes.ok) {
+          actualEmData = await emRes.json();
+          console.log('✅ [情绪探针-A] 自定义代理成功');
+        }
+      } catch (e) {
+        console.warn('⚠️ [情绪探针-A] 自定义代理失败:', e.message);
+      }
     }
 
-    console.dir(actualEmData);
+    // 策略 B：JSONP 脚本注入（东财原生支持 cb=jQuery... 回调参数，完全绕过 CORS 和代理）
+    if (!actualEmData) {
+      try {
+        console.log('🔍 [情绪探针-B] 尝试 JSONP 原生绕过...');
+        const jsonpResult = await new Promise((resolve, reject) => {
+          const callbackName = `em_sentiment_${Date.now()}`;
+          const script = document.createElement('script');
+          script.referrerPolicy = 'no-referrer';
+          const timer = setTimeout(() => {
+            script.remove();
+            delete window[callbackName];
+            reject(new Error('JSONP 超时 (8s)'));
+          }, 8000);
 
+          window[callbackName] = (data) => {
+            clearTimeout(timer);
+            script.remove();
+            delete window[callbackName];
+            resolve(data);
+          };
+          script.onerror = () => {
+            clearTimeout(timer);
+            script.remove();
+            delete window[callbackName];
+            reject(new Error('JSONP 脚本加载失败'));
+          };
+          script.src = `${emUrl}&cb=${callbackName}&_=${Date.now()}`;
+          document.head.appendChild(script);
+        });
+        if (jsonpResult?.data?.diff) {
+          actualEmData = jsonpResult;
+          console.log('✅ [情绪探针-B] JSONP 成功');
+        }
+      } catch (e) {
+        console.warn('⚠️ [情绪探针-B] JSONP 失败:', e.message);
+      }
+    }
+
+    // 策略 C：多公共代理节点轮询（复用 PROXY_NODES 容灾链，每个节点 10s 超时）
+    if (!actualEmData) {
+      for (let i = 0; i < PROXY_NODES.length; i++) {
+        const node = PROXY_NODES[i];
+        try {
+          console.log(`🔍 [情绪探针-C${i + 1}] 尝试 ${node.name}...`);
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 10000);
+          const rawText = await node.fetcher(emUrl);
+          clearTimeout(timer);
+          if (!rawText) throw new Error('空响应');
+          // 各代理节点返回格式不同：AllOrigins-JSON 返回 contents 字符串，其他返回原始文本
+          const parsed = JSON.parse(rawText);
+          if (parsed?.data?.diff) {
+            actualEmData = parsed;
+            console.log(`✅ [情绪探针-C${i + 1}] ${node.name} 成功`);
+            break;
+          }
+        } catch (e) {
+          console.warn(`⚠️ [情绪探针-C${i + 1}] ${node.name} 失败:`, e.message);
+        }
+      }
+    }
+
+    // 解析最终结果
     if (actualEmData?.data?.diff && Array.isArray(actualEmData.data.diff)) {
-      actualEmData.data.diff.forEach((market, index) => {
-        const up = market.f104 || 0;
-        const down = market.f105 || 0;
-        upCount += up;
-        downCount += down;
+      actualEmData.data.diff.forEach((market) => {
+        upCount += market.f104 || 0;
+        downCount += market.f105 || 0;
       });
+      console.log(`📊 [情绪探针] 涨跌家数获取成功: ↑${upCount} / ↓${downCount}`);
+    } else if (!actualEmData) {
+      console.warn('❌ [情绪探针] 全部策略均失败（A/B/C 三级均未命中），涨跌比数据暂不可用。请检查网络或代理配置。');
     } else {
-      console.warn("⚠️ [情绪探针] 请求成功，但未找到有效的 diff 数组结构。");
+      console.warn('⚠️ [情绪探针] 数据返回但缺少 diff 结构，实际 keys:', Object.keys(actualEmData).join(', '));
     }
-  } catch (e) {
-    console.error("❌ [情绪探针] 抓取失败:", e.message);
   }
 
   // 动作 2：抓取核心宽基量价形态 + 异步多周期探针

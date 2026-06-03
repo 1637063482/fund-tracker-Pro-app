@@ -184,6 +184,21 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   const [convListTriggerRect, setConvListTriggerRect] = useState(null);
   const [isConvListOpening, setIsConvListOpening] = useState(true);
   const [isConvListClosing, setIsConvListClosing] = useState(false);
+  const [editingConvId, setEditingConvId] = useState(null);
+  const [editTitleValue, setEditTitleValue] = useState('');
+
+  const handleStartEditTitle = useCallback((convId, currentTitle) => {
+    setEditingConvId(convId);
+    setEditTitleValue(currentTitle || '');
+  }, []);
+
+  const handleSaveTitle = useCallback(async (convId) => {
+    const newTitle = editTitleValue.trim();
+    if (newTitle && user && db) {
+      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'chat_convs', convId), { title: newTitle }).catch(() => {});
+    }
+    setEditingConvId(null);
+  }, [editTitleValue, user, db]);
 
   const convListFlip = useMemo(() => {
     if (!convListTriggerRect) return null;
@@ -219,6 +234,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
 
   const prevIsLoadingRef = useRef(isLoading);
   const prevMsgLengthRef = useRef(messages.length);
+  const prevScrollMsgLenRef = useRef(messages.length);
   const prevIsOpenRef = useRef(isOpen);
   const scrollTimerRef = useRef(null);
 
@@ -246,16 +262,17 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
     };
   }, [messages.length, isOpen, settings.animationSpeed, scrollToBottom]);
 
-  // 场景 3：AI 回复完成 → 补一次滚底（等 ActionCard / markdown 最终渲染）
+  // 场景 3：AI 回复完成 → 补一次滚底。仅当有新消息加入时才滚，卡片状态变更不触发
   useEffect(() => {
-    if (isOpen && !isLoading && prevIsLoadingRef.current) {
+    if (isOpen && !isLoading && prevIsLoadingRef.current && messages.length > prevScrollMsgLenRef.current) {
       scrollTimerRef.current = setTimeout(() => scrollToBottom('smooth'), 250);
     }
     prevIsLoadingRef.current = isLoading;
+    prevScrollMsgLenRef.current = messages.length;
     return () => {
       if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
     };
-  }, [isLoading, isOpen, scrollToBottom]);
+  }, [isLoading, isOpen, messages.length, scrollToBottom]);
 
   // 从 chat_convs 集合直接加载对话列表（每个文档自带 title+createdAt）
   useEffect(() => {
@@ -348,18 +365,18 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   // 保存消息 + 同步更新 title 到消息文档自身
   const saveMessages = useCallback(async (msgs) => {
     if (!user || !db) return;
-    const lastUserMsg = [...msgs].reverse().find(m => m.role === 'user');
-    const title = lastUserMsg
-      ? lastUserMsg.content.substring(0, 30) + (lastUserMsg.content.length > 30 ? '...' : '')
-      : (msgs.length > 1 ? '新对话' : '空对话');
     const msgRef = doc(db, 'artifacts', appId, 'users', user.uid, 'chat_convs', activeConvId);
-    // 🌟 只在首次创建时写入 createdAt，后续合并时不覆盖已有时间戳
     const existingCreatedAt = conversations[activeConvId]?.createdAt;
-    const payload = { messages: msgs, title };
-    if (existingCreatedAt) {
-      payload.createdAt = existingCreatedAt;
-    } else {
+    const payload = { messages: msgs };
+    // title 仅在新建对话时写入，已存在的对话保留手动编辑的标题
+    if (!existingCreatedAt) {
+      const lastUserMsg = [...msgs].reverse().find(m => m.role === 'user');
+      payload.title = lastUserMsg
+        ? lastUserMsg.content.substring(0, 30) + (lastUserMsg.content.length > 30 ? '...' : '')
+        : (msgs.length > 1 ? '新对话' : '空对话');
       payload.createdAt = new Date().toISOString();
+    } else {
+      payload.createdAt = existingCreatedAt;
     }
     setDoc(msgRef, payload, { merge: true }).catch(err => console.error('❌ 保存对话失败，请检查 Firestore 规则:', err));
   }, [user, db, activeConvId, conversations]);
@@ -1180,21 +1197,41 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
                           key={convId}
                           className={`flex items-center border-b border-slate-100 dark:border-slate-700/30 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${convId === activeConvId ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
                         >
-                          {/* 点击区域：切换对话 */}
-                          <button
+                          {/* 点击区域：切换对话（改为 div，避免 button 嵌套 button 导致内层按钮不可见） */}
+                          <div
                             onClick={() => handleSwitchConversation(convId)}
-                            className="flex-1 text-left px-5 py-4 min-w-0"
+                            className="flex-1 text-left px-5 py-4 min-w-0 cursor-pointer"
                           >
-                            <div className={`font-medium text-sm truncate ${convId === activeConvId ? 'text-blue-600 dark:text-blue-400' : 'text-slate-700 dark:text-slate-300'}`}>{meta.title || '新对话'}</div>
+                            {editingConvId === convId ? (
+                              <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                                <input
+                                  value={editTitleValue}
+                                  onChange={e => setEditTitleValue(e.target.value)}
+                                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSaveTitle(convId); } if (e.key === 'Escape') { e.preventDefault(); setEditingConvId(null); } }}
+                                  className="flex-1 text-sm font-medium px-2 py-1 rounded-md border border-blue-300 dark:border-blue-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                                  autoFocus
+                                  onFocus={e => e.target.select()}
+                                />
+                                <button onClick={(e) => { e.stopPropagation(); handleSaveTitle(convId); }} className="p-1 text-green-500 hover:bg-green-50 dark:hover:bg-green-900/30 rounded shrink-0"><Check size={14} /></button>
+                              </div>
+                            ) : (
+                              <span className={`font-medium text-sm truncate block ${convId === activeConvId ? 'text-blue-600 dark:text-blue-400' : 'text-slate-700 dark:text-slate-300'}`}>{meta.title || '新对话'}</span>
+                            )}
                             <div className="text-[11px] text-slate-400 mt-1">{meta.createdAt ? new Date(meta.createdAt).toLocaleString('zh-CN') : ''}</div>
-                          </button>
+                          </div>
+                          {/* 编辑标题按钮 */}
+                          <Tooltip content="编辑标题">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleStartEditTitle(convId, meta.title); }}
+                              className="shrink-0 p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-[0.625rem] transition-colors active:scale-90"
+                            ><Edit size={16} /></button>
+                          </Tooltip>
                           {/* 删除按钮 — default 对话不可删除 */}
                           {convId !== 'default' && (
                             <Tooltip content="删除对话">
                               <button
                                 onClick={(e) => handleDeleteConversation(convId, e)}
                                 className="shrink-0 p-2 mr-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-[0.625rem] transition-colors active:scale-90"
-                                title="删除对话"
                               >
                                 <Trash2 size={16} />
                               </button>

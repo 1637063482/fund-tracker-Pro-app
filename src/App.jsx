@@ -29,6 +29,7 @@ import { useBaseFundsData } from './hooks/useBaseFundsData';
 import { usePortfolioStats } from './hooks/usePortfolioStats';
 import { useModalAnimation } from './hooks/useModalAnimation';
 import { AnimatedModal } from './components/UI/AnimatedModal';
+import { SmartInput } from './components/UI/SmartInput';
 import { Tooltip } from './components/UI/Tooltip';
 import { toast, ToastContainer } from './components/UI/Toast';
 import { PrivacyModeContext } from './contexts/PrivacyModeContext';
@@ -604,15 +605,13 @@ export default function App() {
     handleSaveSettings({ targetAmount: numVal }); 
   };
 
-  const handleTargetDateChange = (e) => {
-    const val = e.target.value;
+  const handleTargetDateChange = (val) => {
     setSettings(prev => ({...prev, targetDate: val}));
     if (targetDateTimeoutRef.current) clearTimeout(targetDateTimeoutRef.current);
     targetDateTimeoutRef.current = setTimeout(() => { handleSaveSettings({ targetDate: val }); }, 800);
   };
 
-  const handleTargetDateBlur = (e) => {
-    const val = e.target.value;
+  const handleTargetDateBlur = (val) => {
     if (targetDateTimeoutRef.current) clearTimeout(targetDateTimeoutRef.current);
     handleSaveSettings({ targetDate: val });
   };
@@ -1036,7 +1035,7 @@ export default function App() {
                           onBlur={handleIdleFundsBlur}
                           placeholder={showAmounts ? '例如: 10000' : '****'}
                           readOnly={!showAmounts}
-                          className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] dark:bg-slate-900 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 focus:outline-none transition-all duration-300 shadow-sm font-mono text-indigo-700 dark:text-indigo-300 font-bold bg-indigo-50 dark:bg-indigo-900/20"
+                          className="w-full px-3 py-2.5 text-sm border border-slate-200 dark:border-slate-700 rounded-[0.75rem] dark:bg-slate-900 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 focus:outline-none transition-all duration-300 shadow-sm font-mono text-indigo-700 dark:text-indigo-300 font-bold bg-indigo-50 dark:bg-indigo-900/20"
                         />
                       </div>
                       <div>
@@ -1047,17 +1046,16 @@ export default function App() {
                           onChange={handleTargetAmountChange}
                           onBlur={handleTargetAmountBlur}
                           readOnly={!showAmounts}
-                          className="w-full px-3 py-2 border border-slate-200 rounded-[0.75rem] dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 focus:outline-none transition-all duration-300"
+                          className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-[0.75rem] dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 focus:outline-none transition-all duration-300"
                         />
                       </div>
                       <div>
                         <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 block">预计达成日期</label>
-                         <input 
-                          type="date" 
-                          value={settings.targetDate} 
-                          onChange={handleTargetDateChange} 
-                          onBlur={handleTargetDateBlur}
-                          className="w-full px-3 py-2 border border-slate-200 rounded-[0.75rem] dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 focus:outline-none transition-all duration-300" 
+                        <SmartInput
+                          isDate={true}
+                          value={settings.targetDate}
+                          onChange={handleTargetDateChange}
+                          className="w-full"
                         />
                       </div>
                       <div className="sm:col-span-2 mt-1">
@@ -1068,7 +1066,7 @@ export default function App() {
                            onChange={handleTargetRateChange} 
                            placeholder="例如: 5"
                            step="0.01"
-                           className="w-full px-3 py-2 font-bold text-blue-600 dark:text-blue-400 bg-slate-50 border border-slate-200 rounded-[0.75rem] dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 focus:outline-none transition-all duration-300"
+                           className="w-full px-3 py-3.5 text-sm font-bold text-blue-600 dark:text-blue-400 bg-slate-50 border border-slate-200 rounded-[0.75rem] dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 focus:outline-none transition-all duration-300"
                         />
                       </div>
                     </div>
