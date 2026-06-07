@@ -1,4 +1,5 @@
-// AI 工具定义注册表：集中管理所有 AI Function Calling 工具的 JSON Schema，description 已精简以降低 Token 消耗
+// AI 工具定义注册表：集中管理所有 AI Function Calling 工具的 JSON Schema
+// description 已精简：仅保留功能描述，使用规则/限制/警告统一在 System Prompt 中说明
 export const defineTools = (settings) => {
   const tools = [];
 
@@ -7,8 +8,8 @@ export const defineTools = (settings) => {
     type: "function",
     function: {
       name: "get_realtime_fund_data",
-      description: "获取单只或少数(≤3只)公募基金的最新净值、同类排名、阶段涨跌幅。同时查≥4只请用 get_batch_fund_data 批量接口。",
-      parameters: { type: "object", properties: { fundCode: { type: "string" } }, required: ["fundCode"] }
+      description: "获取单只或少数(≤3只)公募基金的最新净值、同类排名、阶段涨跌幅。≥4只请用 get_batch_fund_data。",
+      parameters: { type: "object", properties: { fundCode: { type: "string", description: "基金6位数代码" } }, required: ["fundCode"] }
     }
   });
 
@@ -18,12 +19,12 @@ export const defineTools = (settings) => {
       type: "function",
       function: {
         name: "google_macro_search",
-        description: "【仅限新闻/政策查询】搜索引擎，专门查询宏观经济政策、央行操作、突发金融事件等定性资讯。🚨 绝对禁止用于获取任何数字数据——净值用 get_realtime_fund_data，走势用 get_fund_history_data，指数用 get_market_historical_intraday。查到即接受，禁止无限重搜。",
+        description: "搜索引擎，查询宏观经济政策、央行操作、突发金融事件等定性资讯。禁止用于获取数字数据。",
         parameters: {
           type: "object",
           properties: {
-            query: { type: "string" },
-            timeRange: { type: "string", enum: ["qdr:d", "qdr:w", "qdr:m", "all"], description: "时间范围：qdr:d(24h), qdr:w(1周), qdr:m(1月), all(不限)。默认 qdr:d" }
+            query: { type: "string", description: "搜索关键词" },
+            timeRange: { type: "string", enum: ["qdr:d", "qdr:w", "qdr:m", "all"], description: "qdr:d=24h, qdr:w=1周, qdr:m=1月, all=不限" }
           },
           required: ["query"]
         }
@@ -36,8 +37,8 @@ export const defineTools = (settings) => {
     type: "function",
     function: {
       name: "get_fund_history_data",
-      description: "获取公募基金过去30个交易日的历史净值序列，用于走势分析、画图对比、相关性计算。",
-      parameters: { type: "object", properties: { fundCode: { type: "string" } }, required: ["fundCode"] }
+      description: "获取公募基金过去30个交易日的历史净值序列，用于走势分析、画图、相关性计算。",
+      parameters: { type: "object", properties: { fundCode: { type: "string", description: "基金6位数代码" } }, required: ["fundCode"] }
     }
   });
 
@@ -47,12 +48,12 @@ export const defineTools = (settings) => {
       type: "function",
       function: {
         name: "tavily_news_search",
-        description: "【仅限新闻事件】专门查询大盘异动原因、突发财经新闻、政策解读等定性文字信息。搜索结果来自财联社、华尔街见闻等财经快讯源。🚨 禁止用于查任何数字类数据。",
+        description: "查询大盘异动原因、突发财经新闻、政策解读等定性信息。禁止用于查数字数据。",
         parameters: {
           type: "object",
           properties: {
-            query: { type: "string", description: "如：'今日 A股 暴跌 核心原因'" },
-            recency: { type: "string", enum: ["d1", "d3", "w1"], description: "新鲜度：d1(24h), d3(3天), w1(1周)" }
+            query: { type: "string", description: "如：今日A股暴跌核心原因" },
+            recency: { type: "string", enum: ["d1", "d3", "w1"], description: "d1=24h, d3=3天, w1=1周" }
           },
           required: ["query"]
         }
@@ -66,22 +67,22 @@ export const defineTools = (settings) => {
       type: "function",
       function: {
         name: "exa_research",
-        description: "【仅限深度研报/观点】专门搜索机构研报、投资策略分析、中长期宏观展望等长文内容。🚨 禁止用于查净值、价格等具体数字。",
-        parameters: { type: "object", properties: { query: { type: "string", description: "如：'创金合信中证红利低波动指数A 天天基金 最新季报 解读'" } }, required: ["query"] }
+        description: "搜索机构研报、投资策略分析、中长期宏观展望等长文内容。禁止用于查净值/价格。",
+        parameters: { type: "object", properties: { query: { type: "string", description: "如：创金合信中证红利低波动指数A最新季报解读" } }, required: ["query"] }
       }
     });
   }
 
-  // 武器5b：东财财经快讯（替代搜索，直接返回结构化新闻 JSON）
+  // 武器5b：财经快讯聚合
   tools.push({
     type: "function",
     function: {
       name: "get_financial_news",
-      description: "【首选财经资讯源】多源聚合引擎：新浪财经4栏目(综合/A股/债券/基金/全球) + Tavily+Serper搜索并行拉取，自动去重合并，一次调用覆盖全面消息面。topic: macro(宏观/全球) / market(A股/港股) / bond(债券) / fund(基金)。🚨 仅用于新闻资讯，禁止查数字数据。",
+      description: "多源聚合财经资讯：新浪财经4栏目+Tavily+Serper并行拉取，自动去重。topic: macro/market/bond/fund。仅用于新闻资讯，禁止查数字。",
       parameters: {
         type: "object",
         properties: {
-          topic: { type: "string", enum: ["macro", "market", "bond", "fund"], description: "资讯主题：macro=宏观政策/央行/全球, market=A股/大盘异动, bond=债券市场, fund=基金相关" }
+          topic: { type: "string", enum: ["macro", "market", "bond", "fund"], description: "macro=宏观/全球, market=A股/港股, bond=债券, fund=基金" }
         },
         required: ["topic"]
       }
@@ -93,7 +94,7 @@ export const defineTools = (settings) => {
     type: "function",
     function: {
       name: "update_ledger",
-      description: "用户确认买入/卖出/补录交易时调用。支持批量传入多条记账指令。",
+      description: "用户确认买入/卖出/补录交易时调用，支持批量传入多条记账指令。",
       parameters: {
         type: "object",
         properties: {
@@ -104,10 +105,10 @@ export const defineTools = (settings) => {
               type: "object",
               properties: {
                 fundCode: { type: "string", description: "基金6位数代码" },
-                fundName: { type: "string" },
+                fundName: { type: "string", description: "基金名称" },
                 amount: { type: "number", description: "交易金额" },
-                actionType: { type: "string", enum: ["buy", "sell", "delete"] },
-                date: { type: "string", description: "交易日期，格式 YYYY-MM-DD" }
+                actionType: { type: "string", enum: ["buy", "sell", "delete"], description: "buy=买入, sell=卖出, delete=删除" },
+                date: { type: "string", description: "交易日期 YYYY-MM-DD" }
               },
               required: ["fundCode", "amount", "actionType"]
             }
@@ -118,28 +119,28 @@ export const defineTools = (settings) => {
     }
   });
 
-  // 武器7：画图
+  // 武器7：画图 — 参数最大，压缩重点
   tools.push({
     type: "function",
     function: {
       name: "generate_trend_chart",
-      description: "绘制金融图表：多基金净值对比、击球区色带、支撑/阻力线、双Y轴。支持 line/bar/area/scatter，14种预定义色+hex色码。",
+      description: "绘制金融图表：多基金净值对比、击球区色带、支撑阻力线、双Y轴。支持 line/bar/area/scatter，14种预定义色。",
       parameters: {
         type: "object",
         properties: {
           title: { type: "string", description: "图表标题" },
-          chartType: { type: "string", enum: ["line", "bar", "area", "scatter"], description: "图表主类型" },
-          labels: { type: "array", items: { type: "string" }, description: "X轴标签" },
-          enableDualAxis: { type: "boolean", description: "启用双Y轴(不同量纲数据对比时使用)" },
+          chartType: { type: "string", enum: ["line", "bar", "area", "scatter"], description: "图表类型" },
+          labels: { type: "array", items: { type: "string" }, description: "X轴标签(日期)" },
+          enableDualAxis: { type: "boolean", description: "启用双Y轴" },
           datasets: {
             type: "array",
-            description: "数据序列，每个数据集可独立指定颜色、线型、填充、点和所属Y轴",
+            description: "数据序列",
             items: {
               type: "object",
               properties: {
                 label: { type: "string", description: "图例标签" },
                 data: { type: "array", items: { type: "number" }, description: "数据值" },
-                color: { type: "string", description: "颜色名(red/green/blue/orange/purple/yellow/cyan/pink/teal/indigo/amber/lime/rose/slate)或#rrggbb" },
+                color: { type: "string", description: "色名(red/green/blue/orange/purple/yellow/cyan/pink/teal/indigo/amber/lime/rose/slate)或#rrggbb" },
                 fill: { type: "boolean", description: "填充线条下方区域" },
                 dashed: { type: "boolean", description: "虚线" },
                 showPoints: { type: "boolean", description: "显示数据点标记" },
@@ -151,15 +152,12 @@ export const defineTools = (settings) => {
           },
           horizontalLines: {
             type: "array",
-            description: "水平参考线（均线、净值、支撑阻力位、技术指标等），根据分析需要自行选择。⚠️ 只画关键内容，标注总数控制在≤7个，保持图表可读性。",
+            description: "水平参考线。标注总数≤5个。",
             items: {
               type: "object",
               properties: {
-                value: { type: "number" },
-                color: {
-                  type: "string",
-                  description: "强制由你(AI)决定！支持色名(red/green/blue/orange/purple/yellow/cyan/pink/teal/indigo/amber/lime/rose/slate)或#rrggbb。请根据业务语义自主配图，例如支撑位用 green，压力位用 red。"
-                },
+                value: { type: "number", description: "Y轴数值" },
+                color: { type: "string", description: "色名或#rrggbb" },
                 label: { type: "string", description: "文字标注" },
                 dashed: { type: "boolean", description: "默认true" }
               },
@@ -168,16 +166,13 @@ export const defineTools = (settings) => {
           },
           horizontalBands: {
             type: "array",
-            description: "水平色带（击球区、估值带、通道带等），根据分析需要自行选择。⚠️ 只画关键内容，避免过度标注影响阅读。",
+            description: "水平色带(击球区/估值带)。标注总数≤3个。",
             items: {
               type: "object",
               properties: {
-                yMin: { type: "number" },
-                yMax: { type: "number" },
-                color: {
-                  type: "string",
-                  description: "强制由你(AI)决定！支持色名(red/green/blue/orange/purple/yellow/cyan/pink/teal/indigo/amber/lime/rose/slate)或#rrggbb。请根据业务语义自主配图，例如支撑位用 green，压力位用 red。"
-                },
+                yMin: { type: "number", description: "下边界" },
+                yMax: { type: "number", description: "上边界" },
+                color: { type: "string", description: "色名或#rrggbb" },
                 label: { type: "string", description: "文字标注" }
               },
               required: ["yMin", "yMax"]
@@ -185,15 +180,12 @@ export const defineTools = (settings) => {
           },
           verticalLines: {
             type: "array",
-            description: "竖直线，标记重要日期节点（买入日、分红日、政策事件、周期转折等）。⚠️ 只画关键事件，≤3条为宜。",
+            description: "竖直线(重要日期)。≤3条。",
             items: {
               type: "object",
               properties: {
-                value: { type: "string", description: "X轴标签值（日期），必须与labels中的某个值匹配，如 '04-15'" },
-                color: {
-                  type: "string",
-                  description: "强制由你(AI)决定！支持色名或#rrggbb。"
-                },
+                value: { type: "string", description: "X轴标签值(日期)，需匹配labels中的值" },
+                color: { type: "string", description: "色名或#rrggbb" },
                 label: { type: "string", description: "文字标注" },
                 dashed: { type: "boolean", description: "默认true" }
               },
@@ -202,18 +194,15 @@ export const defineTools = (settings) => {
           },
           trendLines: {
             type: "array",
-            description: "斜线/趋势线，连接两个数据坐标点（上升趋势线、下降通道、非水平支撑阻力等）。⚠️ 只画最核心的趋势结构线，≤2条为宜。",
+            description: "斜线/趋势线。≤2条。",
             items: {
               type: "object",
               properties: {
-                x1: { type: "string", description: "起点X轴标签（日期），如 '03-01'" },
+                x1: { type: "string", description: "起点日期，如03-01" },
                 y1: { type: "number", description: "起点Y值" },
-                x2: { type: "string", description: "终点X轴标签（日期），如 '04-15'" },
+                x2: { type: "string", description: "终点日期，如04-15" },
                 y2: { type: "number", description: "终点Y值" },
-                color: {
-                  type: "string",
-                  description: "强制由你(AI)决定！支持色名或#rrggbb。"
-                },
+                color: { type: "string", description: "色名或#rrggbb" },
                 label: { type: "string", description: "文字标注" },
                 dashed: { type: "boolean", description: "默认true" }
               },
@@ -222,16 +211,13 @@ export const defineTools = (settings) => {
           },
           pointMarkers: {
             type: "array",
-            description: "数据点标注，标记局部峰值、谷底、突破点、入场信号等关键点位。⚠️ 只画最重要的点位，≤3个为宜。",
+            description: "关键点位标注(峰/谷/突破/信号)。≤3个。",
             items: {
               type: "object",
               properties: {
-                x: { type: "string", description: "X轴标签（日期），必须与labels中的某个值匹配" },
-                y: { type: "number", description: "Y值（数据点数值）" },
-                color: {
-                  type: "string",
-                  description: "强制由你(AI)决定！支持色名或#rrggbb。"
-                },
+                x: { type: "string", description: "X轴标签(日期)，需匹配labels中的值" },
+                y: { type: "number", description: "数据点数值" },
+                color: { type: "string", description: "色名或#rrggbb" },
                 label: { type: "string", description: "标注文字" }
               },
               required: ["x", "y"]
@@ -248,12 +234,12 @@ export const defineTools = (settings) => {
     type: "function",
     function: {
       name: "execute_javascript",
-      description: "JS 数学引擎，用于复利、收益率倒算、相关性、波动率等精确财务计算。支持 Math 标准库，代码必须以 return 语句结束。",
+      description: "JS数学引擎：复利、收益率倒算、相关性(皮尔逊)、波动率、MDD等精确财务计算。代码必须以return结束。",
       parameters: {
         type: "object",
         properties: {
-          code: { type: "string", description: "JS 代码，如：'let p=80000; let r=0.035/12; let m=7; return p*Math.pow(1+r,m);'" },
-          reasoning: { type: "string", description: "编写此代码的原因（供审计）" }
+          code: { type: "string", description: "JS代码，如：return 80000*Math.pow(1+0.035/12,7);" },
+          reasoning: { type: "string", description: "编写此代码的原因(供审计)" }
         },
         required: ["code", "reasoning"]
       }
@@ -265,7 +251,7 @@ export const defineTools = (settings) => {
     type: "function",
     function: {
       name: "get_batch_fund_data",
-      description: "批量查询多只基金(≤15只)的最新净值和表现。同时查≥4只时优先用此接口。",
+      description: "批量查询多只基金(≤15只)的最新净值和表现。≥4只时优先用此。",
       parameters: {
         type: "object",
         properties: { fundCodes: { type: "array", items: { type: "string" }, description: "基金代码数组，最多15只", maxItems: 15 } },
@@ -279,12 +265,12 @@ export const defineTools = (settings) => {
     type: "function",
     function: {
       name: "get_fund_comparison",
-      description: "【多基金横向对比引擎】同时比较2-5只基金的核心指标：收益(1/3/6/12月+3年)、排名、最大回撤、波动率、估值分位、费率(申购+管理估费)、规模、基金经理、相关性矩阵。用于选基决策、换仓评估、阵型补充。一次调用=6-9次手动工具调用，直接输出对比报告+综合评级。",
+      description: "横向对比2-5只基金的收益/排名/回撤/波动率/费率/规模/经理/相关性矩阵，输出综合评级。",
       parameters: {
         type: "object",
         properties: {
-          fundCodes: { type: "array", items: { type: "string" }, description: "要对比的基金代码数组，2-5只", minItems: 2, maxItems: 5 },
-          aspect: { type: "string", enum: ["full", "returns", "risk", "cost"], description: "对比侧重：full=全面(默认), returns=只看收益, risk=风控维度, cost=费率规模" }
+          fundCodes: { type: "array", items: { type: "string" }, description: "基金代码数组，2-5只", minItems: 2, maxItems: 5 },
+          aspect: { type: "string", enum: ["full", "returns", "risk", "cost"], description: "full=全面, returns=只看收益, risk=风控, cost=费率规模" }
         },
         required: ["fundCodes"]
       }
@@ -296,7 +282,7 @@ export const defineTools = (settings) => {
     type: "function",
     function: {
       name: "manage_plan_todo",
-      description: "新增/修改/删除交易计划。日期必须用绝对格式(如5/28)，禁止'明天''后天''下周一'等相对词。更新或删除现有计划必须传入待办ID。",
+      description: "新增/修改/删除交易计划。日期必须用绝对格式(如5/28)，禁止相对词。更新/删除现有计划需传入待办ID。",
       parameters: {
         type: "object",
         properties: {
@@ -306,14 +292,14 @@ export const defineTools = (settings) => {
             items: {
               type: "object",
               properties: {
-                manageType: { type: "string", enum: ["add", "update", "delete"] },
-                id: { type: "string", description: "更新/删除时必填：上下文中的字母数字ID" },
-                fundCode: { type: "string", description: "新增时必填：基金代码" },
-                fundName: { type: "string", description: "新增时必填：基金名称" },
-                tradeDirection: { type: "string", enum: ["buy", "sell", "observe"] },
+                manageType: { type: "string", enum: ["add", "update", "delete"], description: "add=新增, update=修改, delete=删除" },
+                id: { type: "string", description: "更新/删除时必填：待办ID" },
+                fundCode: { type: "string", description: "基金代码" },
+                fundName: { type: "string", description: "基金名称" },
+                tradeDirection: { type: "string", enum: ["buy", "sell", "observe"], description: "buy=买入, sell=卖出, observe=观察" },
                 amount: { type: "number", description: "计划交易金额" },
-                condition: { type: "string", description: "触发条件。🚨 强制规则：必须使用绝对物理日期(如\"5/28\"或\"5月28日\")，严禁\"明天\"\"后天\"\"下周一\"\"下周\"\"月底\"\"几天后\"等相对时间词。若基于价格信号触发(如\"跌破1.5时买入\")，直接用价格锚点描述。" },
-                priority: { type: "string", enum: ["high", "medium", "low"] }
+                condition: { type: "string", description: "触发条件。必须用绝对日期(如5/28)或价格锚点(如跌破1.5)。禁止相对时间词。" },
+                priority: { type: "string", enum: ["high", "medium", "low"], description: "high=高优, medium=常规, low=低优" }
               },
               required: ["manageType"]
             }
@@ -329,14 +315,14 @@ export const defineTools = (settings) => {
     type: "function",
     function: {
       name: "update_decision_memo",
-      description: "写入或覆写战略备忘录。target: GLOBAL_CONSTITUTION(财富目标)/GLOBAL_MARKET(宏观锚点)/基金代码(个基纪律)。日期必须用绝对格式。",
+      description: "写入或覆写战略备忘录。target: GLOBAL_CONSTITUTION(财富目标)/GLOBAL_MARKET(宏观锚点)/基金代码(个基纪律)。日期必须用绝对格式。支持Markdown排版。",
       parameters: {
         type: "object",
         properties: {
           target: { type: "string", description: "GLOBAL_CONSTITUTION / GLOBAL_MARKET / 基金代码" },
           targetName: { type: "string", description: "标的名称" },
-          decisionType: { type: "string", enum: ["BUY_STRATEGY", "HOLD_STRATEGY", "BLACK_LIST", "WATCH_GRID", "GLOBAL_MACRO"] },
-          coreLogic: { type: "string", description: "核心逻辑摘要。🚨 强制规则：所有日期/时间引用必须使用绝对物理日期(如\"5/28\"或\"5月28日\")，严禁\"明天\"\"下周\"\"下个月\"\"本月底\"等相对词。价格锚点和基本面逻辑(如\"跌破1.5清仓\"\"PE<10时加仓\")直接用数字表达。🎨 支持 Markdown 格式：可自由使用 **粗体**、`代码`、表格、颜色标记等格式化关键内容，界面将完整渲染你的排版。" }
+          decisionType: { type: "string", enum: ["BUY_STRATEGY", "HOLD_STRATEGY", "BLACK_LIST", "WATCH_GRID", "GLOBAL_MACRO"], description: "战略标签" },
+          coreLogic: { type: "string", description: "核心逻辑摘要。日期用绝对格式(如5/28)，价格锚点用数字。支持Markdown。" }
         },
         required: ["target", "targetName", "decisionType", "coreLogic"]
       }
@@ -357,7 +343,7 @@ export const defineTools = (settings) => {
           equityRatio: { type: "number", description: "真实股票仓位比例，如85%填0.85" },
           sectors: {
             type: "object",
-            description: "申万一级行业分布，键为行业名(字符串)，值为占比数字(0-1)，如 {'电子':0.4, '医药':0.3, '新能源':0.3}"
+            description: "申万一级行业分布，键为行业名(字符串)，值为占比(0-1)，如{'电子':0.4,'医药':0.3}"
           }
         },
         required: ["fundCode", "fundName", "equityRatio", "sectors"]
@@ -370,8 +356,8 @@ export const defineTools = (settings) => {
     type: "function",
     function: {
       name: "get_fund_holdings_penetration",
-      description: "获取基金前十大重仓股明细。拿到数据后归类申万行业、估算仓位，再调用 update_fof_dictionary 入库。",
-      parameters: { type: "object", properties: { fundCode: { type: "string" } }, required: ["fundCode"] }
+      description: "获取基金前十大重仓股明细→归类申万行业→估算仓位→调用 update_fof_dictionary 入库。",
+      parameters: { type: "object", properties: { fundCode: { type: "string", description: "基金6位数代码" } }, required: ["fundCode"] }
     }
   });
 
@@ -380,7 +366,7 @@ export const defineTools = (settings) => {
     type: "function",
     function: {
       name: "get_fund_transaction_history",
-      description: "查看某只基金的完整历史交易流水(买入/卖出/分红)。持仓摘要不含流水，需主动调用此工具获取。",
+      description: "查看某只基金的完整历史交易流水(买入/卖出/分红)。持仓摘要不含流水明细，需主动调用。",
       parameters: {
         type: "object",
         properties: { fundCode: { type: "string", description: "基金6位数代码" } },
@@ -394,41 +380,41 @@ export const defineTools = (settings) => {
     type: "function",
     function: {
       name: "get_market_historical_intraday",
-      description: "获取指数/ETF的多周期OHLC(开高低收)K线结构数据。默认日K 60根。支持period参数切换周K(20周)/月K(12月)。用于复盘量价博弈、检测背离、识别影线形态和支撑阻力位。",
+      description: "获取指数/ETF多周期OHLC(开高低收)K线数据。默认日K 60根，可选周K/月K。用于复盘量价博弈、检测背离、识别支撑阻力。",
       parameters: {
         type: "object",
         properties: {
           code: { type: "string", description: "指数或ETF代码，如 sh000001(上证), sh511260(国债ETF)" },
-          period: { type: "string", enum: ["day", "week", "month"], description: "K线周期：day=日K(默认60根), week=周K(20根), month=月K(12根)" },
-          count: { type: "number", description: "返回根数，默认day=60, week=20, month=12，最大100" }
+          period: { type: "string", enum: ["day", "week", "month"], description: "day=日K(60根), week=周K(20根), month=月K(12根)" },
+          count: { type: "number", description: "返回根数，最大100" }
         },
         required: ["code"]
       }
     }
   });
 
-  // ========== 新增: 指数估值工具 ==========
+  // 指数估值
   tools.push({
     type: "function",
     function: {
       name: "get_index_valuation",
-      description: "🌟【估值核心工具】获取指数PE(TTM)、PB、ROE、股息率当前值及近似温区判断。支持一次查询最多8个指数。用于双核打分因子1（宏观战略赔率极值）中'估值历史分位'的客观判断，以及判断当前市场整体估值水位。沪深300 PE<11=低估, 11-15=合理, >17=高估；中证500 PE<20=低估, 20-27=合理, >35=高估；创业板指 PE<30=低估, 30-45=合理, >60=高估。⚠️ PE为负表示指数整体亏损，PE失效请用PB辅助。",
+      description: "获取指数PE(TTM)/PB/ROE/股息率当前值及历史分位，支持一次查询最多8个指数。PE为负=指数整体亏损，需改用PB。",
       parameters: {
         type: "object",
         properties: {
-          codes: { type: "string", description: "指数代码，多个用逗号分隔。常用: 000300(沪深300), 000016(上证50), 000905(中证500), 399006(创业板指), 000922(中证红利), 000688(科创50), 000852(中证1000)。默认: 000300" }
+          codes: { type: "string", description: "指数代码，逗号分隔。常用: 000300(沪深300), 000016(上证50), 000905(中证500), 399006(创业板指), 000922(中证红利), 000688(科创50), 000852(中证1000)" }
         },
         required: []
       }
     }
   });
 
-  // ========== 新增: 跨资产数据工具 ==========
+  // 跨资产数据
   tools.push({
     type: "function",
     function: {
       name: "get_cross_asset_data",
-      description: "🌟【跨资产宏观工具】一次获取人民币汇率(USD/CNY)、沪铜主力、SC原油主力、黄金(AU9999)的实时价格与涨跌幅。用于双核打分因子4（跨资产确认）提供汇率、商品、贵金属的客观价格数据。⚠️ 调用时机：执行第四层双核打分前必须调用此工具获取因子4数据。走势方向的影响请结合实际数据自行判断。",
+      description: "一次获取人民币汇率(USD/CNY)、沪铜主力、SC原油主力、黄金(AU9999)的实时价格与涨跌幅。",
       parameters: {
         type: "object",
         properties: {},
@@ -437,12 +423,12 @@ export const defineTools = (settings) => {
     }
   });
 
-  // ========== 新增: 债市深度数据工具 ==========
+  // 债市深度数据
   tools.push({
     type: "function",
     function: {
       name: "get_bond_market_data",
-      description: "🌟【固收核心工具】获取国债指数(000012)与企债指数(000013)的相对走势，输出信用利差方向和风险偏好信号。用于固收打分因子2（股债跷跷板）的信用维度锚定。⚠️ 国债ETF价格数据已由大盘雷达注入，本工具补充信用定价维度。调用时机：分析纯债基金或固收打分前调用。利差方向的影响请结合实际数据自行判断。",
+      description: "获取国债指数(000012)与企债指数(000013)的相对走势，输出信用利差方向和风险偏好信号。",
       parameters: {
         type: "object",
         properties: {},
@@ -451,17 +437,84 @@ export const defineTools = (settings) => {
     }
   });
 
-
-  // ========== 新增: 宏观经济指标工具 ==========
+  // 宏观经济指标
   tools.push({
     type: "function",
     function: {
       name: "get_macro_data",
-      description: "获取最新宏观经济指标：CPI同比(通胀)、制造业PMI(经济景气)。用于判断宏观经济周期位置和货币政策方向。⚠️ M2/社融/LPR等数据请补充联网搜索。数据发布频率为月度，有1-2个月延迟。",
+      description: "获取最新宏观经济指标：CPI同比(通胀)、制造业PMI(经济景气)。M2/社融/LPR需补充联网搜索。数据月度发布，有1-2月延迟。",
       parameters: {
         type: "object",
         properties: {},
         required: []
+      }
+    }
+  });
+
+  // 打分历史快照读取
+  tools.push({
+    type: "function",
+    function: {
+      name: "get_recent_scores",
+      description: "查询最近N个交易日(默认5天)的双核打分快照(权益分F1-F4+动量修正+最终得分+固收分+上次CIO判定)。跨对话共享。",
+      parameters: {
+        type: "object",
+        properties: {
+          days: { type: "number", description: "查询最近几个自然日的打分快照，默认5天" }
+        },
+        required: []
+      }
+    }
+  });
+
+  // 打分快照存储 — 参数压缩重点
+  tools.push({
+    type: "function",
+    function: {
+      name: "store_scoring_snapshot",
+      description: "保存当日双核打分完整快照到云端，供跨对话动量修正和滞回锁定查询。纯分析数据，自动存储。",
+      parameters: {
+        type: "object",
+        properties: {
+          date: { type: "string", description: "打分日期，ISO格式如2026-06-05" },
+          equity: {
+            type: "object",
+            description: "权益打分。未计算则不传。",
+            properties: {
+              totalRaw: { type: "number", description: "因子总分 F1+F2+F3+F4 (0-100)" },
+              F1: { type: "number", description: "宏观赔率分 0-35" },
+              F2: { type: "number", description: "微观反转分 0-25" },
+              F3: { type: "number", description: "量能验证分 0-25" },
+              F4: { type: "number", description: "跨资产确认分 0-15" },
+              momentum: { type: "number", description: "动量修正 -10/+10/0" },
+              final: { type: "number", description: "最终得分 = clamp(totalRaw+momentum, 0, 100)" }
+            },
+            required: ["totalRaw", "F1", "F2", "F3", "F4", "momentum", "final"]
+          },
+          bond: {
+            type: "object",
+            description: "固收打分。未计算则不传。",
+            properties: {
+              totalRaw: { type: "number", description: "因子总分 F1+F2 (0-100)" },
+              F1: { type: "number", description: "宏观利率水位分 0-50" },
+              F2: { type: "number", description: "股债跷跷板分 0-50" },
+              momentum: { type: "number", description: "动量修正" },
+              final: { type: "number", description: "最终得分" }
+            },
+            required: ["totalRaw", "F1", "F2", "momentum", "final"]
+          },
+          verdict: {
+            type: "object",
+            description: "CIO判定结论(用于滞回锁定)",
+            properties: {
+              equityAction: { type: "string", enum: ["BUY_STRATEGY", "HOLD_STRATEGY", "WATCH_GRID", "BLACK_LIST"], description: "权益最终指令" },
+              bondAction: { type: "string", enum: ["BUY_STRATEGY", "HOLD_STRATEGY", "WATCH_GRID", "BLACK_LIST"], description: "固收最终指令" },
+              hysteresisActive: { type: "boolean", description: "是否触发滞回锁定" }
+            },
+            required: ["equityAction", "hysteresisActive"]
+          }
+        },
+        required: ["date", "verdict"]
       }
     }
   });

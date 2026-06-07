@@ -3,16 +3,17 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { MessageSquare, X, Send, RefreshCw, Trash2, Bot, User, Sparkles, Globe, Target, Brain, Activity, Paperclip, Edit, Check, SlidersHorizontal, Plus, ChevronDown, Share2, MessageCircle } from 'lucide-react';
 import { chatWithPortfolioAI } from '../../utils/ai';
 import { extractDataFromImage } from '../../services/fileParser';
+import { debugLog } from '../../utils/debugLog';
 import { renderMarkdown, renderMarkdownForPrint } from '../../utils/renderMarkdown';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { useModalAnimation } from '../../hooks/useModalAnimation';
 import { ActionCard } from './ActionCard';
-import { dispatchAction } from './actionHandlers';
+import { dispatchAction, handleScoreRecord } from './actionHandlers';
 import { ImageModal } from '../UI/ImageModal';
 import { AppleSelect } from '../UI/AppleSelect';
 import { Tooltip } from '../UI/Tooltip';
 import { AnimatedModal } from '../UI/AnimatedModal';
-import { doc, setDoc, getDoc, onSnapshot, collection, query, updateDoc, deleteDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, getDocs, onSnapshot, collection, query, orderBy, limit, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db, appId } from '../../config/firebase';
 
 // 渲染AI备忘录核心逻辑：复用对话框的 Markdown 解析器，AI 可自由选择颜色/格式
@@ -42,6 +43,22 @@ const formatMessageTime = (timestamp) => {
   } else {
     return `${date.getMonth() + 1}月${date.getDate()}日 ${timeStr}`;
   }
+};
+
+// === Firestore 持久化工具：消除 5 处重复的 setDoc 模板 ===
+const persistConversation = (convId, msgs, user, conversations) => {
+  if (!user) return Promise.resolve();
+  const ref = doc(db, 'artifacts', appId, 'users', user.uid, 'chat_convs', convId);
+  const existing = conversations[convId]?.createdAt;
+  const payload = { messages: msgs };
+  if (!existing) {
+    const lastUserMsg = [...msgs].reverse().find(m => m.role === 'user');
+    payload.title = lastUserMsg ? lastUserMsg.content.substring(0, 30) + (lastUserMsg.content.length > 30 ? '...' : '') : '新对话';
+    payload.createdAt = new Date().toISOString();
+  } else {
+    payload.createdAt = existing;
+  }
+  return setDoc(ref, payload, { merge: true });
 };
 
 export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAddTodo, onUpdateTodo, onDeleteTodo, onSaveSettings, todos }) => {
@@ -90,6 +107,30 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   const [confirmTriggerRect, setConfirmTriggerRect] = useState(null);
   const [isMemoClosing, setIsMemoClosing] = useState(false);
   const [isMemoOpening, setIsMemoOpening] = useState(true);
+  const [scoringHistory, setScoringHistory] = useState(null); // 手动拉取打分历史
+  const [isScoringClosing, setIsScoringClosing] = useState(false);
+  const [isScoringOpening, setIsScoringOpening] = useState(true);
+  const [scoringTriggerRect, setScoringTriggerRect] = useState(null);
+  const [isScoringLoading, setIsScoringLoading] = useState(false);
+
+  // 手动拉取打分快照（按需加载，不设实时监听器，避免性能问题）
+  const fetchScoringHistory = useCallback(async () => {
+    if (!user || !db) return;
+    setIsScoringLoading(true);
+    try {
+      const snapRef = collection(db, 'artifacts', appId, 'users', user.uid, 'scoring_snapshots');
+      const q = query(snapRef, orderBy('date', 'desc'), limit(30));
+      const snapshot = await getDocs(q);
+      const data = [];
+      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
+      setScoringHistory(data);
+    } catch (err) {
+      console.error('拉取打分快照失败:', err);
+      setScoringHistory([]);
+    } finally {
+      setIsScoringLoading(false);
+    }
+  }, [user]);
 
   // FLIP calculation for desktop expand-from-button
   const chatFlip = useMemo(() => {
@@ -109,6 +150,15 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
     const by = memoTriggerRect.top + memoTriggerRect.height / 2;
     return { tx: bx - cx, ty: by - cy, scale: Math.max(memoTriggerRect.width / 600, 0.12) };
   }, [memoTriggerRect]);
+
+  const scoringFlip = useMemo(() => {
+    if (!scoringTriggerRect) return null;
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    const bx = scoringTriggerRect.left + scoringTriggerRect.width / 2;
+    const by = scoringTriggerRect.top + scoringTriggerRect.height / 2;
+    return { tx: bx - cx, ty: by - cy, scale: Math.max(scoringTriggerRect.width / 600, 0.12) };
+  }, [scoringTriggerRect]);
 
   const handleFileChange = (e) => {
       const file = e.target.files[0];
@@ -218,7 +268,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   const handleSaveTitle = useCallback(async (convId) => {
     const newTitle = editTitleValue.trim();
     if (newTitle && user && db) {
-      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'chat_convs', convId), { title: newTitle }).catch(() => {});
+      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'chat_convs', convId), { title: newTitle }).catch(err => console.warn('更新对话标题失败:', err));
     }
     setEditingConvId(null);
   }, [editTitleValue, user, db]);
@@ -241,6 +291,17 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   const messagesEndRef = useRef(null);
   const activeConvIdRef = useRef(activeConvId); // 🌟 追踪当前对话ID，防止AI回复串线
   const pendingConvIdRef = useRef(null); // 🌟 追踪哪个对话有正在进行的AI请求，用于恢复loading状态
+  // 性能优化：用 ref 持有高频变化的值，避免 useCallback 依赖数组爆炸导致 renderedMessages 频繁重算
+  const portfolioStatsRef = useRef(portfolioStats);
+  portfolioStatsRef.current = portfolioStats;
+  const todosRef = useRef(todos);
+  todosRef.current = todos;
+  const memosRef = useRef(memos);
+  memosRef.current = memos;
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const conversationsRef = useRef(conversations);
+  conversationsRef.current = conversations;
 
   // 🌟 按对话设置加载状态
   const setConvLoading = useCallback((convId, loading) => {
@@ -335,12 +396,13 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   // 加载当前对话的消息 + 旧版迁移
   useEffect(() => {
     if (!user || !db) return;
+    let cancelled = false;
     const msgRef = doc(db, 'artifacts', appId, 'users', user.uid, 'chat_convs', activeConvId);
-    const unsub = onSnapshot(msgRef, (snap) => {
+    getDoc(msgRef).then(snap => {
+      if (cancelled) return;
       if (snap.exists() && snap.data().messages?.length > 0) {
         setMessages(snap.data().messages);
       } else {
-        // 🌟 核心修复：防止串线！如果切换过去的对话在云端没数据，必须把本地的状态重置为空对话的欢迎语，否则会看到前一个对话的内容
         setMessages([{
             role: 'assistant',
             content: activeConvId === 'default'
@@ -349,9 +411,8 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
             timestamp: new Date().toISOString()
         }]);
       }
-    }, (err) => {
+    }).catch(err => {
       console.error(`❌ 加载对话 [${activeConvId}] 失败:`, err);
-      // 加载失败时保留当前本地消息，避免空白
     });
 
     // 🌟 一次性迁移：旧版 chat/history → chat_convs/default，完成后删除旧文档防止重复覆盖
@@ -360,8 +421,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
       getDoc(legacyRef).then(legacySnap => {
         if (legacySnap.exists() && legacySnap.data().messages?.length > 0) {
           const legacyMsgs = legacySnap.data().messages;
-          // 🌟 修复：用 onSnapshot 已加载的最新数据做比对，而非闭包中的 prev（避免竞态）
-          // 直接检查 chat_convs/default 是否已有 >= 旧数据的消息数，有则跳过迁移
+          // 检查 chat_convs/default 是否已有 >= 旧数据的消息数，有则跳过迁移
           getDoc(msgRef).then(currentSnap => {
             const currentLen = currentSnap.exists() ? (currentSnap.data().messages?.length || 0) : 0;
             if (legacyMsgs.length > currentLen) {
@@ -369,41 +429,25 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
               const lastUserMsg = [...legacyMsgs].reverse().find(m => m.role === 'user');
               const title = lastUserMsg ? lastUserMsg.content.substring(0, 30) : '默认对话';
               setDoc(msgRef, { messages: legacyMsgs, title, createdAt: new Date().toISOString() }, { merge: true }).then(() => {
-                console.log('✅ 旧版 chat/history 已迁移到 chat_convs/default');
-                // 🌟 迁移成功后立即删除旧文档，防止后续刷新时重复覆盖
-                deleteDoc(legacyRef).catch(() => {});
-              }).catch(() => {});
+                debugLog('✅ 旧版 chat/history 已迁移到 chat_convs/default');
+                deleteDoc(legacyRef).catch(err => console.warn('清理旧版chat/history失败:', err));
+              }).catch(err => console.warn('迁移写入chat_convs失败:', err));
             } else {
-              // 当前数据已更新 → 旧文档已无用，直接清理
-              console.log('🧹 chat_convs/default 数据已更新，清理旧版 chat/history');
-              deleteDoc(legacyRef).catch(() => {});
+              debugLog('🧹 chat_convs/default 数据已更新，清理旧版 chat/history');
+              deleteDoc(legacyRef).catch(err => console.warn('清理旧版chat/history失败:', err));
             }
-          }).catch(() => {});
+          }).catch(err => console.warn('读取chat_convs失败:', err));
         }
       }).catch(() => {});
     }
 
-    return () => { unsub(); };
+    return () => { cancelled = true; };
   }, [user, activeConvId]);
 
   // 保存消息 + 同步更新 title 到消息文档自身
   const saveMessages = useCallback(async (msgs) => {
-    if (!user || !db) return;
-    const msgRef = doc(db, 'artifacts', appId, 'users', user.uid, 'chat_convs', activeConvId);
-    const existingCreatedAt = conversations[activeConvId]?.createdAt;
-    const payload = { messages: msgs };
-    // title 仅在新建对话时写入，已存在的对话保留手动编辑的标题
-    if (!existingCreatedAt) {
-      const lastUserMsg = [...msgs].reverse().find(m => m.role === 'user');
-      payload.title = lastUserMsg
-        ? lastUserMsg.content.substring(0, 30) + (lastUserMsg.content.length > 30 ? '...' : '')
-        : (msgs.length > 1 ? '新对话' : '空对话');
-      payload.createdAt = new Date().toISOString();
-    } else {
-      payload.createdAt = existingCreatedAt;
-    }
-    setDoc(msgRef, payload, { merge: true }).catch(err => console.error('❌ 保存对话失败，请检查 Firestore 规则:', err));
-  }, [user, db, activeConvId, conversations]);
+    persistConversation(activeConvId, msgs, user, conversationsRef.current).catch(err => console.error('❌ 保存对话失败:', err));
+  }, [user, activeConvId]);
 
   const handleNewConversation = useCallback(() => {
     const newId = `conv_${Date.now()}`;
@@ -494,23 +538,8 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
     setMessages(newMessages);
     setConvLoading(requestConvId, true);
 
-    // 🌟 保存用户消息到发起请求的对话（直接用 requestConvId，不用闭包中的 activeConvId）
-    if (user && db) {
-      const reqMsgRef = doc(db, 'artifacts', appId, 'users', user.uid, 'chat_convs', requestConvId);
-      const existingCreatedAt = conversations[requestConvId]?.createdAt;
-      const payload = { messages: newMessages };
-      // title 仅在新建对话时写入；已存在的对话保留用户手动编辑的标题
-      if (!existingCreatedAt) {
-        const lastUserMsg = [...newMessages].reverse().find(m => m.role === 'user');
-        payload.title = lastUserMsg
-          ? lastUserMsg.content.substring(0, 30) + (lastUserMsg.content.length > 30 ? '...' : '')
-          : '新对话';
-        payload.createdAt = new Date().toISOString();
-      } else {
-        payload.createdAt = existingCreatedAt;
-      }
-      setDoc(reqMsgRef, payload, { merge: true }).catch(err => console.error('❌ 保存用户消息失败:', err));
-    }
+    // 保存用户消息
+    persistConversation(requestConvId, newMessages, user, conversations).catch(err => console.error('❌ 保存用户消息失败:', err));
 
     // 🌟 核心拦截层：如果有附件，先走 OCR/解析，不调用 AI
     if (attachment) {
@@ -546,10 +575,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
             setMessages(finalMessages);
             removeAttachment(); // 发送后清空附件
 
-            if (user && db) {
-                const reqMsgRef2 = doc(db, 'artifacts', appId, 'users', user.uid, 'chat_convs', requestConvId);
-                setDoc(reqMsgRef2, { messages: finalMessages }, { merge: true }).catch(() => {});
-            }
+            persistConversation(requestConvId, finalMessages, user, conversations).catch(err => console.warn('保存OCR回复失败:', err));
         } catch (e) {
             console.error(`❌ 文件解析失败 [${requestConvId}]:`, e);
             if (activeConvIdRef.current === requestConvId) {
@@ -569,32 +595,30 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
       const activeMarketData = enableMacroRadar
           ? "FETCH_NOW"
           : "【系统指令：用户已手动关闭大盘雷达，本次对话进入纯净模式。严禁读取、臆测或分析任何 A股、债市的大盘宏观走势！请彻底抛弃大盘数据，完全基于用户的具体基金持仓和提问作答。】";
-      console.log('%c[大盘雷达] enableMacroRadar=' + enableMacroRadar + ' | activeMarketData=' + (activeMarketData === 'FETCH_NOW' ? 'FETCH_NOW' : 'PURE_MODE'), 'color: #f59e0b; font-weight: bold;');
-      const reply = await chatWithPortfolioAI(settings, portfolioStats, chatHistory, userMessage, activeMarketData, useWebSearch, todos, memos, setAiStatus);
+      debugLog('%c[大盘雷达] enableMacroRadar=' + enableMacroRadar + ' | activeMarketData=' + (activeMarketData === 'FETCH_NOW' ? 'FETCH_NOW' : 'PURE_MODE'), 'color: #f59e0b; font-weight: bold;');
+      const firestoreContext = user && db ? { db, userId: user.uid, appId } : null;
+      const reply = await chatWithPortfolioAI(settings, portfolioStats, chatHistory, userMessage, activeMarketData, useWebSearch, todos, memos, setAiStatus, firestoreContext);
       setAiStatus(null);
 
       // 🌟 核心防串线：AI 回复到达时，检查用户是否已切到其他对话
       if (activeConvIdRef.current !== requestConvId) {
         // 用户已切换对话！将 AI 回复静默写入原始对话的 Firestore，不更新当前 UI
-        console.log(`⏭️ AI 回复属于对话 [${requestConvId}]，但用户已切到 [${activeConvIdRef.current}]，静默归档`);
+        debugLog(`⏭️ AI 回复属于对话 [${requestConvId}]，但用户已切到 [${activeConvIdRef.current}]，静默归档`);
         try {
           let replyMessages;
           if (typeof reply === 'object' && reply !== null && reply.type === 'ACTION_REQUIRED') {
-            replyMessages = [...newMessages, { role: 'assistant', content: reply.text || '已为您生成操作卡片', isAction: true, actions: (reply.payload || []).map((act, idx) => ({ ...act, cardId: `act_${Date.now()}_${idx}`, status: 'pending' })), timestamp: new Date().toISOString() }];
+            // 自动处理 score_record（打分快照无需用户确认，即使已切走也要存储）
+            const scoreActs = (reply.payload || []).filter(act => act.toolType === 'score_record');
+            const otherActs = (reply.payload || []).filter(act => act.toolType !== 'score_record');
+            for (const scoreAct of scoreActs) {
+              handleScoreRecord({ action: scoreAct, user }).catch(err => console.error('打分快照自动存储失败:', err));
+            }
+            const archiveActions = otherActs.map((act, idx) => ({ ...act, cardId: `act_${Date.now()}_${idx}`, status: 'pending' }));
+          replyMessages = [...newMessages, { role: 'assistant', content: reply.text || (otherActs.length > 0 ? '已为您生成操作卡片' : ''), isAction: otherActs.length > 0, ...(otherActs.length > 0 ? { actions: archiveActions } : {}), timestamp: new Date().toISOString() }];
           } else {
             replyMessages = [...newMessages, { role: 'assistant', content: typeof reply === 'string' ? reply : String(reply || ''), timestamp: new Date().toISOString() }];
           }
-          const origRef = doc(db, 'artifacts', appId, 'users', user.uid, 'chat_convs', requestConvId);
-          const existingCreatedAt2 = conversations[requestConvId]?.createdAt;
-          const archivePayload = { messages: replyMessages };
-          if (!existingCreatedAt2) {
-            const lastUserMsg2 = [...replyMessages].reverse().find(m => m.role === 'user');
-            archivePayload.title = lastUserMsg2 ? lastUserMsg2.content.substring(0, 30) + (lastUserMsg2.content.length > 30 ? '...' : '') : '新对话';
-            archivePayload.createdAt = new Date().toISOString();
-          } else {
-            archivePayload.createdAt = existingCreatedAt2;
-          }
-          setDoc(origRef, archivePayload, { merge: true }).catch(err => console.error('❌ 归档AI回复失败:', err));
+          persistConversation(requestConvId, replyMessages, user, conversations).catch(err => console.error('❌ 归档AI回复失败:', err));
         } catch (archiveErr) {
           console.error('❌ 归档AI回复时异常:', archiveErr);
         }
@@ -606,16 +630,22 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
       // 🔒 到此说明用户仍在原对话中，正常渲染 AI 回复
       let finalMessages;
       if (typeof reply === 'object' && reply !== null && reply.type === 'ACTION_REQUIRED') {
-          const actionsWithStatus = (reply.payload || []).map((act, idx) => ({
+          // 自动处理 score_record 类型（打分快照无需用户确认）
+          const scoreActions = (reply.payload || []).filter(act => act.toolType === 'score_record');
+          const otherActions = (reply.payload || []).filter(act => act.toolType !== 'score_record');
+          for (const scoreAct of scoreActions) {
+            handleScoreRecord({ action: scoreAct, user }).catch(err => console.error('打分快照自动存储失败:', err));
+          }
+          const actionsWithStatus = otherActions.map((act, idx) => ({
               ...act,
               cardId: `act_${Date.now()}_${idx}`,
               status: 'pending'
           }));
           finalMessages = [...newMessages, {
               role: 'assistant',
-              content: reply.text || `已为您生成以下操作卡片，请逐一核对：`,
-              isAction: true,
-              actions: actionsWithStatus,
+              content: reply.text || (otherActions.length > 0 ? `已为您生成以下操作卡片，请逐一核对：` : ''),
+              isAction: otherActions.length > 0,
+              ...(otherActions.length > 0 ? { actions: actionsWithStatus } : {}),
               timestamp: new Date().toISOString()
           }];
       } else {
@@ -623,31 +653,15 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
       }
       setMessages(finalMessages);
 
-      // 写入 Firestore（用 requestConvId 直写，不依赖 saveMessages 闭包中的 activeConvId）
-      if (user && db) {
-        const finalRef = doc(db, 'artifacts', appId, 'users', user.uid, 'chat_convs', requestConvId);
-        const existingCreatedAt3 = conversations[requestConvId]?.createdAt;
-        const finalPayload = { messages: finalMessages };
-        // title 仅在新建对话时写入；已存在的对话保留用户手动编辑的标题
-        if (!existingCreatedAt3) {
-          const lastUserFinal = [...finalMessages].reverse().find(m => m.role === 'user');
-          finalPayload.title = lastUserFinal ? lastUserFinal.content.substring(0, 30) + (lastUserFinal.content.length > 30 ? '...' : '') : '新对话';
-          finalPayload.createdAt = new Date().toISOString();
-        } else {
-          finalPayload.createdAt = existingCreatedAt3;
-        }
-        setDoc(finalRef, finalPayload, { merge: true }).catch(err => console.error('❌ 保存AI回复失败:', err));
-      }
+      // 保存 AI 回复到 Firestore
+      persistConversation(requestConvId, finalMessages, user, conversations).catch(err => console.error('❌ 保存AI回复失败:', err));
     } catch (e) {
       console.error(`❌ AI 对话异常 [${requestConvId}]:`, e);
       // 🌟 始终在当前对话显示错误（仅当用户未切走时）
       if (activeConvIdRef.current === requestConvId) {
         const errorMessages = [...newMessages, { role: 'assistant', content: `❌ 抱歉，连接大脑失败：${e.message}`, timestamp: new Date().toISOString() }];
         setMessages(errorMessages);
-        if (user && db) {
-          const errRef = doc(db, 'artifacts', appId, 'users', user.uid, 'chat_convs', requestConvId);
-          setDoc(errRef, { messages: errorMessages }, { merge: true }).catch(() => {});
-        }
+        persistConversation(requestConvId, errorMessages, user, conversations).catch(err => console.warn('保存错误消息失败:', err));
       }
     } finally {
       // 🌟 无论成功、失败、归档，始终清除该对话的 loading 状态
@@ -659,7 +673,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   const handleConfirmAction = useCallback(async (action, formData = {}) => {
     if (!user || !db || !action) return;
     if (typeof onAddTodo !== 'function') throw new Error("前端传参丢失：onAddTodo 未定义");
-    const confirmConvId = activeConvId;
+    const confirmConvId = activeConvIdRef.current;
     setConvLoading(confirmConvId, true);
     try {
       await dispatchAction(action, formData, {
@@ -667,7 +681,10 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
         setMessages, setConvLoading, activeConvId: confirmConvId,
         onAddTodo, onUpdateTodo, onDeleteTodo,
         enableMacroRadar, useWebSearch,
-        portfolioStats, todos, memos, messages,
+        portfolioStats: portfolioStatsRef.current,
+        todos: todosRef.current,
+        memos: memosRef.current,
+        messages: messagesRef.current,
       });
     } catch (e) {
       console.error("写入失败:", e);
@@ -681,7 +698,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
     } finally {
       setConvLoading(confirmConvId, false);
     }
-  }, [user, settings, onAddTodo, onUpdateTodo, onDeleteTodo, enableMacroRadar, useWebSearch, portfolioStats, todos, memos, messages, activeConvId, setConvLoading]);
+  }, [user, settings, onAddTodo, onUpdateTodo, onDeleteTodo, enableMacroRadar, useWebSearch, setConvLoading]); // activeConvId/portfolioStats/todos/memos/messages via ref 避免级联重建
 
   // 精准取消函数
   const handleCancelAction = useCallback((action) => {
@@ -720,7 +737,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
           <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 shadow-sm ring-2 ring-white dark:ring-slate-900 ${msg.role === 'user' ? 'bg-blue-500 text-white ml-2 sm:ml-3' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 mr-2 sm:mr-3'}`}>
             {msg.role === 'user' ? <User size={14} /> : <Bot size={15} />}
           </div>
-          <div className={`px-4 py-3 text-[15px] leading-relaxed ${msg.role === 'user' ? 'bg-blue-500 text-white rounded-[1.25rem] shadow-apple-sm' : 'bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/60 rounded-[1.25rem] shadow-apple-sm'}`}>
+          <div className={`px-4 py-3 text-[15px] leading-relaxed min-w-0 overflow-x-auto custom-scrollbar ${msg.role === 'user' ? 'bg-blue-500 text-white rounded-[1.25rem] shadow-apple-sm' : 'bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/60 rounded-[1.25rem] shadow-apple-sm'}`}>
             {msg.role === 'user' ? msg.content : renderMarkdown(msg.content)}
             
             {/* 🌟 核心：遍历 msg.actions 渲染多个卡片 */}
@@ -759,7 +776,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
       {/* 右下角悬浮入口按钮 — Apple风格 */}
       <button
         onClick={handleOpen}
-        className={`fixed bottom-6 right-6 p-4 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-apple-xl transition-all duration-300 ease-spring hover:scale-110 active:scale-95 z-40 ring-4 ring-white/80 dark:ring-slate-900/80 ${showButton ? 'scale-100 opacity-100' : 'scale-0 opacity-0'}`}
+        className={`fixed bottom-6 right-6 p-4 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-apple-xl transition-all duration-150 ease-spring hover:scale-110 active:scale-95 z-40 ring-4 ring-white/80 dark:ring-slate-900/80 ${showButton ? 'scale-100 opacity-100' : 'scale-0 opacity-0'}`}
       >
         <MessageSquare size={24} />
         <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-red-500 rounded-full border-2 border-white dark:border-slate-900 shadow-sm" />
@@ -789,6 +806,13 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
                           {memos.length}
                       </span>
                   )}
+                </button>
+              </Tooltip>
+              {/* 打分历史按钮（手动拉取，无实时监听） */}
+              <Tooltip key={`score-tip-${scoringHistory !== null}`} content="量化打分历史">
+                <button onClick={(e) => { setScoringTriggerRect(e.currentTarget.getBoundingClientRect()); setScoringHistory([]); setIsScoringOpening(true); requestAnimationFrame(() => requestAnimationFrame(() => setIsScoringOpening(false))); fetchScoringHistory(); }} className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-[0.625rem] transition-colors relative">
+                  <Activity size={18} />
+                  {isScoringLoading && <span className="absolute inset-0 flex items-center justify-center"><RefreshCw size={12} className="animate-spin text-indigo-500" /></span>}
                 </button>
               </Tooltip>
               {/* 新建对话按钮 */}
@@ -1082,16 +1106,18 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
           {/* AI 战略记忆库弹窗 — Apple风格 */}
           {isMemoModalOpen && (
             <div
-              style={{ transition: `opacity ${0.2 * (settings.animationSpeed || 1) * (isMemoClosing ? 2.0 : 1)}s ease` }}
+              style={{ transition: `opacity ${0.2 * (settings.animationSpeed || 1) * (isMemoClosing ? 2.0 : 1)}s ease-out` }}
               className={`absolute inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm ${isMemoOpening ? 'opacity-0' : isMemoClosing ? 'opacity-0' : 'opacity-100'}`}
               onClick={() => { setIsMemoClosing(true); setTimeout(() => { setIsMemoModalOpen(false); setIsMemoClosing(false); }, Math.round(780 * (settings.animationSpeed || 1) * 2.0)); }}
             >
               <div
                 style={{
-                  transition: `transform ${0.75 * (settings.animationSpeed || 1) * (isMemoClosing ? 2.0 : 1)}s cubic-bezier(0.22, 1, 0.36, 1), opacity ${0.3 * (settings.animationSpeed || 1) * (isMemoClosing ? 2.0 : 1)}s ease`,
+                  transition: isMemoClosing
+                    ? `transform ${0.75 * (settings.animationSpeed || 1) * 2.0}s cubic-bezier(0.22, 1, 0.36, 1), opacity ${0.25 * (settings.animationSpeed || 1)}s ease-out`
+                    : `transform ${0.75 * (settings.animationSpeed || 1)}s cubic-bezier(0.22, 1, 0.36, 1), opacity ${0.75 * (settings.animationSpeed || 1)}s ease-out`,
                   ...(memoFlip && (isMemoOpening || isMemoClosing) ? { transform: `translate(${memoFlip.tx}px, ${memoFlip.ty}px) scale(${memoFlip.scale})`, opacity: 0 } : {})
                 }}
-                className={`w-full max-w-lg bg-slate-50 dark:bg-slate-900 rounded-[1.25rem] shadow-apple-2xl flex flex-col overflow-hidden border border-slate-200/60 dark:border-slate-700/40 ${isMemoOpening || isMemoClosing ? '' : 'scale-100 opacity-100'}`}
+                className={`w-full max-w-xl bg-slate-50 dark:bg-slate-900 rounded-[1.25rem] shadow-apple-2xl flex flex-col overflow-hidden border border-slate-200/60 dark:border-slate-700/40 ${isMemoOpening || isMemoClosing ? '' : 'scale-100 opacity-100'}`}
                 onClick={e => e.stopPropagation()}
               >
 
@@ -1214,13 +1240,15 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
           {/* 历史对话弹窗 */}
           {showConvList && (
             <div
-              style={{ transition: `opacity ${0.2 * (settings.animationSpeed || 1) * (isConvListClosing ? 2.0 : 1)}s ease` }}
+              style={{ transition: `opacity ${0.2 * (settings.animationSpeed || 1) * (isConvListClosing ? 2.0 : 1)}s ease-out` }}
               className={`absolute inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm ${isConvListOpening ? 'opacity-0' : isConvListClosing ? 'opacity-0' : 'opacity-100'}`}
               onClick={() => { setIsConvListClosing(true); setTimeout(() => { setShowConvList(false); setIsConvListClosing(false); }, Math.round(780 * (settings.animationSpeed || 1) * 2.0)); }}
             >
               <div
                 style={{
-                  transition: `transform ${0.75 * (settings.animationSpeed || 1) * (isConvListClosing ? 2.0 : 1)}s cubic-bezier(0.22, 1, 0.36, 1), opacity ${0.3 * (settings.animationSpeed || 1) * (isConvListClosing ? 2.0 : 1)}s ease`,
+                  transition: isConvListClosing
+                    ? `transform ${0.75 * (settings.animationSpeed || 1) * 2.0}s cubic-bezier(0.22, 1, 0.36, 1), opacity ${0.25 * (settings.animationSpeed || 1)}s ease-out`
+                    : `transform ${0.75 * (settings.animationSpeed || 1)}s cubic-bezier(0.22, 1, 0.36, 1), opacity ${0.75 * (settings.animationSpeed || 1)}s ease-out`,
                   ...(convListFlip && (isConvListOpening || isConvListClosing) ? { transform: `translate(${convListFlip.tx}px, ${convListFlip.ty}px) scale(${convListFlip.scale})`, opacity: 0 } : {})
                 }}
                 className="w-full max-w-md max-h-[80vh] bg-white dark:bg-slate-900 rounded-[1.25rem] shadow-apple-2xl flex flex-col overflow-hidden border border-slate-200/60 dark:border-slate-700/40"
@@ -1295,6 +1323,107 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
           )}
         </div> {/* 整个聊天框大界面的 div 闭合处 */}
       </div> {/* 遮罩层的 div 闭合处 */}
+
+      {/* 打分历史查看面板（手动拉取，按需展示） — Apple FLIP 动画 */}
+      {scoringHistory !== null && (
+        <div
+          style={{ transition: `opacity ${0.2 * (settings.animationSpeed || 1) * (isScoringClosing ? 2.0 : 1)}s ease-out` }}
+          className={`fixed inset-0 z-[65] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm ${isScoringOpening ? 'opacity-0' : isScoringClosing ? 'opacity-0' : 'opacity-100'}`}
+          onClick={() => { setIsScoringClosing(true); setTimeout(() => { setScoringHistory(null); setIsScoringClosing(false); }, Math.round(780 * (settings.animationSpeed || 1) * 2.0)); }}
+        >
+          <div
+            style={{
+              transition: isScoringClosing
+                ? `transform ${0.75 * (settings.animationSpeed || 1) * 2.0}s cubic-bezier(0.22, 1, 0.36, 1), opacity ${0.25 * (settings.animationSpeed || 1)}s ease-out`
+                : `transform ${0.75 * (settings.animationSpeed || 1)}s cubic-bezier(0.22, 1, 0.36, 1), opacity ${0.75 * (settings.animationSpeed || 1)}s ease-out`,
+              ...(scoringFlip && (isScoringOpening || isScoringClosing) ? { transform: `translate(${scoringFlip.tx}px, ${scoringFlip.ty}px) scale(${scoringFlip.scale})`, opacity: 0 } : {})
+            }}
+            className="w-full max-w-lg max-h-[80vh] bg-white dark:bg-slate-900 rounded-[1.25rem] shadow-apple-2xl flex flex-col overflow-hidden border border-slate-200/60 dark:border-slate-700/40"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="p-4 border-b border-slate-200/60 dark:border-slate-700/40 flex justify-between items-center bg-white dark:bg-slate-800 shrink-0">
+              <h3 className="font-bold flex items-center text-slate-800 dark:text-slate-200 text-sm">
+                <Activity className="mr-2 text-indigo-500" size={18} />
+                量化打分历史
+              </h3>
+              <button onClick={() => { setIsScoringClosing(true); setTimeout(() => { setScoringHistory(null); setIsScoringClosing(false); }, Math.round(780 * (settings.animationSpeed || 1) * 2.0)); }} className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto custom-scrollbar space-y-3">
+              {scoringHistory.length === 0 ? (
+                <div className="text-center text-slate-400 py-8 text-sm">暂无打分记录</div>
+              ) : (
+                scoringHistory.map((s, i) => (
+                  <div key={s.id} className="bg-slate-50 dark:bg-slate-800/50 rounded-[0.875rem] p-3.5 border border-slate-100 dark:border-slate-700/30">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">{s.date}</span>
+                      <div className="flex items-center gap-1.5">
+                        {s.equity && (
+                          <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full"
+                            style={{
+                              backgroundColor: s.equity.final >= 50 ? 'rgba(52,199,89,0.15)' : s.equity.final >= 35 ? 'rgba(0,122,255,0.15)' : s.equity.final >= 20 ? 'rgba(255,149,0,0.15)' : 'rgba(255,59,48,0.15)',
+                              color: s.equity.final >= 50 ? '#34C759' : s.equity.final >= 35 ? '#007AFF' : s.equity.final >= 20 ? '#FF9500' : '#FF3B30'
+                            }}>
+                            权益{s.equity.final}分
+                          </span>
+                        )}
+                        {s.bond && (
+                          <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full"
+                            style={{
+                              backgroundColor: s.bond.final >= 50 ? 'rgba(52,199,89,0.15)' : s.bond.final >= 35 ? 'rgba(0,122,255,0.15)' : s.bond.final >= 20 ? 'rgba(255,149,0,0.15)' : 'rgba(255,59,48,0.15)',
+                              color: s.bond.final >= 50 ? '#34C759' : s.bond.final >= 35 ? '#007AFF' : s.bond.final >= 20 ? '#FF9500' : '#FF3B30'
+                            }}>
+                            固收{s.bond.final}分
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {s.equity && (
+                      <>
+                        <div className="text-[10px] text-slate-400 mb-1 font-medium tracking-wide">📈 权益打分</div>
+                        <div className="grid grid-cols-3 gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 mb-1.5">
+                          <span>F1 宏观赔率: <b className="text-slate-700 dark:text-slate-300">{s.equity.F1}</b></span>
+                          <span>F2 微观反转: <b className="text-slate-700 dark:text-slate-300">{s.equity.F2}</b></span>
+                          <span>F3 量能验证: <b className="text-slate-700 dark:text-slate-300">{s.equity.F3}</b></span>
+                          <span>F4 跨资产: <b className="text-slate-700 dark:text-slate-300">{s.equity.F4}</b></span>
+                          <span>因子总分: <b className="text-slate-700 dark:text-slate-300">{s.equity.totalRaw}</b></span>
+                          <span>动量修正: <b className={s.equity.momentum > 0 ? 'text-green-500' : s.equity.momentum < 0 ? 'text-red-500' : 'text-slate-500'}>{s.equity.momentum >= 0 ? '+' : ''}{s.equity.momentum ?? 0}</b></span>
+                        </div>
+                      </>
+                    )}
+                    {s.bond && (
+                      <>
+                        <div className="text-[10px] text-slate-400 mb-1 font-medium tracking-wide">📉 固收打分</div>
+                        <div className="grid grid-cols-2 gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 mb-1.5">
+                          <span>F1 利率水位: <b className="text-slate-700 dark:text-slate-300">{s.bond.F1}</b></span>
+                          <span>F2 股债跷跷板: <b className="text-slate-700 dark:text-slate-300">{s.bond.F2}</b></span>
+                          <span>因子总分: <b className="text-slate-700 dark:text-slate-300">{s.bond.totalRaw}</b></span>
+                          <span>动量修正: <b className={s.bond.momentum > 0 ? 'text-green-500' : s.bond.momentum < 0 ? 'text-red-500' : 'text-slate-500'}>{s.bond.momentum >= 0 ? '+' : ''}{s.bond.momentum ?? 0}</b></span>
+                        </div>
+                      </>
+                    )}
+                    {s.verdict && (
+                      <div className="flex items-center gap-2 text-[11px] flex-wrap">
+                        <span className="text-slate-400">CIO判定:</span>
+                        <span className="font-medium" style={{ color: { BUY_STRATEGY: '#34C759', HOLD_STRATEGY: '#007AFF', WATCH_GRID: '#FF9500', BLACK_LIST: '#FF3B30' }[s.verdict.equityAction] || '#6b7280' }}>
+                          权益:{{ BUY_STRATEGY: '买入/加仓', HOLD_STRATEGY: '持有/观望', WATCH_GRID: '战术网格', BLACK_LIST: '回避/减仓' }[s.verdict.equityAction] || '未判定'}
+                        </span>
+                        {s.verdict.bondAction && (
+                          <span className="font-medium" style={{ color: { BUY_STRATEGY: '#34C759', HOLD_STRATEGY: '#007AFF', WATCH_GRID: '#FF9500', BLACK_LIST: '#FF3B30' }[s.verdict.bondAction] || '#6b7280' }}>
+                            固收:{{ BUY_STRATEGY: '买入/加仓', HOLD_STRATEGY: '持有/观望', WATCH_GRID: '战术网格', BLACK_LIST: '回避/减仓' }[s.verdict.bondAction] || '未判定'}
+                          </span>
+                        )}
+                        {s.verdict.hysteresisActive && <span className="text-amber-500 text-[10px]">🛡️ 滞回锁定</span>}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 图片放大查看器 */}
       {zoomedImage && (

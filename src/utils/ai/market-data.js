@@ -1,6 +1,7 @@
 // 行情数据抓取模块：腾讯分时图、多周期 K 线数据、东方财富市场情绪指标聚合拉取
 import { buildProxyUrl } from './proxy';
 import { PROXY_NODES } from '../../config/constants';
+import { debugLog } from '../debugLog';
 
 // 格式化现金流数据
 export const formatCashFlows = (transactions) => {
@@ -70,8 +71,9 @@ export const fetchIntradayTrend = async (code, settings) => {
   }
 };
 
-// 多周期 K 线轨迹提取器（轻量版：收盘价序列+极值区间，OHLC 细节由 get_market_historical_intraday 按需获取）
-export const fetchMultiPeriodKLines = async (code, period = 'day', count = 20, settings) => {
+// 多周期 K 线轨迹提取器：收盘价序列+极值区间+预计算均线，注入 AI 上下文
+// 均线配置: { period: 均线周期, label: 标签 }，如 [{period:20, label:'20MA'}, {period:60, label:'60MA'}]
+export const fetchMultiPeriodKLines = async (code, period = 'day', count = 20, settings, maConfig = null) => {
   try {
     const url = `https://ifzq.gtimg.cn/appstock/app/kline/kline?param=${code},${period},,,${count},`;
     const fetchUrl = buildProxyUrl(settings, url);
@@ -89,6 +91,7 @@ export const fetchMultiPeriodKLines = async (code, period = 'day', count = 20, s
     let maxVal = -Infinity;
     let minVal = Infinity;
     const keyPoints = [];
+    const closePrices = [];
 
     dayData.forEach(day => {
       const high = parseFloat(day[3]);
@@ -99,7 +102,29 @@ export const fetchMultiPeriodKLines = async (code, period = 'day', count = 20, s
       const dateStr = day[0].substring(5);
       const closePrice = parseFloat(day[2]);
       keyPoints.push({ date: dateStr, price: closePrice });
+      closePrices.push(closePrice);
     });
+
+    // 预计算均线
+    let maString = "";
+    if (maConfig && Array.isArray(maConfig) && closePrices.length > 0) {
+      const maParts = [];
+      for (const cfg of maConfig) {
+        const n = cfg.period;
+        if (closePrices.length >= n) {
+          const slice = closePrices.slice(-n);
+          const sum = slice.reduce((a, b) => a + b, 0);
+          const ma = sum / n;
+          const lastClose = closePrices[closePrices.length - 1];
+          const deviation = lastClose > 0 ? ((lastClose - ma) / ma * 100).toFixed(2) : '?';
+          const bias = parseFloat(deviation) > 0 ? `↑+${deviation}%` : parseFloat(deviation) < 0 ? `↓${deviation}%` : '→0%';
+          maParts.push(`${cfg.label}: ${ma.toFixed(2)} (现价偏离 ${bias})`);
+        } else {
+          maParts.push(`${cfg.label}: 数据不足(需${n}根,仅${closePrices.length}根)`);
+        }
+      }
+      if (maParts.length > 0) maString = ` | ${maParts.join(' | ')}`;
+    }
 
     let trendString = "";
     for (let i = 0; i < keyPoints.length; i++) {
@@ -119,7 +144,7 @@ export const fetchMultiPeriodKLines = async (code, period = 'day', count = 20, s
     }
 
     const labelMap = { 'day': '日K线(季波动)', 'week': '周K线(中线中枢)', 'month': '月K线(牛熊大周期)' };
-    return `\n   📅 ${labelMap[period]}: 区间[${minVal.toFixed(2)} ~ ${maxVal.toFixed(2)}] | 完整走势: ${trendString}`;
+    return `\n   📅 ${labelMap[period]}: 区间[${minVal.toFixed(2)} ~ ${maxVal.toFixed(2)}]${maString} | 完整走势: ${trendString}`;
   } catch (e) {
     console.warn(`[多周期探针] 获取 ${code} 的 ${period} K线失败:`, e);
     return "";
@@ -146,14 +171,14 @@ export const fetchAdvancedMarketData = async (settings) => {
     if (settings.proxyMode === 'custom' && settings.customProxyUrl) {
       try {
         const emFetchUrl = buildProxyUrl(settings, emUrl);
-        console.log('🔍 [情绪探针-A] 尝试自定义代理...');
+        debugLog('🔍 [情绪探针-A] 尝试自定义代理...');
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 8000);
         const emRes = await fetch(emFetchUrl, { cache: 'no-store', signal: ctrl.signal });
         clearTimeout(timer);
         if (emRes.ok) {
           actualEmData = await emRes.json();
-          console.log('✅ [情绪探针-A] 自定义代理成功');
+          debugLog('✅ [情绪探针-A] 自定义代理成功');
         }
       } catch (e) {
         console.warn('⚠️ [情绪探针-A] 自定义代理失败:', e.message);
@@ -163,7 +188,7 @@ export const fetchAdvancedMarketData = async (settings) => {
     // 策略 B：JSONP 脚本注入（东财原生支持 cb=jQuery... 回调参数，完全绕过 CORS 和代理）
     if (!actualEmData) {
       try {
-        console.log('🔍 [情绪探针-B] 尝试 JSONP 原生绕过...');
+        debugLog('🔍 [情绪探针-B] 尝试 JSONP 原生绕过...');
         const jsonpResult = await new Promise((resolve, reject) => {
           const callbackName = `em_sentiment_${Date.now()}`;
           const script = document.createElement('script');
@@ -191,7 +216,7 @@ export const fetchAdvancedMarketData = async (settings) => {
         });
         if (jsonpResult?.data?.diff) {
           actualEmData = jsonpResult;
-          console.log('✅ [情绪探针-B] JSONP 成功');
+          debugLog('✅ [情绪探针-B] JSONP 成功');
         }
       } catch (e) {
         console.warn('⚠️ [情绪探针-B] JSONP 失败:', e.message);
@@ -203,7 +228,7 @@ export const fetchAdvancedMarketData = async (settings) => {
       for (let i = 0; i < PROXY_NODES.length; i++) {
         const node = PROXY_NODES[i];
         try {
-          console.log(`🔍 [情绪探针-C${i + 1}] 尝试 ${node.name}...`);
+          debugLog(`🔍 [情绪探针-C${i + 1}] 尝试 ${node.name}...`);
           const ctrl = new AbortController();
           const timer = setTimeout(() => ctrl.abort(), 10000);
           const rawText = await node.fetcher(emUrl);
@@ -213,7 +238,7 @@ export const fetchAdvancedMarketData = async (settings) => {
           const parsed = JSON.parse(rawText);
           if (parsed?.data?.diff) {
             actualEmData = parsed;
-            console.log(`✅ [情绪探针-C${i + 1}] ${node.name} 成功`);
+            debugLog(`✅ [情绪探针-C${i + 1}] ${node.name} 成功`);
             break;
           }
         } catch (e) {
@@ -228,7 +253,7 @@ export const fetchAdvancedMarketData = async (settings) => {
         upCount += market.f104 || 0;
         downCount += market.f105 || 0;
       });
-      console.log(`📊 [情绪探针] 涨跌家数获取成功: ↑${upCount} / ↓${downCount}`);
+      debugLog(`📊 [情绪探针] 涨跌家数获取成功: ↑${upCount} / ↓${downCount}`);
     } else if (!actualEmData) {
       console.warn('❌ [情绪探针] 全部策略均失败（A/B/C 三级均未命中），涨跌比数据暂不可用。请检查网络或代理配置。');
     } else {
@@ -327,8 +352,8 @@ export const fetchAdvancedMarketData = async (settings) => {
           const pathStr = await fetchIntradayTrend(ifzqCode, settings);
           if (pathStr) intradayPathDesc = `\n   📍 日内分时: ${pathStr}`;
 
-          const dailyStr = await fetchMultiPeriodKLines(ifzqCode, 'day', 60, settings);
-          const weeklyStr = await fetchMultiPeriodKLines(ifzqCode, 'week', 20, settings);
+          const dailyStr = await fetchMultiPeriodKLines(ifzqCode, 'day', 60, settings, [{period:20, label:'20MA'}, {period:60, label:'60MA'}]);
+          const weeklyStr = await fetchMultiPeriodKLines(ifzqCode, 'week', 20, settings, [{period:20, label:'20周MA'}]);
           const monthlyStr = await fetchMultiPeriodKLines(ifzqCode, 'month', 12, settings);
 
           if (dailyStr || weeklyStr || monthlyStr) {

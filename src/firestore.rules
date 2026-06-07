@@ -71,10 +71,15 @@ service cloud.firestore {
       match /fof_dict/{docId} {
         allow read, write: if isOwner(userId);
       }
-      
+
+      // ---------- 7. 🌟 打分快照 (scoring_snapshots) 集合的授权 ----------
+      match /scoring_snapshots/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
       // 默认拒绝该用户路径下其他任何未明确声明的集合的写入（防止乱建集合消耗配额）
       match /{document=**} {
-        allow read, write: if false; 
+        allow read, write: if false;
       }
     }
   }

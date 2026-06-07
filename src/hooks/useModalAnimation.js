@@ -40,15 +40,15 @@ export function useModalAnimation(onClose, triggerRect, speed = 1.0, closeMultip
   const isOpen = mounted && phase !== 'closed';
 
   const flip = useMemo(() => {
-    if (!triggerRect) return { tx: 0, ty: 0, scale: 0.3 };
+    if (!triggerRect) return { tx: 0, ty: 0, scale: 0.45 };
     const cx = window.innerWidth / 2;
     const cy = window.innerHeight / 2;
     const bx = triggerRect.left + triggerRect.width / 2;
     const by = triggerRect.top + triggerRect.height / 2;
     const tx = bx - cx;
     const ty = by - cy;
-    const btnScale = Math.min(triggerRect.width / 600, 0.3);
-    return { tx, ty, scale: Math.max(btnScale, 0.12) };
+    const btnScale = Math.min(triggerRect.width / 600, 0.5);
+    return { tx, ty, scale: Math.max(btnScale, 0.3) };
   }, [triggerRect]);
 
   const overlayStyle = {
@@ -65,16 +65,20 @@ export function useModalAnimation(onClose, triggerRect, speed = 1.0, closeMultip
     WebkitBackdropFilter: phase === 'open' ? 'blur(4px)' : 'blur(0px)',
     transition: phase === 'closing'
       ? `background-color ${0.15 * speed}s ease-in, backdrop-filter ${0.15 * speed}s ease-in`
-      : `background-color ${0.3 * speed}s ease-out, backdrop-filter ${0.2 * speed}s ease-out`,
+      : `background-color ${0.4 * speed}s ease-out, backdrop-filter ${0.3 * speed}s ease-out`,
   };
 
+  const panelTransition = phase === 'closing'
+    ? `transform ${closeDur}s cubic-bezier(0.22, 1, 0.36, 1), opacity ${0.25 * speed}s ease-out`
+    : `transform ${openDur}s cubic-bezier(0.22, 1, 0.36, 1), opacity ${openDur}s ease-out`;
+
   const panelStyle = {
-    transition: `transform ${phase === 'closing' ? closeDur : openDur}s cubic-bezier(0.22, 1, 0.36, 1), opacity ${0.3 * speed}s ease-out`,
+    transition: panelTransition,
     transform: phase === 'open'
       ? 'translate(0, 0) scale(1)'
       : `translate(${flip.tx}px, ${flip.ty}px) scale(${flip.scale})`,
     opacity: phase === 'open' ? 1 : 0,
-    visibility: (phase === 'open' || phase === 'closing') ? 'visible' : 'hidden',
+    visibility: (phase === 'open' || phase === 'opening' || phase === 'closing') ? 'visible' : 'hidden',
   };
 
   return { isOpen, open, close, overlayStyle, panelStyle };

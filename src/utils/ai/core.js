@@ -2,162 +2,25 @@
 import { resolveProvider } from './providers';
 import { fetchAdvancedMarketData } from './market-data';
 import { fetchTavilySearch } from './search-engines';
-import { calculate7DayPenalty } from './fifo';
+import { precomputePortfolioInsights } from './precompute';
 import { defineTools } from './tools-definitions';
 import { dispatchToolCall } from './tool-handlers';
 import {
+  buildCoreSystemPrompt,
+  buildSkillLibraryPrompt,
+  buildScoringSystemPrompt,
   buildChatSystemPrompt,
   buildFundAnalysisPrompt,
   buildPortfolioAnalysisPrompt,
   buildLatestStateWrapper,
   fullDateTimeStr
 } from './prompts';
-
-// 推理强度配置映射
-const buildReasoningConfig = (effort) => {
-  if (effort === 'disabled') return {};
-  if (effort === 'high') return { thinking: { type: "enabled" }, reasoning_effort: "high" };
-  return { thinking: { type: "enabled" }, reasoning_effort: "max" }; // default/max
-};
-
-// 工具名称 → 用户友好状态提示 · Apple 风格
-const TOOL_LABELS = {
-  'get_realtime_fund_data': '📊 读取实时净值…',
-  'get_batch_fund_data': '📊 批量拉取基金数据…',
-  'get_fund_history_data': '📈 回溯历史走势…',
-  'get_fund_comparison': '⚖️ 多维度对比分析…',
-  'get_financial_news': '📰 速览财经快讯…',
-  'google_macro_search': '🌐 检索宏观政策…',
-  'tavily_news_search': '🔍 搜索相关资讯…',
-  'exa_research': '📚 研读深度研报…',
-  'get_fund_holdings_penetration': '🔬 透视底层持仓…',
-  'get_fund_transaction_history': '🧾 查阅交易流水…',
-  'get_market_historical_intraday': '📉 加载 K 线数据…',
-  'generate_trend_chart': '🎨 渲染走势图表…',
-  'execute_javascript': '⚡ 执行量化演算…',
-  'update_ledger': '📝 记录交易明细…',
-  'manage_plan_todo': '✅ 同步交易计划…',
-  'update_decision_memo': '🗂️ 更新战略备忘…',
-  'update_fof_dictionary': '📖 维护 FOF 字典…',
-  'get_index_valuation': '📊 评估指数估值…',
-  'get_cross_asset_data': '🌍 加载跨资产全景…',
-  'get_bond_market_data': '🏦 解析债市数据…',
-
-  'get_sector_ranking': '🏭 扫描行业板块…',
-  'get_macro_data': '📡 采集宏观指标…',
-};
-
-// Token 估算工具（中文约1.8字符/token，用于开发调试和生产监控）
-const estimateTokens = (body) => {
-  let totalChars = 0;
-  if (body.messages) {
-    for (const msg of body.messages) {
-      totalChars += (msg.content || '').length;
-    }
-  }
-  if (body.tools) {
-    totalChars += JSON.stringify(body.tools).length;
-  }
-  if (body.systemInstruction?.parts) {
-    for (const p of body.systemInstruction.parts) {
-      totalChars += (p.text || '').length;
-    }
-  }
-  return Math.round(totalChars / 1.8);
-};
+import { analyzeIntent } from './intent-router';
+import { buildReasoningConfig, TOOL_LABELS, estimateTokens, executeAIRequest } from './providers/shared';
+import { debugLog } from '../debugLog';
 
 // ============================================================================
-// 1. 底层 HTTP 请求封装
-// ============================================================================
-const executeAIRequest = async (settings, provider, apiKey, modelName, prompt, targetTemp, targetTopP, apiBase = '') => {
-  try {
-    const temperature = targetTemp ?? settings.temperature ?? 0.1;
-    const topP = targetTopP ?? settings.topP ?? 0.1;
-    const maxTokens = settings.maxOutputTokens || 8192;
-
-    let url = '';
-    let body = {};
-    let headers = { 'Content-Type': 'application/json' };
-
-    if (provider === 'gemini') {
-      url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-      body = {
-        contents: [{ parts: [{ text: prompt }] }],
-        tools: [{ googleSearch: {} }],
-        generationConfig: { temperature, topP, maxOutputTokens: maxTokens },
-        safetySettings: [
-          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
-          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
-          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
-          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" }
-        ]
-      };
-    } else if (provider === 'openai') {
-      url = apiBase.replace(/\/+$/, '') + '/chat/completions';
-      headers['Authorization'] = `Bearer ${apiKey}`;
-      body = {
-        model: modelName,
-        messages: [{ role: 'user', content: prompt }],
-        temperature,
-        top_p: topP,
-        max_tokens: maxTokens
-      };
-    } else {
-      url = provider === 'deepseek' ? 'https://api.deepseek.com/chat/completions' : 'https://api.siliconflow.cn/v1/chat/completions';
-      headers['Authorization'] = `Bearer ${apiKey}`;
-      body = {
-        model: modelName,
-        messages: [{ role: 'user', content: prompt }],
-        temperature,
-        top_p: topP,
-        max_tokens: maxTokens,
-        ...((provider === 'deepseek' || provider === 'siliconflow') && buildReasoningConfig(settings.reasoningEffort))
-      };
-    }
-
-    const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-    const data = await response.json();
-
-    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-    if (data.message && !data.choices) throw new Error(data.message);
-
-    // Token 估算日志
-    const estTokens = estimateTokens(body);
-    const reasoningLabel = (provider === 'deepseek' || provider === 'siliconflow') ? (settings.reasoningEffort || 'max') : 'n/a';
-    console.log('%c📊 [Token 估算] ' + provider + ' | 推理: ' + reasoningLabel + ' | 预估输入: ≈' + estTokens + ' tokens | 模型: ' + modelName, 'color: #10b981; font-weight: bold;');
-
-    if (provider === 'gemini') {
-      if (!data.candidates || data.candidates.length === 0) {
-        if (data.promptFeedback?.blockReason) {
-          throw new Error(`内容被 Google 安全策略拦截 (${data.promptFeedback.blockReason})`);
-        }
-        throw new Error("Google API 未返回有效文本");
-      }
-      const parts = data.candidates[0].content?.parts;
-      if (!parts || parts.length === 0 || !parts[0].text) {
-        throw new Error("Google API 返回了非标准文本数据");
-      }
-      return parts[0].text;
-    } else {
-      if (!data.choices || data.choices.length === 0) {
-        throw new Error(`API 返回空数据: ${JSON.stringify(data)}`);
-      }
-      const msg = data.choices[0].message;
-      let finalContent = msg.content || '';
-      if (msg.reasoning_content) {
-        const thinkProcess = msg.reasoning_content.replace(/\n/g, '<br/>');
-        finalContent = `### 🧠 AI 深度思考过程\n<div class="text-slate-400 dark:text-slate-500 text-xs opacity-90 border-l-4 border-slate-300 dark:border-slate-600 pl-3 py-2 mb-4 bg-slate-50 dark:bg-slate-900/50 rounded-r-lg">${thinkProcess}</div>\n\n` + finalContent;
-      }
-      return finalContent;
-    }
-  } catch (error) {
-    console.error("AI API Error:", error);
-    throw new Error(error.message === "Failed to fetch" ? `网络无法访问 ${provider} 服务，请检查代理节点状态。` : error.message);
-  }
-};
-
-// ============================================================================
-// 2. 单基诊断引擎
+// 1. 单基诊断引擎
 // ============================================================================
 export const analyzeFundWithAI = async (settings, fund, profile, marketData) => {
   const { provider, apiKey, targetModel, apiBase } = resolveProvider(settings);
@@ -203,40 +66,18 @@ export const analyzePortfolioWithAI = async (settings, portfolioStats, marketDat
 // ============================================================================
 // 3. 持续交互对话引擎 (聊天框专用) — 核心重构
 // ============================================================================
-export const chatWithPortfolioAI = async (settings, portfolioStats, chatHistory, newMessage, marketData, useWebSearch = true, todos = [], memos = [], onStatus = null) => {
+export const chatWithPortfolioAI = async (settings, portfolioStats, chatHistory, newMessage, marketData, useWebSearch = true, todos = [], memos = [], onStatus = null, firestoreContext = null) => {
   const { provider, apiKey, targetModel, apiBase } = resolveProvider(settings);
 
   const idleFunds = Number(settings.idleFunds) || 0;
 
-  // === 组装持仓明细 ===
-  const activeFundsDetail = portfolioStats.computedFundsWithMetrics
-    .filter(f => f.currentValue > 0 && !f.isArchived)
-    .map(f => {
-      const profitRate = f.totalInvested > 0 ? ((f.profit / f.totalInvested) * 100).toFixed(2) : 0;
-      const xirrRate = (f.xirr * 100).toFixed(2);
+  // === 本地预计算：持仓洞察（赎回费陷阱、集中度、大类配置） ===
+  const insights = precomputePortfolioInsights(portfolioStats, settings);
 
-      let fundTypeTag = "其他类型/混合";
-      const name = f.name || '';
-      if (name.includes('短债') || name.includes('理财') || name.includes('货币')) fundTypeTag = "中短债/货币 (防守底仓)";
-      else if (name.includes('债') || name.includes('定期开放')) fundTypeTag = "长债/纯债 (收益底仓)";
-      else if (name.includes('混合') || name.includes('固收+') || name.includes('平衡')) fundTypeTag = "固收+ / 混合 (弹性增强)";
-      else if (name.includes('红利') || name.includes('低波')) fundTypeTag = "红利策略 (权益保护)";
-      else if (name.includes('指数') || name.includes('联接') || name.includes('ETF')) fundTypeTag = "被动宽基/行业 (高弹性)";
-
-      const sortedTx = [...(f.transactions || [])].sort((a, b) => new Date(a.date || a.createdAt) - new Date(b.date || b.createdAt));
-      const todayIso = new Date().toISOString().split('T')[0];
-      const { lockedAmount, penaltyFee } = calculate7DayPenalty(sortedTx, todayIso);
-
-      let penaltyWarning = '';
-      if (lockedAmount > 0) {
-        penaltyWarning = `\n> 🚨 [系统底层强制风控拦截]：该基金存在 ${lockedAmount} 元持仓未满 7 天！若生成立刻卖出待办，将触发约 ${penaltyFee} 元的 1.5% 惩罚性手续费！`;
-      }
-
-      return `\n- 资产: ${f.name} (代码: ${f.fundCode || '未知'}) | 🏷️ [大类判定]: ${fundTypeTag}
-> 当前市值: ${f.currentValue} 元 | 累计盈亏: ${f.profit} 元
-> 累计投入: ${f.totalInvested} 元 | 净本金: ${f.netInvested} 元
-> 简单盈亏率: ${profitRate}% | 年化收益率(XIRR): ${xirrRate}% | 持有份额: ${f.shares || 0}${penaltyWarning}`;
-    }).join('\n');
+  // === 组装持仓明细（紧凑表格格式，替代原来的逐只文本段落） ===
+  const activeFundsDetail = `基金        │代码    │   市值 │   盈亏率 │  XIRR │ 占比 │类型│陷阱
+──────┼────┼─────┼───────┼─────┼────┼──┼──
+${insights.portfolioTable}明细提示：如需某只基金的历史交易流水，请调用 get_fund_transaction_history 工具获取。`;
 
   // === 组装待办上下文 ===
   const pendingTodos = todos.filter(t => !t.isCompleted);
@@ -261,6 +102,8 @@ export const chatWithPortfolioAI = async (settings, portfolioStats, chatHistory,
   const fundMemos = memos.filter(m => m.target !== 'GLOBAL_CONSTITUTION' && m.target !== 'GLOBAL_MARKET');
 
   const memosText = `
+⚠️ 备忘录中的净值/价格数字为写入时的历史快照，仅作战略锚点参考（如"跌破1.5清仓"的1.5是纪律红线，非实时净值）。严禁将备忘录中的快照净值用于日收益计算、盈亏核算或任何需要当前净值的计算。凡涉净值计算，必须调用 get_realtime_fund_data / get_batch_fund_data / get_fund_history_data 工具。
+
 【👑 第一层：顶层财富宪法 (Global Constitution)】
 🚨 这是用户的最高投资目标与底线，所有战术动作必须服务于此目标！
 ${constitutionMemo ? `> 核心目标：${constitutionMemo.coreLogic}` : '> 暂无顶层财富目标，请询问用户。'}
@@ -284,38 +127,207 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
     marketStr = marketData;
   }
 
-  // === 构建 system prompt（纯静态层，利用 DeepSeek 上下文缓存） ===
-  const systemPrompt = buildChatSystemPrompt(provider);
+  // === 构建 system prompt（纯静态层，利用 DeepSeek 上下文缓存，永不变化） ===
+  const coreSystemPrompt = buildCoreSystemPrompt();
 
-  // === 构建最新状态注入（通过 prompts.js 统一模板构建） ===
-  const latestStateWrapper = buildLatestStateWrapper(radarOverride + marketStr, memosText, portfolioStats, settings, activeFundsDetail, todosContext, newMessage);
+  // === 本地意图路由：分析用户消息，决定是否加载技能库（打分系统由雷达直接控制） ===
+  const intent = analyzeIntent(newMessage, chatHistory);
+
+  // === 打分系统加载策略：雷达 ON → 始终加载，雷达 OFF → 始终不加载 ===
+  const radarEnabled = marketData === "FETCH_NOW";
+  intent.needsScoring = radarEnabled;
+
+  // === 📦 模块加载报告（Console 可视化） ===
+  const CORE_TOKENS = 1400;
+  const SKILL_TOKENS = 2000;
+  const SCORING_TOKENS = 6300;
+  const fullTokens = CORE_TOKENS + SKILL_TOKENS + SCORING_TOKENS;
+  const loadedTokens = CORE_TOKENS
+    + (intent.needsSkillLibrary ? SKILL_TOKENS : 0)
+    + (intent.needsScoring ? SCORING_TOKENS : 0);
+  const savedTokens = fullTokens - loadedTokens;
+  const savedPct = Math.round((savedTokens / fullTokens) * 100);
+
+  const lines = [
+    { style: 'h',   text: '📦 模块加载报告' },
+    { style: 'sep', text: '' },
+    { style: 'g',   text: `Core (防幻觉+记忆+数据洁癖)       ✅  ~1,400 tok` },
+    { style: intent.needsSkillLibrary ? 'g' : 'dim', text: `Skill Library (技能库+工具铁律)    ${intent.needsSkillLibrary ? '✅' : '⏭️'}  ${intent.needsSkillLibrary ? '~2,000 tok' : '    跳过 (Router判定)'}` },
+    { style: radarEnabled ? 'g' : 'warn', text: `Scoring System (打分+CIO矩阵)      ${radarEnabled ? '✅  ~6,300 tok (雷达ON)' : '⏭️ 雷达关闭'}` },
+    { style: 'sep', text: '' },
+    { style: 'h2',  text: `System Prompt 合计: ~${loadedTokens.toLocaleString()} tokens  |  节省 ~${savedTokens.toLocaleString()} tokens (${savedPct}%)` },
+    { style: confidenceColor(intent.confidence), text: `技能库置信度: ${intent.confidence.toUpperCase()}  |  雷达: ${radarEnabled ? '🟢 ON' : '🔴 OFF'}` },
+    { style: 'dim2', text: `理由: ${intent.reason}` },
+  ];
+
+  // 简单表格样式输出，适配窄终端
+  const W = 62;
+  const boxTop    = '┌' + '─'.repeat(W) + '┐';
+  const boxSep    = '├' + '─'.repeat(W) + '┤';
+  const boxBottom = '└' + '─'.repeat(W) + '┘';
+  const padLine = (text, w) => '│ ' + text + ' '.repeat(Math.max(0, w - 1 - text.length)) + '│';
+
+  const styleMap = {
+    'h':    'color: #c4b5fd; font-weight: bold;',
+    'h2':   'color: #f59e0b; font-weight: bold;',
+    'g':    'color: #10b981;',
+    'dim':  'color: #6b7280;',
+    'dim2': 'color: #94a3b8; font-style: italic;',
+    'sep':  'color: #6366f1;',
+    'warn': 'color: #f59e0b;',
+    'red':  'color: #ef4444; font-weight: bold;',
+  };
+
+  debugLog(
+    '%c' + boxTop + '\n' +
+    lines.map((l, i) => '%c' + (l.style === 'sep' ? boxSep : padLine(l.text, W)) + '\n').join('') +
+    '%c' + boxBottom,
+    styleMap['sep'],
+    ...lines.flatMap(l => [styleMap[l.style] || '']),
+    styleMap['sep']
+  );
+
+  // === ⚠️ 低置信度独立警告 ===
+  if (intent.confidence === 'low') {
+    const msgPreview = newMessage.length > 40 ? newMessage.substring(0, 37) + '...' : newMessage;
+    debugLog(
+      '%c╔' + '═'.repeat(W) + '╗\n' +
+      '%c║ ⚠️  LOW CONFIDENCE — 模块选择可能不准确' + ' '.repeat(Math.max(0, W - 33)) + '║\n' +
+      '%c║ 消息: ' + msgPreview + ' '.repeat(Math.max(0, W - 9 - msgPreview.length)) + '║\n' +
+      '%c║ 若分类有误 → 反馈至 intent-router.js 反哺规则' + ' '.repeat(Math.max(0, W - 35)) + '║\n' +
+      '%c╚' + '═'.repeat(W) + '╝',
+      'color: #ef4444; font-weight: bold;',
+      'color: #fbbf24; font-weight: bold;',
+      'color: #fca5a5;',
+      'color: #fca5a5;',
+      'color: #ef4444; font-weight: bold;'
+    );
+  }
+
+  // 辅助函数
+  function confidenceColor(c) {
+    return c === 'high' ? 'g' : c === 'medium' ? 'warn' : 'red';
+  }
+
+  // === 构建最新状态注入（通过 prompts.js 统一模板构建，永远放在末尾 user message） ===
+  // 预计算风控标记
+  const alertsText = insights.alerts.length > 0
+    ? `\n【系统预计算风控标记】\n${insights.alerts.map(a => a).join('\n')}\n`
+    : '';
+
+  const latestStateWrapper = buildLatestStateWrapper(radarOverride + marketStr, memosText, portfolioStats, settings, activeFundsDetail, todosContext, alertsText, newMessage);
 
   try {
     let url = '';
     let body = {};
     let headers = { 'Content-Type': 'application/json' };
 
-    // 历史消息窗口
-    const MAX_HISTORY_MESSAGES = settings.maxHistoryMessages || 20;
-    const recentHistory = chatHistory.slice(-MAX_HISTORY_MESSAGES);
+    // === 历史降采样：今日保留最近 N 轮，跨日摘要，雷达指令去重 ===
+    const todayStr = new Date().toDateString();
+    const MAX_TODAY_ROUNDS = settings.maxHistoryMessages || 6;    // 今日最多保留的轮次数
+    const MAX_OLDER_ROUNDS = Math.max(1, Math.floor(MAX_TODAY_ROUNDS / 3)); // 跨日最多保留轮次 = 今日的 1/3
 
-    // 清洗历史中的 HTML 思考标签
-    const cleanHistory = recentHistory.map(msg => {
-      let content = msg.content;
-      if (msg.role === 'assistant') {
-        content = content.replace(/### 🧠 AI 深度多轮思考过程\n<div[^>]*>[\s\S]*?<\/div>\n\n/, '');
-        content = content.replace(/### 🧠 AI 深度思考过程\n<div[^>]*>[\s\S]*?<\/div>\n\n/, '');
+    const downsampleHistory = (msgs) => {
+      // 分离今日和跨日消息（消息已按时间排序）
+      const todayMsgs = [];
+      const olderMsgs = [];
+      let i = 0;
+      while (i < msgs.length) {
+        const userMsg = msgs[i];
+        const asstMsg = msgs[i + 1];
+        const msgDate = userMsg?.timestamp ? new Date(userMsg.timestamp).toDateString() : null;
+        if (msgDate === todayStr) {
+          if (userMsg) todayMsgs.push(userMsg);
+          if (asstMsg?.role === 'assistant') todayMsgs.push(asstMsg);
+        } else {
+          if (userMsg) olderMsgs.push(userMsg);
+          if (asstMsg?.role === 'assistant') olderMsgs.push(asstMsg);
+        }
+        i += 2;
       }
-      return { role: msg.role, content };
-    });
+
+      // 今日：截断到最近 MAX_TODAY_ROUNDS 轮
+      const recentToday = todayMsgs.slice(-MAX_TODAY_ROUNDS * 2);
+
+      // 跨日：仅保留最近 MAX_OLDER_ROUNDS 轮，提取 AI 摘要 + 保留用户消息
+      const recentOlder = olderMsgs.slice(-MAX_OLDER_ROUNDS * 2);
+      const olderCompressed = [];
+      let j = 0;
+      while (j < recentOlder.length) {
+        const uMsg = recentOlder[j];
+        const aMsg = recentOlder[j + 1];
+        if (uMsg?.role === 'user') {
+          // 从助理消息中提取 [本轮摘要] 行（AI 生成的压缩摘要）
+          let aiSummary = '';
+          if (aMsg?.role === 'assistant' && aMsg.content) {
+            const m = aMsg.content.match(/\[本轮摘要\]\s*([\s\S]*?)(?:\n\n|$)/);
+            if (m?.[1]?.trim()) aiSummary = ' | AI摘要: ' + m[1].trim();
+          }
+          olderCompressed.push({
+            role: 'user',
+            content: `[跨日 — ${uMsg.timestamp ? new Date(uMsg.timestamp).toDateString() : '?'}] ${uMsg.content || ''}${aiSummary}`
+          });
+        }
+        j += 2;
+      }
+
+      // 合并：跨日摘要 + 今日最近 N 轮
+      const merged = [...olderCompressed, ...recentToday];
+
+      // 清洗：剥离历史消息中的雷达状态指令（最新雷达状态已在末尾注入）
+      // 同时清洗助理消息中的 HTML 思考标签
+      const RADAR_CLEAN_PATTERN = /(?:🚨\s*【状态变更】大盘雷达已开启[^\n]*\n*|【系统指令：用户已手动关闭大盘雷达[^】]*】)/g;
+      return merged.map(msg => {
+        let content = msg.content || '';
+        if (msg.role === 'assistant') {
+          content = content.replace(/### 🧠 AI 深度多轮思考过程\n<div[^>]*>[\s\S]*?<\/div>\n\n/, '');
+          content = content.replace(/### 🧠 AI 深度思考过程\n<div[^>]*>[\s\S]*?<\/div>\n\n/, '');
+        }
+        // 历史中的雷达指令剥离（最新状态在 latestStateWrapper 末尾，具有绝对权威）
+        if (content.includes('大盘雷达') || content.includes('纯净模式')) {
+          content = content.replace(RADAR_CLEAN_PATTERN, '');
+        }
+        return { role: msg.role, content };
+      });
+    };
+
+    const cleanHistory = downsampleHistory(chatHistory);
+
+    // === 公共：按需构建静态 rulebook 消息（消除 3 套 provider 中的重复代码） ===
+    const buildRulebookMessages = (format) => {
+      const msgs = [];
+      const isGemini = format === 'gemini';
+      const mkMsg = (role, text) => isGemini
+        ? { role, parts: [{ text }] }
+        : { role: role === 'model' ? 'assistant' : role, content: text };
+
+      if (intent.needsScoring) {
+        msgs.push(mkMsg('user', '[系统加载] 双核打分与CIO战略矩阵规则手册'));
+        msgs.push(mkMsg('model', '已加载打分规则手册，将在涉及市场时机判断时严格执行所有因子分析、动量修正、滞回锁定、CIO矩阵匹配和全局否决检查。'));
+        msgs.push(mkMsg('user', buildScoringSystemPrompt()));
+        msgs.push(mkMsg('model', '明白。所有打分规则已于本轮加载完毕，本轮回复将严格基于该规则体系执行。'));
+      }
+      if (intent.needsSkillLibrary) {
+        msgs.push(mkMsg('user', '[系统加载] 高级工具技能库'));
+        msgs.push(mkMsg('model', '已加载技能库，将按照跨工具调用铁律使用所有工具。'));
+        msgs.push(mkMsg('user', buildSkillLibraryPrompt()));
+        msgs.push(mkMsg('model', '明白。将严格遵守防海选、防死循环、防同质化、防口嗨、穿透链条等铁律。'));
+      }
+      return msgs;
+    };
 
     if (provider === 'gemini') {
       url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey}`;
-      const geminiMessages = cleanHistory.map(msg => ({
-        role: msg.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: msg.content }]
-      }));
-      geminiMessages.push({ role: 'user', parts: [{ text: latestStateWrapper }] });
+
+      const geminiPrefix = buildRulebookMessages('gemini');
+      const geminiMessages = [
+        ...geminiPrefix,
+        ...cleanHistory.map(msg => ({
+          role: msg.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: msg.content }]
+        })),
+        { role: 'user', parts: [{ text: latestStateWrapper }] }
+      ];
 
       // 转换 OpenAI 工具格式为 Gemini functionDeclarations（并清洗不兼容字段）
       const openaiTools = defineTools(settings);
@@ -342,7 +354,7 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
       }));
 
       body = {
-        systemInstruction: { parts: [{ text: systemPrompt }] },
+        systemInstruction: { parts: [{ text: coreSystemPrompt }] },
         contents: geminiMessages,
         tools: geminiDeclarations.length > 0
           ? [{ functionDeclarations: geminiDeclarations }]
@@ -360,8 +372,10 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
       url = (apiBase || '').replace(/\/+$/, '') + '/chat/completions';
       headers['Authorization'] = `Bearer ${apiKey}`;
 
+      const rulebookPairs = buildRulebookMessages('openai');
       const openaiMessages = [
-        { role: 'system', content: systemPrompt },
+        { role: 'system', content: coreSystemPrompt },
+        ...rulebookPairs,
         ...cleanHistory.map(msg => ({ role: msg.role, content: msg.content })),
         { role: 'user', content: latestStateWrapper }
       ];
@@ -378,8 +392,10 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
       url = provider === 'deepseek' ? 'https://api.deepseek.com/chat/completions' : 'https://api.siliconflow.cn/v1/chat/completions';
       headers['Authorization'] = `Bearer ${apiKey}`;
 
+      const rulebookPairs = buildRulebookMessages('openai');
       const openaiMessages = [
-        { role: 'system', content: systemPrompt + `\n\n12. 【数据洁癖与交叉验证】：当你调用搜索工具获取基金净值或排名时，必须严格审视返回结果的【时间戳】！如果搜索返回的是过时数据，你必须回答"无法获取可靠的最新数据"，或者换个更精确的关键词再搜一次！` },
+        { role: 'system', content: coreSystemPrompt },
+        ...rulebookPairs,
         ...cleanHistory.map(msg => ({ role: msg.role, content: msg.content })),
         { role: 'user', content: latestStateWrapper }
       ];
@@ -407,7 +423,7 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
     // Token 估算日志
     const estTokens = estimateTokens(body);
     const reasoningLabel = (provider === 'deepseek' || provider === 'siliconflow') ? (settings.reasoningEffort || 'max') : 'n/a';
-    console.log('%c📊 [Token 估算] ' + provider + ' | 推理: ' + reasoningLabel + ' | 预估输入: ≈' + estTokens + ' tokens | 模型: ' + targetModel, 'color: #10b981; font-weight: bold;');
+    debugLog('%c📊 [Token 估算] ' + provider + ' | 推理: ' + reasoningLabel + ' | 预估输入: ≈' + estTokens + ' tokens | 模型: ' + targetModel, 'color: #10b981; font-weight: bold;');
 
     let accumulatedReasoning = '';
     let accumulatedContent = '';
@@ -423,10 +439,12 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
 
       if (responseMsg.reasoning_content) {
         accumulatedReasoning += responseMsg.reasoning_content + '\n\n';
+        debugLog('%c🧠 [思考 R' + roundNum + '] ' + responseMsg.reasoning_content.substring(0, 200) + (responseMsg.reasoning_content.length > 200 ? '…' : ''), 'color: #a78bfa;');
       }
 
       if (responseMsg.content) {
         accumulatedContent += responseMsg.content + '\n\n';
+        debugLog('%c💬 [文本 R' + roundNum + '] ' + responseMsg.content.substring(0, 150) + (responseMsg.content.length > 150 ? '…' : ''), 'color: #94a3b8;');
       }
 
       body.messages.push(responseMsg);
@@ -445,6 +463,8 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
           args = {};
         }
 
+        debugLog('%c🔧 [工具 R' + roundNum + '] ' + toolName + ' | ' + JSON.stringify(args).substring(0, 200), 'color: #60a5fa; font-weight: bold;');
+
         const ctx = {
           args,
           toolCall,
@@ -452,6 +472,7 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
           body,
           pendingActions,
           portfolioStats,
+          firestoreContext,
           fullDateTimeStr: fullDateTimeStr(),
           todayStr: new Date().toISOString().split('T')[0]
         };
@@ -472,11 +493,11 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
     }
 
     // === Gemini 工具调用循环（functionCall / functionResponse 协议） ===
+    // 使用独立的 toolMessages 变量承载工具结果，不再与 body.messages 混用
     if (provider === 'gemini') {
       let geminiAccumulatedContent = '';
       let geminiMaxLoops = settings.maxToolLoops || 12;
       let geminiRoundNum = 0;
-      body.messages = [];
 
       while (geminiMaxLoops > 0) {
         geminiMaxLoops--;
@@ -498,13 +519,15 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
         // 收集本轮文本
         const textParts = parts.filter(p => p.text);
         if (textParts.length > 0) {
-          geminiAccumulatedContent += textParts.map(p => p.text).join('\n') + '\n\n';
+          const geminiText = textParts.map(p => p.text).join('\n');
+          geminiAccumulatedContent += geminiText + '\n\n';
+          debugLog('%c💬 [Gemini R' + geminiRoundNum + '] ' + geminiText.substring(0, 150) + (geminiText.length > 150 ? '…' : ''), 'color: #94a3b8;');
         }
 
         // 添加 model 消息（含 functionCall parts）
         body.contents.push({ role: 'model', parts });
 
-        // 执行每项工具调用
+        // 执行每项工具调用 — 用独立 toolMessages 承载 handler 写入的结果
         const functionResponseParts = [];
         for (const part of functionCalls) {
           const fc = part.functionCall;
@@ -513,13 +536,17 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
 
           const label = TOOL_LABELS[toolName] || '⚙️ 调用 ' + toolName + '…';
           onStatus && onStatus({ type: 'tool', label, tool: toolName, round: geminiRoundNum });
+          debugLog('%c🔧 [Gemini R' + geminiRoundNum + '] ' + toolName + ' | ' + JSON.stringify(toolArgs).substring(0, 200), 'color: #60a5fa; font-weight: bold;');
 
           const fakeToolCall = {
             id: `gc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             function: { name: toolName, arguments: JSON.stringify(toolArgs) }
           };
 
-          const prevLen = body.messages.length;
+          // 每轮新数组，handler 通过 ctx.body.messages push 结果
+          const toolMessages = [];
+          body.messages = toolMessages;
+
           const ctx = {
             args: toolArgs,
             toolCall: fakeToolCall,
@@ -527,14 +554,14 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
             body,
             pendingActions,
             portfolioStats,
+            firestoreContext,
             fullDateTimeStr: fullDateTimeStr(),
             todayStr: new Date().toISOString().split('T')[0]
           };
 
           await dispatchToolCall(toolName, ctx);
 
-          const newResults = body.messages.splice(prevLen);
-          const resultContent = newResults.map(m => m.content).join('\n\n');
+          const resultContent = toolMessages.map(m => m.content).join('\n\n');
 
           functionResponseParts.push({
             functionResponse: {
@@ -544,10 +571,12 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
           });
         }
 
+        // 清除 body.messages，避免被 JSON.stringify 发送给 Gemini
+        delete body.messages;
+
         // 添加 user 消息（含 functionResponse parts）
         if (functionResponseParts.length > 0) {
           body.contents.push({ role: 'user', parts: functionResponseParts });
-          body.messages = [];
         }
 
         // 下一轮思考状态
@@ -555,9 +584,8 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
           onStatus && onStatus({ type: 'thinking', label: '🧠 综合研判 · 第 ' + (geminiRoundNum + 1) + ' 轮…', round: geminiRoundNum + 1 });
         }
 
-        delete body.messages;
+        // 发送请求（body 不含 messages 字段）
         response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-        body.messages = [];
         data = await response.json();
         if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
       }
@@ -610,6 +638,8 @@ ${fundMemos.length > 0 ? fundMemos.map(m => `- [${new Date(m.updatedAt).toISOStr
           .replace(/\n/g, '<br/>');
         finalContent = `### 🧠 AI 深度多轮思考过程\n<div class="${thinkingBoxClass}">${thinkProcess}</div>\n\n` + finalContent;
       }
+
+      debugLog('%c✅ [完成] 工具轮次: ' + roundNum + ' | 思考长度: ' + accumulatedReasoning.length + ' chars | 输出长度: ' + finalContent.length + ' chars | 待确认操作: ' + pendingActions.length, 'color: #10b981; font-weight: bold;');
 
       if (pendingActions.length > 0) {
         return { type: 'ACTION_REQUIRED', payload: pendingActions, text: finalContent };

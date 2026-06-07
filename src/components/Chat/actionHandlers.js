@@ -36,12 +36,22 @@ async function syncChatToCloud(user, messages, activeConvId) {
     messages,
     title,
     createdAt: new Date().toISOString()
-  }, { merge: true }).catch(() => {});
+  }, { merge: true }).catch(err => console.warn('同步对话到云端失败:', err));
 }
 
 // ---- 1. 数据确认处理器 ----
 export async function handleDataConfirmation({ action, formData, setMessages, settings, portfolioStats, useWebSearch, enableMacroRadar, messages, todos, memos, user, activeConvId }) {
   setMessages(prev => markActionStatus(prev, action.cardId, 'completed'));
+
+  // 防御：extractedText 为空时不发 AI 请求
+  if (!formData?.extractedText?.trim()) {
+    setMessages(prev => {
+      const finalMessages = [...prev, { role: 'assistant', content: '❌ 数据解析失败或内容为空，请重新上传文件。', timestamp: new Date().toISOString() }];
+      syncChatToCloud(user, finalMessages, activeConvId);
+      return finalMessages;
+    });
+    return;
+  }
 
   const activeMarketData = enableMacroRadar ? "FETCH_NOW" : "【纯净模式】";
   const stitchedPrompt = `【系统强制注入：用户上传并已人工核对无误的 Ground Truth 真实底层数据】\n<verified_data>\n${formData.extractedText}\n</verified_data>\n\n【用户的原始指令】：${action.originalMessage || '请深度分析上述数据并给出具体建议。'}`;
@@ -114,6 +124,9 @@ export async function handleTodoCRUD({ action, onAddTodo, onUpdateTodo, onDelete
     if (action.condition) updatePayload.condition = action.condition;
     if (action.amount !== undefined) updatePayload.amount = action.amount;
     if (action.priority) updatePayload.priority = action.priority;
+    if (action.actionType) updatePayload.actionType = action.actionType;
+    if (action.fundName) updatePayload.fundName = action.fundName;
+    if (action.fundCode) updatePayload.fundCode = action.fundCode;
     await onUpdateTodo(cleanId, updatePayload);
   } else if (mType === 'delete') {
     if (!cleanId) throw new Error("大模型未返回有效的待办ID，无法删除。");
@@ -211,6 +224,21 @@ export async function handleLedgerTransaction({ action, formData, user, settings
   }
 }
 
+// ---- 5. 打分快照自动存储（无需用户确认） ----
+export async function handleScoreRecord({ action, user }) {
+  if (!user || !db) return;
+  // Firestore 文档 ID 不能含 /，将 "2026/06/05" 规范化为 "2026-06-05"
+  const safeDate = (action.date || new Date().toISOString().split('T')[0]).replace(/\//g, '-');
+  const snapRef = doc(db, 'artifacts', appId, 'users', user.uid, 'scoring_snapshots', safeDate);
+  await setDoc(snapRef, {
+    date: safeDate,
+    createdAt: action.createdAt || new Date().toISOString(),
+    equity: action.equity || null,
+    bond: action.bond || null,
+    verdict: action.verdict || null
+  }, { merge: true });
+}
+
 // ---- 分发器：根据 action.toolType 路由 ----
 export async function dispatchAction(action, formData, ctx) {
   const { setMessages, user } = ctx;
@@ -220,9 +248,11 @@ export async function dispatchAction(action, formData, ctx) {
     return; // 已自行管理 loading 和 messages
   }
 
-  // memo / fof_dict / todo / ledger：写入后统一标记完成
+  // memo / fof_dict / todo / ledger / score_record：写入后统一标记完成
   if (action.toolType === 'memo') {
     await handleMemoWrite({ action, user });
+  } else if (action.toolType === 'score_record') {
+    await handleScoreRecord({ action, user });
   } else if (action.toolType === 'fof_dict') {
     await handleFofDictWrite({ action, user });
   } else if (action.toolType === 'todo') {

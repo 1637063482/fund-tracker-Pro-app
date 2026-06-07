@@ -6,19 +6,89 @@
 
 ---
 
-## [1.4.2] — 2026-06-03
+## [1.5.0] — 2026-06-06
+
+### 新增
+- System Prompt 三层动态加载架构：Core（防幻觉+记忆+数据洁癖）/ Skill Library（技能库+工具铁律）/ Scoring（双核打分+CIO矩阵），按需注入降低 Token
+- 本地意图路由器（`intent-router.js`）：5 层分类引擎（短消息/显式关键词/纯轻量/分析兜底/资产检测），智能判断是否加载技能库
+- 大盘雷达与打分系统联动：雷达 ON → 始终加载 Scoring，雷达 OFF → 始终不加载，消除误判风险
+- 本地预计算层（`precompute.js`）：赎回费陷阱/集中度风险/大类配置偏离等规则化计算前置，紧凑表格替代冗长文本注入
+- 历史对话降采样引擎（`downsampleHistory`）：同日轮次完整保留（可配置上限），跨日轮次压缩为 AI 摘要，雷达指令去重
+- AI 跨日摘要协议（`[本轮摘要]` / `AI摘要:`）：每轮 AI 输出末尾生成摘要，次日通过 `[跨日]` 标记注入，保留操作承诺、丢弃过时市场判断
+- Console 模块加载可视化报告：每次 AI 调用输出彩色表格展示 Core/Skill/Scoring 加载状态、Token 节省量、分类置信度
+- 低置信度分类警告框：意图路由器在置信度 `low` 时输出红色醒目标识，引导反哺规则
+- 生产环境 `debugLog` 工具（`import.meta.env.DEV` 门控）：17 处 `console.log` 替换为生产自动移除
+- 基金分类统一模块（`fundClassifier.js`）：`RULES` 数组驱动 `classifyFundType` / `classifyAssetClass` / `classifyFundTypeShort` 三合一
+
+### 变更
+- System Prompt 从单一 13,800 token 巨块拆为 3 个纯静态函数：Core ~1,950 tok / Skill ~2,000 tok / Scoring ~3,750 tok
+- Skill Library / Scoring 从 System Prompt 移出，改为按需作为静态 user message 注入 → DeepSeek 缓存独立命中
+- Core Prompt 新增规则 13-15：跨日历史可靠性分层（操作承诺引用 ✅ / 市场判断引用 ❌）、回复格式铁律（结论先行+压缩评分格式）、雷达状态绝对权威
+- Scoring Prompt 压缩 41%：移除触发条件判断（已由 radarEnabled 控制）、CIO 矩阵 A/B/C 三标签表格化、第五层巡检流程简化为单行流程链
+- Core Prompt 新增输出简洁性指令：F1:28/35 F2:18/25 压缩格式、多基金单行格式、禁填充词
+- `get_recent_scores` 工具被设定为动量修正和滞回锁定的唯一数据源（禁止从对话文本推断）
+- `analyzeHoldingPeriods` 引用从 `core.js` 移至 `precompute.js`，core.js 不再直接调用
+- `onSnapshot` 对话消息监听改为 `getDoc` 一次性读取，切断 AI 工具调用期 12+ 次 Firestore 回环
+- 静默 `catch(() => {})` 全部替换为 `catch(err => console.warn(...))`，数据持久化失败可追溯
+- `App.jsx` 抽出 `PortfolioSummaryCards` 和 `RankingPanels` 两个 `React.memo` 组件，阻断无关状态渲染传播
+- `PortfolioChat.jsx` 抽出 `persistConversation()` 统一 Firestore 写入，消除 6 处重复模板
+- `handleConfirmAction` 依赖数组移除 `activeConvId`（改为 `activeConvIdRef.current`），消除切对话时的级联重建
+
+### 修复
+- 修复 Gemini 工具循环 `body.messages` 与 `body.contents` 状态不一致：改为独立 `toolMessages` 变量，`delete body.messages` 仅清除不重建
+- 修复 `actionHandlers.js` `handleDataConfirmation` 中 `formData.extractedText` 可能为空时不校验直接发给 AI 的问题（新增空数据防御）
+- 修复 `helpers.js` XIRR 二分法上限 `high=10000`（1,000,000%）导致精度溢出的潜在风险 → 降为 `high=10`（1000%）
+- 修复 `App.jsx` 死代码 `ref={el => el && setProxyModalOpen && null}` → 移除
+- 修复 `buildChatSystemPrompt` DeepSeek 路径每次拼接"数据洁癖"规则导致缓存失效 → 移入 Core Prompt 静态层
+- 修复雷达指令去重正则过于激进：`纯净模式` 和 `关闭大盘雷达` 裸词移除，仅保留完整系统模板匹配
+- 修复 `[本轮摘要]` 正则仅捕获到首行 → 改为捕获到段落分隔 `\n\n`
+- 修复跨日摘要截断用户消息 → 用户消息全文保留，仅丢弃助理分析正文
+
+### 性能
+- **Token 节省**：轻量场景（查净值/记账）输入从 ~29,800 → ~12,300 tok（-59%），FULL 场景跨日 ~18,100 tok（78% 缓存率）
+- **渲染优化**：`useBaseFundsData` + `usePortfolioStats` 合并为 `useFundMetrics`，XIRR 同步计算消除 `setTimeout(0)` 双重重算
+- **代码消重**：基金分类 4→1、Firestore 写入 6→1、rulebook 注入 3→1，净消除 ~250 行重复/死代码
+
+---
+
+## [1.4.3] — 2026-06-05
+
+### 新增
+- 基金赎回费率编辑器（FundEditor 可折叠卡片）：支持自定义天数阈值 + 对应费率，覆盖任意基金的实际赎回规则
+- 持仓分层分析引擎（`analyzeHoldingPeriods`）：基于 FIFO 原则将当前持仓按买入批次拆分为持有天数区间，精确计算各层金额
+- AI 赎回费精确计算：每只基金的持仓分层 × 真实费率注入 AI 上下文，AI 可输出逐档费用明细和总预估赎回费
+- System Prompt 新增"短期赎回绝对亏损红线"：强制 AI 在建议卖出 <30 天份额前对比下跌风险与赎回费确定性损耗
+- 打分历史面板支持固收打分展示：权益分和固收分双标签并列，CIO 判定区分权益/固收指令
+
+### 变更
+- 行情数据源迁移：`push2.eastmoney.com` 全部替换为 `qt.gtimg.cn`（指数现价/债市数据）和 `hq.sinajs.cn`（期货数据），消除 502 错误
+- 打分快照存储简化：移除冗余调试日志和探针，保留必要错误处理
+- AI 对话消息气泡增加 `min-w-0 overflow-x-auto`，超宽表格在气泡内横向滚动而非撑开对话框
+- System Prompt 中赎回费率相关描述精简，`store_scoring_snapshot` 指令从 4 处合并为 3 处
+
+### 修复
+- 修复 `chat_convs` 写入失败：消息对象中 `actions: undefined` 改为条件属性展开，Firestore 不再拒绝 undefined 字段
+- 修复打分历史面板不显示：`absolute` 定位改为 `fixed`，与遮罩层对齐
+- 修复 Tooltip 在打分面板打开后残留：Tooltip 添加动态 `key`，面板状态变化时强制重新挂载
+- 修复打分面板打开无动画：`scoringHistory` 改为同步挂载空数组触发 FLIP，异步填充数据
+- 修复 `rate > 0` 导致 0% 费率被误判为"未设置"
+
+---
+
+## [1.4.2] — 2026-06-04
 
 ### 新增
 - 聊天消息时间戳：每条消息记录发送/接收时间，默认隐藏，鼠标悬停显示（格式：今天/昨天 + HH:mm），向下兼容旧消息
 - 静态复利推演卡片烟花动画（`FireworksBackground` 组件）：Canvas 真实物理粒子系统 + 加法混合渲染
 
 ### 变更
-- 烟花动画含 6 种真实爆炸类型（牡丹/垂柳/菊花/光环/棕榈/频闪），星光拖尾非圆点渲染，星芒闪光，全卡片高度随机位置
+- 烟花动画含 6 种真实爆炸类型（牡丹/垂柳/菊花/光环/棕榈/频闪），流光拖尾非圆点渲染，星芒闪光，全卡片高度随机位置
 - 烟花火箭轨迹加入曲率漂移 + 正弦摆动，非匀速直线
 - 烟花发射频率约 0.7s~2.0s 间隔，循环播放
 
 ### 修复
 - 修复编辑对话标题后发送消息导致标题被覆盖的 Bug：`handleSend` 内 3 处 `setDoc` 调用统一改为仅在新建对话时写入 `title`，已有对话省略 `title` 字段以保留用户手动编辑的标题
+- 修复 AI 修改待办计划标题后点击确认不生效的 Bug：`handleTodoCRUD` 更新 payload 补充 `fundName`、`actionType`、`fundCode` 三个字段
 
 ---
 

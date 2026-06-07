@@ -265,27 +265,27 @@ class Rocket {
     const outer = Math.floor(total * 0.6);
     for (let i = 0; i < outer; i++) {
       const theta = (Math.PI * 2 * i) / outer + (Math.random() - 0.5) * 0.22;
-      const speed = 1.8 + Math.random() * 2.4;
+      const speed = 1.0 + Math.random() * 1.5;
       const vx = Math.cos(theta) * speed;
       const vy = Math.sin(theta) * speed;
       this.particles.push(new StreakParticle(this.x, this.y, vx, vy,
         colors[Math.floor(Math.random() * colors.length)],
         1.0 + Math.random() * 1.5,
-        { gravity: 0.018, friction: 0.989, decay: 0.0055, trailLen: 6 }));
+        { gravity: 0.010, friction: 0.991, decay: 0.003, trailLen: 8 }));
     }
 
     // 内层慢速高亮
     const inner = total - outer;
     for (let i = 0; i < inner; i++) {
       const theta = Math.random() * Math.PI * 2;
-      const speed = 0.4 + Math.random() * 1.2;
+      const speed = 0.25 + Math.random() * 0.8;
       const vx = Math.cos(theta) * speed;
       const vy = Math.sin(theta) * speed;
       const isCore = i < inner * 0.3;
       this.particles.push(new StreakParticle(this.x, this.y, vx, vy,
         isCore ? core : colors[Math.floor(Math.random() * colors.length)],
         1.4 + Math.random() * 2,
-        { gravity: 0.01, friction: 0.993, decay: 0.0045, trailLen: 5, isCore }));
+        { gravity: 0.006, friction: 0.995, decay: 0.0025, trailLen: 7, isCore }));
     }
   }
 
@@ -295,22 +295,22 @@ class Rocket {
     const count = 80 + Math.floor(Math.random() * 35);
     for (let i = 0; i < count; i++) {
       const theta = (Math.PI / 2) + (Math.random() - 0.5) * 1.2; // 30°~150°
-      const speed = 1.6 + Math.random() * 2.6;
+      const speed = 1.0 + Math.random() * 1.6;
       const vx = Math.cos(theta) * speed;
       const vy = Math.sin(theta) * speed;
       this.particles.push(new StreakParticle(this.x, this.y, vx, vy,
         wColors[Math.floor(Math.random() * wColors.length)],
         0.7 + Math.random() * 1.1,
-        { gravity: 0.05, friction: 0.994, decay: 0.0028, trailLen: 12 }));
+        { gravity: 0.028, friction: 0.995, decay: 0.0016, trailLen: 16 }));
     }
     // 顶部雾状光点
     for (let i = 0; i < 20; i++) {
       const theta = (Math.PI / 2) + (Math.random() - 0.5) * 0.5;
-      const speed = 0.3 + Math.random() * 0.7;
+      const speed = 0.2 + Math.random() * 0.5;
       this.particles.push(new StreakParticle(this.x, this.y,
         Math.cos(theta) * speed, Math.sin(theta) * speed,
         '#FFFFFF', 1 + Math.random() * 1.6,
-        { gravity: 0.008, decay: 0.012, trailLen: 3, isCore: true }));
+        { gravity: 0.005, decay: 0.008, trailLen: 4, isCore: true }));
     }
   }
 
@@ -320,22 +320,22 @@ class Rocket {
     const count = 150 + Math.floor(Math.random() * 45);
     for (let i = 0; i < count; i++) {
       const theta = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.18;
-      const speed = 2 + Math.random() * 2.8;
+      const speed = 1.2 + Math.random() * 1.8;
       const vx = Math.cos(theta) * speed;
       const vy = Math.sin(theta) * speed;
       this.particles.push(new StreakParticle(this.x, this.y, vx, vy,
         colors[Math.floor(Math.random() * colors.length)],
         0.7 + Math.random() * 1.2,
-        { gravity: 0.014, friction: 0.989, decay: 0.0032, trailLen: 9 }));
+        { gravity: 0.008, friction: 0.991, decay: 0.0018, trailLen: 12 }));
     }
     // 密集白色核心
     for (let i = 0; i < 35; i++) {
       const theta = Math.random() * Math.PI * 2;
-      const speed = 0.15 + Math.random() * 0.6;
+      const speed = 0.1 + Math.random() * 0.4;
       this.particles.push(new StreakParticle(this.x, this.y,
         Math.cos(theta) * speed, Math.sin(theta) * speed,
         core, 2 + Math.random() * 2.5,
-        { gravity: 0.005, decay: 0.012, trailLen: 4, isCore: true }));
+        { gravity: 0.003, decay: 0.008, trailLen: 5, isCore: true }));
     }
   }
 
@@ -347,13 +347,13 @@ class Rocket {
     for (let i = 0; i < count; i++) {
       const azi = (Math.PI * 2 * i) / count;       // 方位角
       const elev = ringTilt + (Math.random() - 0.5) * 0.2; // 纬度窄带
-      const speed = 2 + Math.random() * 2.4;
+      const speed = 1.2 + Math.random() * 1.6;
       const vx = Math.cos(azi) * Math.cos(elev) * speed;
       const vy = Math.sin(elev) * speed;
       this.particles.push(new StreakParticle(this.x, this.y, vx, vy,
         colors[Math.floor(Math.random() * colors.length)],
         0.8 + Math.random() * 1.3,
-        { gravity: 0.006, decay: 0.005, trailLen: 6 }));
+        { gravity: 0.004, decay: 0.003, trailLen: 8 }));
     }
     // 延迟爆心（30 帧后）
     this._ringCenterPending = true;
@@ -365,13 +365,13 @@ class Rocket {
     const nb = 10 + Math.floor(Math.random() * 5);
     for (let i = 0; i < nb; i++) {
       const theta = (Math.PI / 2) + (Math.random() - 0.5) * 0.8;
-      const speed = 2 + Math.random() * 2;
+      const speed = 1.2 + Math.random() * 1.4;
       const vx = Math.cos(theta) * speed;
       const vy = Math.sin(theta) * speed;
       this.particles.push(new StreakParticle(this.x, this.y, vx, vy,
         branchColors[Math.floor(Math.random() * branchColors.length)],
         2.2 + Math.random() * 1.8,
-        { gravity: 0.022, friction: 0.994, decay: 0.0024, trailLen: 14, isCore: true }));
+        { gravity: 0.013, friction: 0.995, decay: 0.0014, trailLen: 18, isCore: true }));
     }
   }
 
@@ -380,11 +380,11 @@ class Rocket {
     for (const b of bigs.slice(0, 5)) {
       for (let i = 0; i < 8; i++) {
         const theta = Math.random() * Math.PI * 2;
-        const speed = 0.15 + Math.random() * 0.5;
+        const speed = 0.1 + Math.random() * 0.3;
         this.particles.push(new StreakParticle(b.x, b.y,
           Math.cos(theta) * speed, Math.sin(theta) * speed,
           '#FFFEF0', 0.3 + Math.random() * 0.6,
-          { gravity: 0.035, decay: 0.025, trailLen: 3, isCore: true }));
+          { gravity: 0.020, decay: 0.015, trailLen: 4, isCore: true }));
       }
     }
   }
@@ -400,13 +400,13 @@ class Rocket {
       const delay = b * 10;
       for (let i = 0; i < count; i++) {
         const theta = Math.random() * Math.PI * 2;
-        const speed = 0.5 + Math.random() * 1.4;
+        const speed = 0.3 + Math.random() * 0.9;
         const vx = Math.cos(theta) * speed;
         const vy = Math.sin(theta) * speed;
         const p = new StreakParticle(bx, by, vx, vy,
           colors[Math.floor(Math.random() * colors.length)],
           0.6 + Math.random() * 1.6,
-          { gravity: 0.004, decay: 0.03, trailLen: 3, isCore: true });
+          { gravity: 0.003, decay: 0.018, trailLen: 4, isCore: true });
         // 延迟可见
         p._hideFrames = delay;
         const origUpd = p.update.bind(p);
@@ -474,11 +474,11 @@ class Rocket {
     const { core } = this.palette;
     for (let i = 0; i < 55; i++) {
       const theta = Math.random() * Math.PI * 2;
-      const speed = 0.3 + Math.random() * 1.8;
+      const speed = 0.2 + Math.random() * 1.2;
       this.particles.push(new StreakParticle(this.x, this.y,
         Math.cos(theta) * speed, Math.sin(theta) * speed,
         core, 1 + Math.random() * 1.8,
-        { gravity: 0.008, decay: 0.016, trailLen: 4, isCore: true }));
+        { gravity: 0.005, decay: 0.01, trailLen: 5, isCore: true }));
     }
     this.starBursts.push(new StarBurst(this.x, this.y, 0.7));
   }

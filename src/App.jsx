@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef, Fragment, useCallback, useContext } from 'react';
 import {
   Activity, Download, CloudOff, RefreshCw, Sun, Moon, LogOut, Settings, Pause, Play,
-  AlertCircle, TrendingUp, TrendingDown, PieChart, ArrowUpDown, ArrowUp, ArrowDown,
+  AlertCircle, PieChart, ArrowUpDown, ArrowUp, ArrowDown,
   Plus, Edit3, Award, Target, CheckCircle2, Sparkles, X, Cloud, Eye, EyeOff
 } from 'lucide-react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -12,7 +12,7 @@ import { collection, doc, setDoc, deleteDoc, onSnapshot, query, addDoc } from 'f
 // --- 引入拆分出来的功能 ---
 import { auth, db, appId } from './config/firebase';
 import { PROXY_NODES } from './config/constants';
-import { evaluateExpression, calculateXIRR, formatMoney, formatPercent, checkIsTradingTime } from './utils/helpers';
+import { evaluateExpression, formatMoney, formatPercent, checkIsTradingTime } from './utils/helpers';
 import { fetchFundNavService } from './services/navFetcher';
 import { fetchMarketService } from './services/marketFetcher';
 import { AnimatedNumber } from './components/UI/AnimatedNumber';
@@ -24,10 +24,11 @@ import { FundProfileModal } from './components/Fund/FundProfileModal';
 import { FundEditor } from './components/Fund/FundEditor';
 import { PortfolioAnalysisModal } from './components/Portfolio/PortfolioAnalysisModal';
 import { TodoListCard } from './components/Dashboard/TodoListCard';
+
 import { FundTable } from './components/Dashboard/FundTable';
-import { useBaseFundsData } from './hooks/useBaseFundsData';
-import { usePortfolioStats } from './hooks/usePortfolioStats';
+import { useFundMetrics } from './hooks/useFundMetrics';
 import { useModalAnimation } from './hooks/useModalAnimation';
+import { debugLog } from './utils/debugLog';
 import { AnimatedModal } from './components/UI/AnimatedModal';
 import { SmartInput } from './components/UI/SmartInput';
 import { Tooltip } from './components/UI/Tooltip';
@@ -45,6 +46,62 @@ const PrivacyEyeButton = () => {
     </Tooltip>
   );
 };
+
+// ── React.memo 包裹的渲染子组件，阻断 App 重渲染向子树传播 ──
+
+const PortfolioSummaryCards = React.memo(({ stats }) => {
+  const items = [
+    { label: '投资总净本金', val: stats.totalInvested, color: '' },
+    { label: '全盘持仓总值', val: stats.totalCurrentValue, color: 'text-blue-600 dark:text-blue-400' },
+    { label: '全盘累计盈亏', val: stats.totalProfit, color: stats.totalProfit>=0?'text-red-500':'text-green-500' },
+    { label: '综合年化(XIRR)', val: stats.overallXirr, color: stats.overallXirr>=0?'text-red-500':'text-green-500', isPercent: true },
+    { label: '简单收益率', val: stats.overallSimpleReturn, color: stats.overallSimpleReturn>=0?'text-red-500':'text-green-500', isPercent: true }
+  ];
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4 relative pt-2">
+      {items.map((item, idx) => (
+        <div key={idx} className="apple-card-hover p-3 sm:p-4 xl:p-5 relative overflow-hidden z-10 transition-colors duration-500">
+          <div className="text-fluid-stat-sm font-bold text-slate-500 mb-1 sm:mb-1.5 relative z-10">{item.label}</div>
+          <div className={`text-fluid-stat font-bold font-mono relative z-10 ${item.color} transition-colors duration-500`}>
+              <AnimatedNumber value={item.val} formatter={item.isPercent ? formatPercent : formatMoney} />
+          </div>
+          {idx === 3 && <div className="absolute -right-2 -bottom-2 text-slate-100 dark:text-slate-700/50 transform-gpu"><Award size={90} className="w-[60px] h-[60px] sm:w-[80px] sm:h-[80px] xl:w-[100px] xl:h-[100px] transform rotate-12"/></div>}
+        </div>
+      ))}
+    </div>
+  );
+});
+
+const RankingPanels = React.memo(({ stats, fmt }) => {
+  const panels = [
+    { key: 'xirr', title: '按年化(XIRR)排序榜单', data: stats.rankedByXirr, valKey: 'xirr', isPercent: true },
+    { key: 'profit', title: '按累计收益排序榜单', data: stats.rankedByProfit, valKey: 'profit', isPercent: false },
+    { key: 'simple', title: '按简单收益率排序榜单', data: stats.rankedBySimpleReturn, valKey: 'simpleReturn', isPercent: true },
+  ];
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-6">
+      {panels.map(p => (
+        <div key={p.key} className="apple-card overflow-hidden transition-colors duration-500">
+          <h3 className="text-base sm:text-lg font-bold p-4 sm:p-5 border-b dark:border-slate-700 flex items-center bg-slate-50 dark:bg-slate-900/50">
+            <Award className="mr-2 text-yellow-500"/> {p.title}
+          </h3>
+          <div className="divide-y dark:divide-slate-700 max-h-[400px] overflow-y-auto custom-scrollbar p-1">
+            {p.data.length === 0 ? <div className="p-6 text-center text-slate-400 text-sm">暂无数据</div> : null}
+            {p.data.map((f, i) => (
+              <div key={p.key + f.id} className="flex justify-between items-center p-3 sm:p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors rounded-[0.875rem] mx-1">
+                <span className="font-medium truncate flex items-center pr-2 text-sm sm:text-base">
+                  <span className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full text-white text-xs sm:text-sm flex items-center justify-center mr-3 sm:mr-4 transition-transform hover:scale-110 ${i===0?'bg-gradient-to-br from-yellow-400 to-yellow-600 shadow-md':i===1?'bg-gradient-to-br from-slate-300 to-slate-500 shadow-sm':i===2?'bg-gradient-to-br from-amber-600 to-amber-800 shadow-sm':'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>{i+1}</span>
+                  <span className="truncate" title={f.name}>{f.name}</span>
+                </span>
+                <span className={`font-mono font-bold shrink-0 text-base sm:text-lg tabular-nums ${f[p.valKey]>=0?'text-red-500':'text-green-500'}`}>{p.isPercent ? fmt.percent(f[p.valKey]) : fmt.money(f[p.valKey])}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+});
 
 // 提取移除函数（核打击版：绝对防止移动端放大镜图层穿透）
 const removeGlobalSplash = () => {
@@ -74,8 +131,27 @@ const removeGlobalSplash = () => {
 
 // 【新增】引入对话副驾驶组件
 import { PortfolioChat } from './components/Chat/PortfolioChat';
-// 烟花粒子背景动画
-import FireworksBackground from './components/Effects/FireworksBackground';
+// 静态复利推演卡片（React.memo 隔离，防止行情刷新触发烟花重渲染）
+import { CompoundInterestCard } from './components/Dashboard/CompoundInterestCard';
+// 行情卡片网格（tickDirs 状态内部隔离，防止行情涨跌动画触发 App 级重渲染）
+import { MarketCardsGrid } from './components/Dashboard/MarketCardsGrid';
+
+// 刷新按钮：自管理 loading 状态（用内部 useState 替代全局 isFetchingMarket），
+// 确保刷新请求不触发 App 级重渲染，仅按钮自身显示 spinner
+const RefreshButton = React.memo(({ onClick }) => {
+  const [loading, setLoading] = useState(false);
+  const handleClick = async () => {
+    if (loading) return;
+    setLoading(true);
+    try { await onClick(); } finally { setLoading(false); }
+  };
+  return (
+    <button type="button" onClick={handleClick} disabled={loading} className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-1.5 rounded-full flex items-center transition-all shadow-apple-sm font-medium active:scale-[0.97] disabled:opacity-50 group">
+      <RefreshCw size={14} className={`mr-1.5 transition-transform duration-500 group-hover:rotate-180 ${loading ? 'animate-spin' : ''}`} /> 刷新
+    </button>
+  );
+});
+RefreshButton.displayName = 'RefreshButton';
 
 export default function App() {
   const[user, setUser] = useState(null); 
@@ -173,50 +249,11 @@ export default function App() {
   }, []);
   
   const [marketData, setMarketData] = useState([]);
-  const prevPricesRef = useRef({});
-  const [tickDirs, setTickDirs] = useState({}); // { [id]: 'up' | 'down' }
-  const[isFetchingMarket, setIsFetchingMarket] = useState(false);
   const[marketError, setMarketError] = useState('');
   const [activeProxyIndex, setActiveProxyIndex] = useState(0);
 
-  // 检测行情数值变化方向，逐卡片独立计时触发跳动动画
-  const tickTimersRef = useRef({}); // { [id]: timer }
-  useEffect(() => {
-    if (marketData.length === 0) return;
-    const newDirs = { ...tickDirs };
-    marketData.forEach(d => {
-      const prev = prevPricesRef.current[d.id];
-      if (prev !== undefined && prev !== d.price) {
-        newDirs[d.id] = d.price > prev ? 'up' : 'down';
-        // 该卡片已有动画在跑：先清除旧的，再写入新的（方向可能反转）
-        if (tickTimersRef.current[d.id]) {
-          clearTimeout(tickTimersRef.current[d.id]);
-          delete tickTimersRef.current[d.id];
-        }
-        tickTimersRef.current[d.id] = setTimeout(() => {
-          setTickDirs(prev => {
-            const next = { ...prev };
-            delete next[d.id];
-            return next;
-          });
-          delete tickTimersRef.current[d.id];
-        }, 1250);
-      }
-      prevPricesRef.current[d.id] = d.price;
-    });
-    if (Object.keys(newDirs).length !== Object.keys(tickDirs).length
-        || Object.keys(newDirs).some(k => newDirs[k] !== tickDirs[k])) {
-      setTickDirs(newDirs);
-    }
-    // 清理：组件卸载时清除全部未完成的定时器
-    return () => {
-      Object.values(tickTimersRef.current).forEach(clearTimeout);
-    };
-  }, [marketData]);
-  // 组件卸载时兜底清理
-  useEffect(() => () => {
-    Object.values(tickTimersRef.current).forEach(clearTimeout);
-  }, []);
+  // marketError 兜底：fetchMarketService 内部通过 setMarketError 更新，
+  // 此处仅保留手动 catch 块中的 setMarketError 调用
 
   const isFetchingRef = useRef(false);
   const [settingsReady, setSettingsReady] = useState(false); // 防止 Firestore settings 未就绪时提前 fetch
@@ -236,9 +273,6 @@ export default function App() {
   const[fundNavs, setFundNavs] = useState({});
   const[fetchingNavCodes, setFetchingNavCodes] = useState({}); 
   
-  const[xirrMap, setXirrMap] = useState({});
-  const[overallXirr, setOverallXirr] = useState(0);
-
   const[fundProfiles, setFundProfiles] = useState({});
   const[viewingProfileCode, setViewingProfileCode] = useState(null);
 
@@ -335,7 +369,7 @@ export default function App() {
     if (logoutTimerRef.current) clearTimeout(logoutTimerRef.current);
     if (user && INACTIVITY_LIMIT > 0) {
       logoutTimerRef.current = setTimeout(() => {
-        console.log('长时间未操作，自动登出。');
+        debugLog('长时间未操作，自动登出。');
         handleSignOut();
       }, INACTIVITY_LIMIT);
     }
@@ -496,7 +530,6 @@ export default function App() {
   const manualFetch = useCallback(async () => {
      if (isFetchingRef.current) return;
      isFetchingRef.current = true;
-     setIsFetchingMarket(true);
      try {
         await fetchMarketAPI();
      } catch (error) {
@@ -505,7 +538,6 @@ export default function App() {
            setActiveProxyIndex(prev => (prev + 1) % PROXY_NODES.length);
         }
      } finally {
-        setIsFetchingMarket(false);
         isFetchingRef.current = false;
      }
   },[activeProxyIndex, user, settings.proxyMode, settings.customProxyUrl, settings.dataSource]);
@@ -559,6 +591,7 @@ export default function App() {
       isArchived: !!fund.isArchived,
       lastNav: fundNavs[fund.fundCode]?.nav || fund.lastNav || 0,
       lastNavDate: fundNavs[fund.fundCode]?.date || fund.lastNavDate || '',
+      redemptionFees: fund.redemptionFees || {},
       updatedAt: new Date().toISOString()
     };
 
@@ -653,38 +686,7 @@ export default function App() {
     linkElement.click();
   };
 
-  const { baseFundsData, preXirrPayloads, globalPreCashFlows } = useBaseFundsData(funds, fundNavs, xirrMap);
-
-  useEffect(() => {
-    let isCancelled = false;
-    
-    const computeAllXirrAsync = () => {
-      setTimeout(() => {
-        if (isCancelled) return;
-
-        setXirrMap(prev => {
-           let isChanged = false;
-           const updatedMap = { ...prev };
-           preXirrPayloads.forEach(p => {
-               const res = calculateXIRR(p.flows);
-               if (updatedMap[p.id] !== res) {
-                   updatedMap[p.id] = res;
-                   isChanged = true;
-               }
-           });
-           return isChanged ? updatedMap : prev; 
-        });
-
-        const gRes = calculateXIRR(globalPreCashFlows);
-        setOverallXirr(prev => (prev !== gRes ? gRes : prev));
-      }, 0);
-    };
-    computeAllXirrAsync();
-
-    return () => { isCancelled = true; };
-  },[preXirrPayloads, globalPreCashFlows]);
-
-  const portfolioStats = usePortfolioStats(baseFundsData, settings, overallXirr, globalPreCashFlows, xirrMap, fundProfiles);
+  const { baseFundsData, portfolioStats } = useFundMetrics(funds, fundNavs, settings, fundProfiles);
 
   const sortedFunds = useMemo(() => {
     if (!portfolioStats.computedFundsWithMetrics) return[];
@@ -838,7 +840,7 @@ export default function App() {
                 </div>
                 
                 <div className="flex flex-wrap items-center gap-2.5 text-sm w-full xl:w-auto">
-                  <button type="button" ref={el => el && setProxyModalOpen && null} onClick={(e) => { setModalTriggerRect(e.currentTarget.getBoundingClientRect()); setProxyModalOpen(true); }} className="text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 flex items-center transition-colors bg-slate-50 hover:bg-slate-100 dark:bg-slate-900/50 dark:hover:bg-slate-800 px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 font-medium active:scale-[0.97]">
+                  <button type="button" onClick={(e) => { setModalTriggerRect(e.currentTarget.getBoundingClientRect()); setProxyModalOpen(true); }} className="text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 flex items-center transition-colors bg-slate-50 hover:bg-slate-100 dark:bg-slate-900/50 dark:hover:bg-slate-800 px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700 font-medium active:scale-[0.97]">
                     <Settings size={14} className="mr-1" /> 系统设置中心
                   </button>
 
@@ -849,42 +851,13 @@ export default function App() {
                     {isAutoRefresh ? '自动刷新: 开' : '自动刷新: 关'}
                   </button>
 
-                  <button type="button" onClick={manualFetch} disabled={isFetchingMarket} className={`bg-blue-500 hover:bg-blue-600 text-white px-4 py-1.5 rounded-full flex items-center transition-all shadow-apple-sm font-medium active:scale-[0.97] disabled:opacity-50 group`}>
-                    <RefreshCw size={14} className={`mr-1.5 transition-transform duration-500 group-hover:rotate-180 ${isFetchingMarket ? 'animate-spin' : ''}`}/> 刷新
-                  </button>
+                  <RefreshButton onClick={manualFetch} />
                 </div>
               </div>
               
               {marketError && <div className="text-amber-500 text-sm mb-4 flex items-center animate-in fade-in slide-in-from-top-2 duration-300"><AlertCircle size={14} className="mr-1"/>{marketError}</div>}
               
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
-                {marketData.length === 0 ? (
-                    Array(5).fill(0).map((_, i) => (
-                      <div key={'skel'+i} className="bg-slate-50 dark:bg-slate-900 p-4 sm:p-5 rounded-[0.875rem] border border-slate-100 dark:border-slate-700 animate-pulse">
-                        <div className="h-3 w-16 bg-slate-200 dark:bg-slate-800 rounded mb-3"></div>
-                        <div className="h-6 w-24 bg-slate-200 dark:bg-slate-800 rounded mb-2"></div>
-                        <div className="h-3 w-12 bg-slate-200 dark:bg-slate-800 rounded"></div>
-                      </div>
-                    ))
-                  ) : 
-                  marketData.map((data) => {
-                    const isPositive = data.change > 0;
-                    const textColor = isPositive ? 'text-red-500' : (data.change < 0 ? 'text-green-500' : 'text-slate-500');
-                    return (
-                      <div key={data.id} className={`apple-card-hover p-4 sm:p-5 transition-all duration-300 cursor-default hover:[transform:translateY(-8px)_scale(1.02)] ${tickDirs[data.id] === 'up' ? 'animate-tick-up' : tickDirs[data.id] === 'down' ? 'animate-tick-down' : ''} ${data.change > 0 ? 'bg-tick-up' : data.change < 0 ? 'bg-tick-down' : ''}`}>
-                        <div className="text-sm sm:text-base text-slate-600 dark:text-slate-400 mb-1.5 font-bold tracking-wide truncate">{data.name}</div>
-                        <div className={`text-xl sm:text-2xl lg:text-3xl font-bold font-mono ${textColor} transition-colors duration-300 truncate w-full block`}>
-                          <AnimatedNumber value={data.price} formatter={(v) => v.toFixed(3)} privacy={false} />
-                        </div>
-                        <div className={`text-sm sm:text-base flex items-center mt-1.5 font-mono font-medium ${textColor} transition-colors duration-300 truncate`}>
-                          {isPositive ? <TrendingUp size={16} className="mr-1 shrink-0"/> : (data.change < 0 ? <TrendingDown size={16} className="mr-1 shrink-0"/> : null)}
-                          {isPositive ? '+' : ''}{(data.percent * 100).toFixed(2)}%
-                        </div>
-                      </div>
-                    )
-                  })
-                }
-              </div>
+              <MarketCardsGrid marketData={marketData} />
             </section>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -907,80 +880,9 @@ export default function App() {
                   onCaptureRect={setModalTriggerRect}
                 />
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4 relative pt-2">
-                  {[
-                    { label: '投资总净本金', val: portfolioStats.totalInvested, color: '' },
-                    { label: '全盘持仓总值', val: portfolioStats.totalCurrentValue, color: 'text-blue-600 dark:text-blue-400' },
-                    { label: '全盘累计盈亏', val: portfolioStats.totalProfit, color: portfolioStats.totalProfit>=0?'text-red-500':'text-green-500' },
-                    { label: '综合年化(XIRR)', val: portfolioStats.overallXirr, color: portfolioStats.overallXirr>=0?'text-red-500':'text-green-500', isPercent: true },
-                    { label: '简单收益率', val: portfolioStats.overallSimpleReturn, color: portfolioStats.overallSimpleReturn>=0?'text-red-500':'text-green-500', isPercent: true }
-                  ].map((item, idx) => (
-                    <div key={idx} className="apple-card-hover p-3 sm:p-4 xl:p-5 relative overflow-hidden z-10 transition-colors duration-500">
-                      <div className="text-fluid-stat-sm font-bold text-slate-500 mb-1 sm:mb-1.5 relative z-10">{item.label}</div>
-                      <div className={`text-fluid-stat font-bold font-mono relative z-10 ${item.color} transition-colors duration-500`}>
-                          <AnimatedNumber value={item.val} formatter={item.isPercent ? formatPercent : formatMoney} />
-                      </div>
-                      {idx === 3 && <div className="absolute -right-2 -bottom-2 text-slate-100 dark:text-slate-700/50 transform-gpu"><Award size={90} className="w-[60px] h-[60px] sm:w-[80px] sm:h-[80px] xl:w-[100px] xl:h-[100px] transform rotate-12"/></div>}
-                    </div>
-                  ))}
-                </div>
+                <PortfolioSummaryCards stats={portfolioStats} />
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-6">
-                  
-                  <div className="apple-card overflow-hidden transition-colors duration-500">
-                    <h3 className="text-base sm:text-lg font-bold p-4 sm:p-5 border-b dark:border-slate-700 flex items-center bg-slate-50 dark:bg-slate-900/50">
-                      <Award className="mr-2 text-yellow-500"/> 按年化(XIRR)排序榜单
-                    </h3>
-                    <div className="divide-y dark:divide-slate-700 max-h-[400px] overflow-y-auto custom-scrollbar p-1">
-                      {portfolioStats.rankedByXirr.length === 0 ? <div className="p-6 text-center text-slate-400 text-sm">暂无数据</div> : null}
-                      {portfolioStats.rankedByXirr.map((f, i) => (
-                        <div key={'xirr'+f.id} className="flex justify-between items-center p-3 sm:p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors rounded-[0.875rem] mx-1">
-                          <span className="font-medium truncate flex items-center pr-2 text-sm sm:text-base">
-                            <span className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full text-white text-xs sm:text-sm flex items-center justify-center mr-3 sm:mr-4 transition-transform hover:scale-110 ${i===0?'bg-gradient-to-br from-yellow-400 to-yellow-600 shadow-md':i===1?'bg-gradient-to-br from-slate-300 to-slate-500 shadow-sm':i===2?'bg-gradient-to-br from-amber-600 to-amber-800 shadow-sm':'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>{i+1}</span>
-                            <span className="truncate" title={f.name}>{f.name}</span>
-                          </span>
-                          <span className={`font-mono font-bold shrink-0 text-base sm:text-lg tabular-nums ${f.xirr>=0?'text-red-500':'text-green-500'}`}>{fmt.percent(f.xirr)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="apple-card overflow-hidden transition-colors duration-500">
-                    <h3 className="text-base sm:text-lg font-bold p-4 sm:p-5 border-b dark:border-slate-700 flex items-center bg-slate-50 dark:bg-slate-900/50">
-                      <Award className="mr-2 text-yellow-500"/> 按累计收益排序榜单
-                    </h3>
-                    <div className="divide-y dark:divide-slate-700 max-h-[400px] overflow-y-auto custom-scrollbar p-1">
-                      {portfolioStats.rankedByProfit.length === 0 ? <div className="p-6 text-center text-slate-400 text-sm">暂无数据</div> : null}
-                      {portfolioStats.rankedByProfit.map((f, i) => (
-                        <div key={'profit'+f.id} className="flex justify-between items-center p-3 sm:p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors rounded-[0.875rem] mx-1">
-                          <span className="font-medium truncate flex items-center pr-2 text-sm sm:text-base">
-                            <span className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full text-white text-xs sm:text-sm flex items-center justify-center mr-3 sm:mr-4 transition-transform hover:scale-110 ${i===0?'bg-gradient-to-br from-yellow-400 to-yellow-600 shadow-md':i===1?'bg-gradient-to-br from-slate-300 to-slate-500 shadow-sm':i===2?'bg-gradient-to-br from-amber-600 to-amber-800 shadow-sm':'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>{i+1}</span>
-                            <span className="truncate" title={f.name}>{f.name}</span>
-                          </span>
-                          <span className={`font-mono font-bold shrink-0 text-base sm:text-lg tabular-nums ${f.profit>=0?'text-red-500':'text-green-500'}`}>{fmt.money(f.profit)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="apple-card overflow-hidden transition-colors duration-500">
-                    <h3 className="text-base sm:text-lg font-bold p-4 sm:p-5 border-b dark:border-slate-700 flex items-center bg-slate-50 dark:bg-slate-900/50">
-                      <Award className="mr-2 text-yellow-500"/> 按简单收益率排序榜单
-                    </h3>
-                    <div className="divide-y dark:divide-slate-700 max-h-[400px] overflow-y-auto custom-scrollbar p-1">
-                      {portfolioStats.rankedBySimpleReturn.length === 0 ? <div className="p-6 text-center text-slate-400 text-sm">暂无数据</div> : null}
-                      {portfolioStats.rankedBySimpleReturn.map((f, i) => (
-                        <div key={'simple'+f.id} className="flex justify-between items-center p-3 sm:p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors rounded-[0.875rem] mx-1">
-                          <span className="font-medium truncate flex items-center pr-2 text-sm sm:text-base">
-                            <span className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full text-white text-xs sm:text-sm flex items-center justify-center mr-3 sm:mr-4 transition-transform hover:scale-110 ${i===0?'bg-gradient-to-br from-yellow-400 to-yellow-600 shadow-md':i===1?'bg-gradient-to-br from-slate-300 to-slate-500 shadow-sm':i===2?'bg-gradient-to-br from-amber-600 to-amber-800 shadow-sm':'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>{i+1}</span>
-                            <span className="truncate" title={f.name}>{f.name}</span>
-                          </span>
-                          <span className={`font-mono font-bold shrink-0 text-base sm:text-lg tabular-nums ${f.simpleReturn>=0?'text-red-500':'text-green-500'}`}>{fmt.percent(f.simpleReturn)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div> {/* 结束：三个榜单的 grid 容器 */}
+                <RankingPanels stats={portfolioStats} fmt={fmt} />
 
                 {/* 🌟 新增：待办事项卡片 (它依然属于左侧大的 section 内部) */}
                 <TodoListCard
@@ -1119,24 +1021,11 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="bg-gradient-to-br from-slate-800 to-slate-900 dark:from-slate-900 dark:to-black rounded-[0.875rem] shadow-apple-lg border border-slate-700/60 p-6 sm:p-8 relative overflow-hidden text-white transition-all hover:shadow-xl hover:-translate-y-1 duration-300">
-                  <FireworksBackground />
-                  <div className="absolute -right-6 -bottom-6 text-white/5 pointer-events-none transform-gpu"><TrendingUp size={140}/></div>
-                  <h3 className="text-lg sm:text-xl font-bold mb-4 flex items-center relative z-10 text-blue-400">
-                    <TrendingUp className="mr-2" size={24}/> 静态复利推演
-                  </h3>
-                  <div className="space-y-4 relative z-10">
-                    <div className="text-slate-300 text-sm sm:text-base leading-relaxed">
-                      基于当前 <span className="font-bold text-white tabular-nums text-base sm:text-lg bg-white/10 px-2 py-0.5 rounded-[0.625rem] ml-1 mr-1">{fmt.percent(portfolioStats.overallXirr)}</span> 综合年化收益率推演：
-                    </div>
-                    <div className="pt-2 border-t border-white/10 mt-2">
-                      <div className="text-slate-400 text-sm sm:text-base mb-1">至目标日期预计总持仓将达到:</div>
-                      <div className="text-3xl sm:text-4xl font-bold font-mono tabular-nums text-red-500 tracking-tight break-all drop-shadow-md">
-                        <AnimatedNumber value={portfolioStats.projectedAssets} />
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <CompoundInterestCard
+                  projectedAssets={portfolioStats.projectedAssets}
+                  overallXirr={portfolioStats.overallXirr}
+                  fmt={fmt}
+                />
 
               </section>
             </div>

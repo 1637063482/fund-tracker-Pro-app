@@ -77,7 +77,7 @@ export const calculateXIRR = (cashFlows) => {
   };
 
   let low = -0.999999;
-  let high = 10000;   
+  let high = 10;  // 上限 1000%，覆盖任何真实基金年化收益   
   let rate = 0;
   for (let i = 0; i < 100; i++) {
     rate = (low + high) / 2;

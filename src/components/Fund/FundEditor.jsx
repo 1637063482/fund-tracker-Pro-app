@@ -6,16 +6,37 @@ import { AppleSelect } from '../UI/AppleSelect';
 import { evaluateExpression, formatMoney } from '../../utils/helpers';
 export const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually }) => {
   const [localFund, setLocalFund] = useState({
-    id: fund.id, 
+    id: fund.id,
     name: fund.name || '',
     transactions: fund.transactions?.length > 0 ? [...fund.transactions] :[{ id: Date.now().toString(), date: new Date().toISOString().split('T')[0], amountRaw: '', type: 'buy' }],
     currentValueRaw: fund.currentValueRaw || '',
-    mode: fund.mode || 'manual', 
+    mode: fund.mode || 'manual',
     fundCode: fund.fundCode || '',
     shares: fund.shares || '',
-    isArchived: fund.isArchived || false, 
-    lastNav: fund.lastNav || 0
+    isArchived: fund.isArchived || false,
+    lastNav: fund.lastNav || 0,
+    redemptionFees: fund.redemptionFees?.breakpoints
+      ? { ...fund.redemptionFees }
+      : fund.redemptionFees?.d0_7 !== undefined
+        ? { breakpoints: [7, 30, 180, 365], rates: [fund.redemptionFees.d0_7 || '', fund.redemptionFees.d7_30 || '', fund.redemptionFees.d30_180 || '', fund.redemptionFees.d180_365 || '', fund.redemptionFees.d365_plus || ''] }
+        : { breakpoints: [7, 30, 180, 365], rates: ['', '', '', '', ''] }
   });
+  const [showFeeEditor, setShowFeeEditor] = useState(false);
+
+  const DEFAULT_BREAKPOINTS = [7, 30, 180, 365];
+  const bp = localFund.redemptionFees?.breakpoints || DEFAULT_BREAKPOINTS;
+  const rt = localFund.redemptionFees?.rates || ['', '', '', '', ''];
+
+  const handleBreakpointChange = (index, val) => {
+    const newBp = [...bp];
+    newBp[index] = val === '' ? '' : Math.max(1, parseInt(val) || 0);
+    setLocalFund(prev => ({ ...prev, redemptionFees: { ...prev.redemptionFees, breakpoints: newBp } }));
+  };
+  const handleRateChange = (index, val) => {
+    const newRt = [...rt];
+    newRt[index] = val;
+    setLocalFund(prev => ({ ...prev, redemptionFees: { ...prev.redemptionFees, rates: newRt } }));
+  };
 
   const [isFetchingLocalNav, setIsFetchingLocalNav] = useState(false);
   const [localNavError, setLocalNavError] = useState('');
@@ -188,6 +209,52 @@ export const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually 
         )}
       </div>
       
+      {/* 赎回费率设置 — 可折叠，自定义天数阈值 */}
+      <div className="pt-2">
+        <button type="button" onClick={() => setShowFeeEditor(!showFeeEditor)} className="flex items-center gap-2 text-sm font-bold text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors">
+          <span className={`transition-transform ${showFeeEditor ? 'rotate-90' : ''}`}>▸</span>
+          赎回费率设置（卖出摩擦成本计算用）
+          {rt.some(v => v !== '' && v !== undefined) && (
+            <span className="text-[10px] bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-1.5 py-0.5 rounded-full">已配置</span>
+          )}
+        </button>
+        {showFeeEditor && (
+          <div className="mt-3 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-[0.875rem] border border-slate-200/60 dark:border-slate-700/40 animate-in fade-in duration-200">
+            <p className="text-xs text-slate-500 mb-4">填写该基金在各持有天数的赎回费率（%），天数阈值和费率均可修改。可在天天基金或基金公告中查询真实费率。</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              {bp.map((b, i) => {
+                const label = i === 0 ? `< ${b} 天` : `${bp[i - 1]}-${b} 天`;
+                return (
+                  <div key={i} className="flex flex-col items-center gap-2">
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">{label}</span>
+                    <div className="flex items-center gap-1">
+                      <input type="number" min="1" step="1" value={b} onChange={(e) => handleBreakpointChange(i, e.target.value)}
+                        className="w-12 py-1 border border-slate-200 rounded-[0.5rem] dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none text-xs font-mono text-center text-slate-700 dark:text-slate-300 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                      <span className="text-[11px] text-slate-400">天</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <input type="number" step="0.01" min="0" max="2" value={rt[i] ?? ''} onChange={(e) => handleRateChange(i, e.target.value)}
+                        placeholder="1.50" className="w-12 py-1 border border-slate-200 rounded-[0.5rem] dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none text-xs font-mono font-bold text-center text-blue-600 dark:text-blue-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                      <span className="text-[11px] text-slate-400">%</span>
+                    </div>
+                  </div>
+                );
+              })}
+              {/* 最后一档 */}
+              <div className="flex flex-col items-center gap-2">
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">{`> ${bp[bp.length - 1] || '?'} 天`}</span>
+                <span className="text-xs text-slate-300 dark:text-slate-600 py-1.5">—</span>
+                <div className="flex items-center gap-1">
+                  <input type="number" step="0.01" min="0" max="2" value={rt[rt.length - 1] ?? ''} onChange={(e) => handleRateChange(rt.length - 1, e.target.value)}
+                    placeholder="0" className="w-12 py-1 border border-slate-200 rounded-[0.5rem] dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none text-xs font-mono font-bold text-center text-blue-600 dark:text-blue-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                  <span className="text-[11px] text-slate-400">%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="pt-4 border-t border-slate-100 dark:border-slate-700">
         <div className="mb-4">
            <h4 className="text-base font-bold text-slate-800 dark:text-slate-200 mb-1">历史现金流记录</h4>

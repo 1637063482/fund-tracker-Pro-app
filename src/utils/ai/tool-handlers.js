@@ -3,6 +3,7 @@ import { buildProxyUrl, buildAllOriginsUrl } from './proxy';
 import { fetchSerperSearch, fetchTavilySearch, fetchExaSearch } from './search-engines';
 import { formatCashFlows } from './market-data';
 import { fetchFinancialNews } from './financial-news';
+import { collection, query, where, orderBy, limit, getDocs, setDoc, doc } from 'firebase/firestore';
 
 // 生成色卡主题（扩展至 14 色 + hex 支持）
 const colorMap = {
@@ -1199,46 +1200,62 @@ const handleGetIndexValuation = async (ctx) => {
       });
     };
 
-    // Step 3: 获取现价（东财 push2）
-    const prefixMap = {};
-    codes.forEach(c => {
-      prefixMap[c] = (c === '000001' || c.startsWith('000') || c.startsWith('5') || c.startsWith('6') || c.startsWith('9')) ? '1.' : '0.';
-    });
-    const secids = codes.map(c => prefixMap[c] + c).join(',');
-    const priceUrl = `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${secids}&fields=f2,f3`;
+    // Step 3: 获取现价（腾讯财经 qt.gtimg.cn — 比东财 push2 更稳定）
+    const toQtCode = (code) => {
+      return (code === '000001' || code.startsWith('000') || code.startsWith('5') || code.startsWith('6') || code.startsWith('9')) ? 'sh' + code : 'sz' + code;
+    };
+    const qtCodes = codes.map(c => toQtCode(c)).join(',');
+    const priceUrl = `https://qt.gtimg.cn/q=${qtCodes}`;
     let priceFetchUrl = buildProxyUrl(settings, priceUrl);
     if (settings.proxyMode !== 'custom' || !settings.customProxyUrl) {
       priceFetchUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(priceUrl)}`;
     }
 
-    let priceData = [];
+    const priceMap = {}; // code → { price, pct }
     try {
       const pRes = await fetch(priceFetchUrl, { cache: 'no-store' });
-      const pRaw = await pRes.text();
-      let pData;
-      try { pData = JSON.parse(pRaw); } catch (e) {
-        if (pRaw.includes('contents')) {
-          const w = JSON.parse(pRaw);
-          pData = typeof w.contents === 'string' ? JSON.parse(w.contents) : w.contents;
+      let text;
+      if (settings.proxyMode === 'custom') {
+        const buffer = await pRes.arrayBuffer();
+        text = new TextDecoder('gbk').decode(buffer);
+      } else {
+        const wrapped = await pRes.json();
+        const raw = wrapped.contents || '';
+        if (raw.includes('�') || raw.includes('��')) {
+          try {
+            const bytes = new Uint8Array(raw.split('').map(c => c.charCodeAt(0)));
+            text = new TextDecoder('gbk').decode(bytes);
+          } catch (e) { text = raw; }
+        } else {
+          text = raw;
         }
       }
-      priceData = pData?.data?.diff || [];
+      const lines = (text || '').split(';').filter(l => l.includes('v_'));
+      lines.forEach(line => {
+        const dataArr = line.substring(line.indexOf('="') + 2, line.length - 1).split('~');
+        if (dataArr.length < 5) return;
+        const rawCode = dataArr[2]; // e.g. "000300"
+        const price = parseFloat(dataArr[3]);
+        const prevClose = parseFloat(dataArr[4]) || parseFloat(dataArr[6]) || 0;
+        const pct = prevClose > 0 ? ((price - prevClose) / prevClose * 100) : (parseFloat(dataArr[32]) || parseFloat(dataArr[13]) || 0);
+        if (rawCode && !isNaN(price)) {
+          priceMap[rawCode] = { price, pct: isNaN(pct) ? null : pct };
+        }
+      });
     } catch (e) { /* ignore */ }
 
     // Step 4: 合并结果
     const results = codes.map((code, i) => {
       const name = nameMap[code] || code;
       const eva = findByCode(code);
-      const priceItem = priceData[i] || {};
+      const qtData = priceMap[code];
 
       const parts = [`${name}(${code})`];
 
-      // 现价
-      if (priceItem.f2 !== undefined) {
-        const price = parseFloat(priceItem.f2);
-        const pct = priceItem.f3 !== undefined ? parseFloat(priceItem.f3) : null;
-        if (!isNaN(price)) parts.push(`现价: ${price.toFixed(2)}`);
-        if (pct !== null && !isNaN(pct)) parts.push(`涨跌: ${pct > 0 ? '+' : ''}${pct.toFixed(2)}%`);
+      // 现价（来自腾讯财经）
+      if (qtData && !isNaN(qtData.price)) {
+        parts.push(`现价: ${qtData.price.toFixed(2)}`);
+        if (qtData.pct !== null && !isNaN(qtData.pct)) parts.push(`涨跌: ${qtData.pct > 0 ? '+' : ''}${qtData.pct.toFixed(2)}%`);
       }
 
       if (eva) {
@@ -1367,9 +1384,9 @@ const handleGetCrossAssetData = async (ctx) => {
       }
     });
 
-    // 东方财富期货: 沪铜主力 + 原油主力
-    const futCodes = '8.IMC0,8.SC0'; // 沪铜主力, SC原油主力
-    const futUrl = `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${futCodes}&fields=f2,f3,f4,f12,f14`;
+    // 新浪财经期货: 沪铜主力 + 原油主力（nf_ 格式: [5]=最新价, [6]=昨结算）
+    const futCodes = 'nf_CU0,nf_SC0';
+    const futUrl = `https://hq.sinajs.cn/list=${futCodes}`;
     let futFetchUrl = buildProxyUrl(settings, futUrl);
     if (settings.proxyMode !== 'custom' || !settings.customProxyUrl) {
       futFetchUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(futUrl)}`;
@@ -1377,25 +1394,37 @@ const handleGetCrossAssetData = async (ctx) => {
 
     try {
       const futRes = await fetch(futFetchUrl, { cache: 'no-store' });
-      const futRaw = await futRes.text();
-      let futData;
-      try { futData = JSON.parse(futRaw); } catch (e) {
-        if (settings.proxyMode !== 'custom') {
-          const w = JSON.parse(futRaw);
-          futData = typeof w.contents === 'string' ? JSON.parse(w.contents) : w.contents;
+      let futText;
+      if (settings.proxyMode === 'custom') {
+        const buffer = await futRes.arrayBuffer();
+        futText = new TextDecoder('gbk').decode(buffer);
+      } else {
+        const wrapped = await futRes.json();
+        const raw = wrapped.contents || '';
+        if (raw.includes('�') || raw.includes('��')) {
+          try {
+            const bytes = new Uint8Array(raw.split('').map(c => c.charCodeAt(0)));
+            futText = new TextDecoder('gbk').decode(bytes);
+          } catch (e) { futText = raw; }
+        } else {
+          futText = raw;
         }
       }
-      const futItems = futData?.data?.diff;
-      if (futItems && Array.isArray(futItems)) {
-        futItems.forEach(item => {
-          const name = item.f14 || item.f12 || '';
-          const price = parseFloat(item.f2);
-          const pct = parseFloat(item.f3) || 0;
-          if (name && !isNaN(price)) {
-            parts.push(`${name}: ${price.toFixed(2)} (${pct > 0 ? '+' : ''}${pct.toFixed(2)}%)`);
-          }
-        });
-      }
+      const futLines = (futText || '').split(';').filter(l => l.includes('hq_str_nf_'));
+      futLines.forEach(line => {
+        const dataArr = line.substring(line.indexOf('="') + 2, line.length - 1).split(',');
+        if (dataArr.length < 7) return;
+        const name = (dataArr[0] || '').replace('连续', '主力');
+        // [5]=最新价(盘中有效，盘后为0), [2]=今开, [6]=昨结算
+        let price = parseFloat(dataArr[5]);
+        if (!price || price <= 0) price = parseFloat(dataArr[2]);  // 盘后fallback: 今开
+        if (!price || price <= 0) price = parseFloat(dataArr[6]);  // 最后fallback: 昨结算
+        const prevClose = parseFloat(dataArr[6]) || 0;
+        const pct = prevClose > 0 ? ((price - prevClose) / prevClose * 100) : 0;
+        if (name && !isNaN(price) && price > 0) {
+          parts.push(`${name}: ${price.toFixed(2)} (${pct > 0 ? '+' : ''}${pct.toFixed(2)}%)`);
+        }
+      });
     } catch (e) {
       parts.push('期货数据暂时获取失败');
     }
@@ -1421,27 +1450,45 @@ const handleGetBondMarketData = async (ctx) => {
   try {
     const parts = [];
 
-    // Step 1: 信用利差 — 国债指数(000012) vs 企债指数(000013)
+    // Step 1: 信用利差 — 国债指数(000012) vs 企债指数(000013)（腾讯财经 qt.gtimg.cn）
     try {
-      const spreadCodes = '1.000012,1.000013';
-      const spreadUrl = `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${spreadCodes}&fields=f2,f3,f4,f9,f23`;
+      const spreadUrl = `https://qt.gtimg.cn/q=sh000012,sh000013`;
       let sFetchUrl = buildProxyUrl(settings, spreadUrl);
       if (settings.proxyMode !== 'custom' || !settings.customProxyUrl) {
         sFetchUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(spreadUrl)}`;
       }
       const sRes = await fetch(sFetchUrl, { cache: 'no-store' });
-      const sRaw = await sRes.text();
-      let sData;
-      try { sData = JSON.parse(sRaw); } catch (e) {
-        if (sRaw.includes('contents')) {
-          const w = JSON.parse(sRaw);
-          sData = typeof w.contents === 'string' ? JSON.parse(w.contents) : w.contents;
+      let text;
+      if (settings.proxyMode === 'custom') {
+        const buffer = await sRes.arrayBuffer();
+        text = new TextDecoder('gbk').decode(buffer);
+      } else {
+        const wrapped = await sRes.json();
+        const raw = wrapped.contents || '';
+        if (raw.includes('�') || raw.includes('��')) {
+          try {
+            const bytes = new Uint8Array(raw.split('').map(c => c.charCodeAt(0)));
+            text = new TextDecoder('gbk').decode(bytes);
+          } catch (e) { text = raw; }
+        } else {
+          text = raw;
         }
       }
-      const items = sData?.data?.diff;
-      if (items && Array.isArray(items) && items.length >= 2) {
-        const govPct = parseFloat(items[0]?.f3) || 0;
-        const corpPct = parseFloat(items[1]?.f3) || 0;
+      // 解析 v_sh000012 / v_sh000013 格式
+      const bondMap = {};
+      const lines = (text || '').split(';').filter(l => l.includes('v_sh'));
+      lines.forEach(line => {
+        const dataArr = line.substring(line.indexOf('="') + 2, line.length - 1).split('~');
+        if (dataArr.length < 5) return;
+        const code = dataArr[2];
+        const price = parseFloat(dataArr[3]);
+        const prevClose = parseFloat(dataArr[4]) || 0;
+        const pct = prevClose > 0 ? ((price - prevClose) / prevClose * 100) : 0;
+        if (code && !isNaN(pct)) bondMap[code] = pct;
+      });
+      const govPct = bondMap['000012'] ?? 0;
+      const corpPct = bondMap['000013'] ?? 0;
+      if (bondMap['000012'] !== undefined || bondMap['000013'] !== undefined) {
         const spread = corpPct - govPct;
         const signal = spread > 0.05 ? '🔥 信用利差大幅收窄 → 风险偏好飙升，利好含权资产/可转债/信用债'
           : spread > 0.01 ? '✅ 信用利差温和收窄 → 风险偏好回升'
@@ -1449,6 +1496,8 @@ const handleGetBondMarketData = async (ctx) => {
           : spread < -0.01 ? '⚠️ 信用利差温和走阔 → 避险情绪上升'
           : '➖ 信用利差稳定 → 多空平衡';
         parts.push(`【信用利差】\n国债指数(000012): ${govPct>0?'+':''}${govPct.toFixed(2)}% | 企债指数(000013): ${corpPct>0?'+':''}${corpPct.toFixed(2)}%\n利差方向: ${signal}`);
+      } else {
+        parts.push('信用利差数据暂不可用');
       }
     } catch (e) {
       parts.push('信用利差数据暂不可用');
@@ -1548,6 +1597,91 @@ const handleGetMacroData = async (ctx) => {
   }
 };
 
+// ============================================================================
+// 打分快照工具：跨对话共享打分历史，用于动量修正与滞回锁定
+// ============================================================================
+
+const handleGetRecentScores = async (ctx) => {
+  const { args, toolCall, body, firestoreContext } = ctx;
+  const days = args.days || 5;
+
+  if (!firestoreContext?.db || !firestoreContext?.userId || !firestoreContext?.appId) {
+    body.messages.push({
+      role: "tool", tool_call_id: toolCall.id, name: "get_recent_scores",
+      content: "【系统提示】打分快照存储未就绪（缺少数据库连接），本次无法查询历史打分。请跳过动量修正，记为 0。"
+    });
+    return;
+  }
+
+  try {
+    const { db, userId, appId } = firestoreContext;
+    const sinceDate = new Date();
+    sinceDate.setDate(sinceDate.getDate() - Math.max(days, 30)); // 最多查30天
+
+    const snapshotsRef = collection(db, 'artifacts', appId, 'users', userId, 'scoring_snapshots');
+    const q = query(
+      snapshotsRef,
+      where('date', '>=', sinceDate.toISOString().split('T')[0]),
+      orderBy('date', 'desc'),
+      limit(Math.min(days, 30))
+    );
+
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) {
+      body.messages.push({
+        role: "tool", tool_call_id: toolCall.id, name: "get_recent_scores",
+        content: `【打分快照查询结果】近 ${days} 天内无历史打分记录。这是首次打分，动量修正记为 0，滞回锁定不触发。`
+      });
+      return;
+    }
+
+    let recordsText = `【打分快照查询结果 — 近 ${days} 天历史】\n`;
+    snapshot.forEach(doc => {
+      const s = doc.data();
+      recordsText += `\n--- 日期: ${s.date} ---\n`;
+
+      if (s.equity) {
+        recordsText += `权益分: F1(宏观赔率)=${s.equity.F1} F2(微观反转)=${s.equity.F2} F3(量能验证)=${s.equity.F3} F4(跨资产)=${s.equity.F4} | 因子总分=${s.equity.totalRaw} | 动量修正=${s.equity.momentum ?? 0} | 最终得分=${s.equity.final}\n`;
+      }
+      if (s.bond && s.bond.totalRaw != null) {
+        recordsText += `固收分: F1(利率水位)=${s.bond.F1} F2(股债跷跷板)=${s.bond.F2} | 因子总分=${s.bond.totalRaw} | 动量修正=${s.bond.momentum ?? 0} | 最终得分=${s.bond.final}\n`;
+      }
+      if (s.verdict) {
+        recordsText += `CIO判定: 权益指令=${s.verdict.equityAction ?? 'N/A'}`;
+        if (s.verdict.bondAction) recordsText += ` 固收指令=${s.verdict.bondAction}`;
+        recordsText += ` 滞回锁定=${s.verdict.hysteresisActive ? '是' : '否'}\n`;
+      }
+    });
+
+    body.messages.push({
+      role: "tool", tool_call_id: toolCall.id, name: "get_recent_scores",
+      content: recordsText
+    });
+  } catch (e) {
+    console.error("打分快照查询失败", e);
+    body.messages.push({
+      role: "tool", tool_call_id: toolCall.id, name: "get_recent_scores",
+      content: `【系统提示】打分快照查询异常: ${e.message}。请跳过动量修正，记为 0。`
+    });
+  }
+};
+
+const handleStoreScoringSnapshot = async (ctx) => {
+  const { args, toolCall, body, pendingActions } = ctx;
+
+  // 推入 auto-confirm 通道：toolType='score_record' 将由 actionHandlers 自动执行，无需用户确认
+  pendingActions.push({
+    ...args,
+    toolType: 'score_record',
+    createdAt: new Date().toISOString()
+  });
+
+  body.messages.push({
+    role: "tool", tool_call_id: toolCall.id, name: "store_scoring_snapshot",
+    content: "【系统提示】打分快照已自动保存到云端存储。后续跨对话动量修正和滞回锁定将引用此记录。"
+  });
+};
+
 const HANDLER_MAP = {
   'get_fund_history_data': handleGetFundHistoryData,
   'get_realtime_fund_data': handleGetRealtimeFundData,
@@ -1570,6 +1704,8 @@ const HANDLER_MAP = {
   'get_cross_asset_data': handleGetCrossAssetData,
   'get_bond_market_data': handleGetBondMarketData,
   'get_macro_data': handleGetMacroData,
+  'get_recent_scores': handleGetRecentScores,
+  'store_scoring_snapshot': handleStoreScoringSnapshot,
 };
 
 // 分发入口：根据 toolName 调用对应 handler

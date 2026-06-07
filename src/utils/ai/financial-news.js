@@ -1,6 +1,7 @@
 // 财经快讯聚合模块：并行拉取新浪财经免费快讯 + 搜索引擎兜底，去重合并后供 AI 引用
 import { buildProxyUrl } from './proxy';
 import { fetchTavilySearch, fetchSerperSearch } from './search-engines';
+import { debugLog } from '../debugLog';
 
 // 新浪财经栏目：免费、无需认证、结构化 JSON
 const SINA_LID_MAP = {
@@ -157,7 +158,7 @@ export async function fetchFinancialNews(settings, topic = 'market', limit = 12)
   const final = allItems.slice(0, limit);
 
   if (final.length > 0) {
-    console.log('[财经快讯] 聚合 ' + final.length + ' 条（新浪 ' + sinaItems.length + ' + 搜索 ' + searchItems.length + '）');
+    debugLog('[财经快讯] 聚合 ' + final.length + ' 条（新浪 ' + sinaItems.length + ' + 搜索 ' + searchItems.length + '）');
   }
 
   return { source: '多源聚合', items: final };
