@@ -98,6 +98,18 @@
 - [x] 文件上传解析（Gemini OCR）
 - [x] 分享 PDF 功能
 
+### v1.5.1 — AI 架构重构与设置数据修复（已交付）— 2026-06-09
+
+- [x] AI 引擎模块化重构：core.js (653→99行) → orchestrator + pipeline + adapter + context 分层架构
+- [x] AI 厂商适配层：GeminiAdapter / OpenAIAdapter 统一协议序列化
+- [x] 上下文管理器 (ContextManager)：4 个 Selector 按意图精准选取注入数据 + Token 预算控制
+- [x] 双层意图路由器 (context-router)：FastPath 关键词零成本 + SlowPath 轻量 AI 5s 超时兜底
+- [x] JS 层预计算缓存 (DataCache)：同日+同持仓状态下复用预计算结果
+- [x] 行情数据 depth 参数：summary 模式跳过 ~20 次分时+K线请求
+- [x] 修复 Firestore rules 导致设置从未成功持久化的问题
+- [x] 修复 ProxySettingsModal 空字符串覆盖真实 API Key 的问题
+- [x] handleSaveSettings 写入失败 toast 提示
+
 ### v1.4 — 体验优化（部分交付）
 
 - [x] 金额隐私模式（一键隐藏/显示）

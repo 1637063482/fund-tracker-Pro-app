@@ -1,7 +1,37 @@
 // 本地预计算层 — 将确定性的、规则化的计算前置到 JS 端
 // 避免 AI 每轮重新分析同一份原始数据，节省输入 + 输出 token
 import { analyzeHoldingPeriods } from './fifo';
-import { classifyFundType, classifyAssetClass, classifyFundTypeShort } from '../fundClassifier';
+import { classifyFundType, classifyAssetClass } from '../fundClassifier';
+
+// ============================================================================
+// DataCache — 同次对话内缓存预计算结果，避免重复遍历
+// 失效条件：totalCurrentValue 变化 / 持仓数变化 / 跨日
+// ============================================================================
+let _cache = null;
+
+export const getDataCache = (portfolioStats, settings) => {
+  const currentDate = new Date().toDateString();
+  const currentValue = portfolioStats.totalCurrentValue || 0;
+  const fundCount = portfolioStats.computedFundsWithMetrics?.filter(f => f.currentValue > 0 && !f.isArchived).length || 0;
+  const snapshotKey = `${currentValue}|${fundCount}|${currentDate}`;
+
+  if (_cache && _cache._snapshotKey === snapshotKey) return _cache;
+
+  const insights = precomputePortfolioInsights(portfolioStats, settings);
+  _cache = {
+    _snapshotKey: snapshotKey,
+    ...insights,
+    getFund(fundCode) {
+      return (insights.fundList || []).find(f => f.code === fundCode) || null;
+    },
+    getTradeWarnings() {
+      return insights.alerts || [];
+    }
+  };
+  return _cache;
+};
+
+export const clearDataCache = () => { _cache = null; };
 
 // ============================================================================
 // 主入口：预计算全量持仓洞察
@@ -24,10 +54,11 @@ export const precomputePortfolioInsights = (portfolioStats, settings) => {
   for (const f of activeFunds) {
     const name = (f.name || '').substring(0, 10);
     const code = f.fundCode || '?';
+    const shares = Number(f.shares) || 0;
     const value = f.currentValue || 0;
     const profitRate = f.totalInvested > 0 ? ((f.profit / f.totalInvested) * 100) : 0;
     const xirr = f.xirr != null ? f.xirr * 100 : null;
-    const typeTag = classifyFundTypeShort(f.name || '');
+    const typeTag = classifyFundType(f.name || '');
     const weight = totalValue > 0 ? ((value / totalValue) * 100) : 0;
 
     // 赎回费陷阱检测
@@ -74,10 +105,11 @@ export const precomputePortfolioInsights = (portfolioStats, settings) => {
     // 基金列表
     fundList.push({ name, code, value, profitRate, xirr, weight, typeTag, trapMark });
 
-    // 紧凑行
+    // 紧凑行：名称│代码│份额│市值│盈亏率│XIRR│占比│类型│标记
     const xirrStr = xirr !== null ? xirr.toFixed(1) + '%' : '-';
     const profitStr = (profitRate >= 0 ? '+' : '') + profitRate.toFixed(1) + '%';
-    portfolioTable += `${name.padEnd(10)}│${code}│${String(Math.round(value)).padStart(7)}│${profitStr.padStart(7)}│${xirrStr.padStart(6)}│${weight.toFixed(1).padStart(4)}%│${typeTag.padEnd(3)}${trapMark}\n`;
+    const sharesStr = shares > 0 ? (shares >= 1000 ? Math.round(shares).toLocaleString() : shares.toFixed(2)) : '?';
+    portfolioTable += `${name.padEnd(8)}│${code}│${sharesStr.padStart(8)}│${String(Math.round(value)).padStart(8)}│${profitStr.padStart(7)}│${xirrStr.padStart(6)}│${weight.toFixed(1).padStart(4)}%│${typeTag.padEnd(9)}${trapMark}\n`;
   }
 
   // 大类集中度检测
@@ -105,11 +137,10 @@ export const precomputePortfolioInsights = (portfolioStats, settings) => {
   const alerts = [];
   if (feeTraps.length > 0) {
     const trapSummary = feeTraps.map(t => `${t.fundCode}(${t.shortAmount}元↘费≈${t.estimatedFee}元)`).join(', ');
-    alerts.push(`⚠️赎回陷阱: ${trapSummary}`);
-  }
-  if (concentrationRisks.length > 0) {
-    const concSummary = concentrationRisks.map(c => `${c.type}:${c.fund}(${c.weight})`).join(', ');
-    alerts.push(`⚠️集中度: ${concSummary}`);
+    const trapCodes = new Set(feeTraps.map(t => t.fundCode));
+    const noTrapCount = activeFunds.length - trapCodes.size;
+    const note = noTrapCount > 0 ? `（其余${noTrapCount}只无赎回费问题）` : '';
+    alerts.push(`⚠️赎回陷阱: ${trapSummary}${note}`);
   }
   if (idleFunds > totalValue * 0.3) {
     alerts.push(`⚠️闲置资金占比${((idleFunds / totalValue) * 100).toFixed(0)}%，过高`);

@@ -26,7 +26,7 @@ export const ActionCard = ({ action, onConfirm, onCancel, todos = [] }) => {
     if (!isNaN(inputVal) && inputVal > 0) {
       finalFeeAmount = feeMode === 'rate' ? rawAmount * (inputVal / 100) : inputVal;
     }
-    onConfirm(action, { date: form.date, fee: finalFeeAmount, shares: form.shares, extractedText: form.extractedText });
+    onConfirm(action, { date: form.date, fee: finalFeeAmount, shares: form.shares, extractedText: form.extractedText, stockPct: form.stockPct, bondPct: form.bondPct, fundPct: form.fundPct, cashPct: form.cashPct, otherPct: form.otherPct });
   };
 
   return (
@@ -113,17 +113,53 @@ export const ActionCard = ({ action, onConfirm, onCancel, todos = [] }) => {
         )}
 
         {action.toolType === 'fof_dict' && (
-          <div className="mt-2 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-[0.875rem] border border-blue-200/60 dark:border-blue-800/40">
-            <div className="text-blue-700 dark:text-blue-300 font-bold mb-2 border-b border-blue-200/50 pb-1">
-              真实权益仓位：<span className="text-lg">{(action.equityRatio * 100).toFixed(2)}%</span>
-            </div>
-            <div className="text-slate-600 dark:text-slate-400 text-xs space-y-1">
-              {Object.entries(action.sectors || {}).map(([sec, ratio]) => (
-                <div key={sec} className="flex justify-between items-center">
-                  <span>{sec}</span>
-                  <span className="font-mono font-bold text-slate-700 dark:text-slate-300">{(ratio * 100).toFixed(2)}%</span>
+          <div className="mt-2 space-y-2">
+            {/* 用户手动补充五栏 */}
+            {isPending && (
+              <div className="bg-amber-50 dark:bg-amber-900/20 p-3 rounded-[0.875rem] border border-amber-200/60 dark:border-amber-800/40">
+                <div className="text-xs text-amber-700 dark:text-amber-400 font-medium mb-2">
+                  ⚠️ 穿透仅覆盖前十大，无法获取总仓位占比。请根据季报/年报手动填入（留空则不覆盖已有数据）：
                 </div>
-              ))}
+                <div className="grid grid-cols-5 gap-1.5">
+                  {[
+                    { key: 'stockPct', label: '股票%', hint: '如22' },
+                    { key: 'bondPct', label: '债券%', hint: '如70' },
+                    { key: 'fundPct', label: '基金%', hint: '如0' },
+                    { key: 'cashPct', label: '现金%', hint: '如5' },
+                    { key: 'otherPct', label: '其他%', hint: '如3' },
+                  ].map(field => (
+                    <div key={field.key} className="text-center">
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 mb-0.5">{field.label}</div>
+                      <input
+                        type="number"
+                        min="0" max="100" step="0.1"
+                        placeholder={field.hint}
+                        value={form[field.key] || ''}
+                        onChange={e => setForm({ ...form, [field.key]: e.target.value })}
+                        className="w-full text-center text-xs font-mono font-bold border border-amber-200 dark:border-amber-700 rounded-[0.625rem] px-1 py-1.5 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-amber-400"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 穿透明细 — 仅展示前十大和行业分布，不展示 AI 估算仓位 */}
+            <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-[0.875rem] border border-blue-200/60 dark:border-blue-800/40">
+              <div className="text-xs text-blue-600 dark:text-blue-400 font-medium mb-2">
+                📊 前十大持仓穿透（占净值比例）— 总仓位请在上方手动填写
+              </div>
+              <div className="text-slate-600 dark:text-slate-400 text-xs space-y-1">
+                {Object.entries(action.sectors || {}).map(([sec, ratio]) => (
+                  <div key={sec} className="flex justify-between items-center">
+                    <span>{sec}</span>
+                    <span className="font-mono font-bold text-slate-700 dark:text-slate-300">{(ratio * 100).toFixed(2)}%</span>
+                  </div>
+                ))}
+              </div>
+              {!Object.keys(action.sectors || {}).length && (
+                <div className="text-xs text-slate-400">无行业分布数据（纯债/货币基金）</div>
+              )}
             </div>
           </div>
         )}

@@ -43,7 +43,9 @@ export const ProxySettingsModal = ({ settings, onSave, onClose, triggerRect }) =
   };
 
   const handleSave = () => {
-    onSave({
+    // 构建完整 settings 对象时，剔除敏感字段的空字符串值，
+    // 防止 merge:true 把真实 API Key 覆盖成空字符串导致数据丢失
+    const raw = {
       proxyMode: mode,
       customProxyUrl: customUrl,
       dataSource,
@@ -67,7 +69,20 @@ export const ProxySettingsModal = ({ settings, onSave, onClose, triggerRect }) =
       cfWorkerSecret: cfWorkerSecret,
       customAiProviders: customProviders,
       animationSpeed: animSpeed
-    });
+    };
+
+    // 剔除所有空字符串的敏感字段，避免 merge:true 覆盖 Firestore 中的真实值
+    const sensitiveKeys = [
+      'customProxyUrl', 'geminiApiKey', 'deepseekApiKey', 'siliconflowApiKey',
+      'tavilyApiKey', 'exaApiKey', 'serperApiKey', 'cfWorkerUrl', 'cfWorkerSecret', 'ntfyTopic'
+    ];
+    const cleaned = {};
+    for (const [key, val] of Object.entries(raw)) {
+      if (sensitiveKeys.includes(key) && val === '') continue;  // 跳过空字符串的敏感字段
+      cleaned[key] = val;
+    }
+
+    onSave(cleaned);
     animClose();
   };
 

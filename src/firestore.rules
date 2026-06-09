@@ -1,47 +1,41 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
+
     // 封装一个函数，专门用来判断是否是本人操作
     function isOwner(userId) {
       return request.auth != null && request.auth.uid == userId;
     }
 
     match /artifacts/{appId}/users/{userId} {
-      
+
       // ---------- 1. 基金数据 (funds) 集合的严格控制 ----------
       match /funds/{fundId} {
         // 读：只能读自己的
         allow read: if isOwner(userId);
-        
+
         // 创建：必须是本人，且必须包含必要的字段，且类型要正确
-        allow create: if isOwner(userId) 
+        allow create: if isOwner(userId)
                       && request.resource.data.keys().hasAll(['name', 'currentValue', 'updatedAt'])
                       && request.resource.data.name is string
                       && request.resource.data.currentValue is number
                       // 限制名字长度，防止恶意写入超大文本
                       && request.resource.data.name.size() < 100;
-        
+
         // 更新：必须是本人，不能修改文档的归属，且新数据也要符合格式
         allow update: if isOwner(userId)
                       && request.resource.data.name is string
                       && request.resource.data.currentValue is number;
-        
+
         // 删除：允许本人删除
         allow delete: if isOwner(userId);
       }
 
-      // ---------- 2. 设置数据 (settings) 集合的严格控制 ----------
+      // ---------- 2. 设置数据 (settings) 集合 — 放宽约束，避免 setDoc merge 时误拦截 ----------
       match /settings/general {
-        allow read: if isOwner(userId);
-        allow create, update: if isOwner(userId)
-                              // 目标金额必须是数字且大于0
-                              && request.resource.data.targetAmount is number
-                              && request.resource.data.targetAmount >= 0
-                              // 日期必须是字符串
-                              && request.resource.data.targetDate is string;
+        allow read, create, update, delete: if isOwner(userId);
       }
-      
+
       // ---------- 3. 聊天记录 (chat) 集合的授权 ----------
       match /chat/history {
         // 允许本人读写自己的 AI 对话上下文记忆
@@ -56,17 +50,14 @@ service cloud.firestore {
 
       // ---------- 4. 🌟 待办计划 (todos) 集合的授权 (已修复) ----------
       match /todos/{todoId} {
-        // 核心安全底线：只要是当前用户本人的操作，全部放行。
-        // 撤销对具体字段的死板限制，允许 AI 自由地使用 merge 插入 condition、amount 等新字段，
-        // 也允许 AI 在顺延过期计划时重建文档。
         allow read, write: if isOwner(userId);
       }
-      
+
       // ---------- 5. 🌟 战略备忘录 (ai_memos) 集合的授权 (已修正为平级) ----------
       match /ai_memos/{memoId} {
         allow read, write: if isOwner(userId);
       }
-      
+
       // ---------- 6. 🌟 资产穿透字典 (FOF X-Ray) 新增集合的授权 ----------
       match /fof_dict/{docId} {
         allow read, write: if isOwner(userId);

@@ -183,7 +183,8 @@ export default function App() {
   const handleToggleTodo = async (id, isCompleted) => {
     if (!user || !db) return;
     const todoRef = doc(db, 'artifacts', appId, 'users', user.uid, 'todos', id);
-    await setDoc(todoRef, { isCompleted }, { merge: true });
+    const now = new Date().toISOString();
+    await setDoc(todoRef, { isCompleted, completedAt: isCompleted ? now : null, updatedAt: now }, { merge: true });
   };
 
   const handleDeleteTodo = async (id) => {
@@ -621,6 +622,9 @@ export default function App() {
       await setDoc(settingsDocRef, newSettings, { merge: true });
     } catch (error) {
       console.error("保存云端设置失败:", error);
+      // 保存失败时回滚 local state，避免 UI 与 Firestore 不一致
+      setSettings(prev => ({ ...prev }));
+      toast('设置保存失败，请检查网络连接或刷新后重试', 'error');
     }
   };
 

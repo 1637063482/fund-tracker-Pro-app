@@ -6,6 +6,62 @@
 
 ---
 
+## [1.6.0] — 2026-06-09
+
+### 优化
+- **System Prompt 深度压缩（-47%）**：Core + SkillLibrary + ScoringSystem 三合一内联至 `system.js`，规则去重、`▸` 注意力锚点、冗余描述精简化。14,000→7,600 chars，DeepSeek 前缀缓存 100% 命中不变
+- **备忘录结构化注入**：`coreLogic` 从自由文本全文注入改为 12 个可选字段解析（定调/净值锚/风格/网格/击球区/止盈/止损/仓位/相关性/建仓条件/红线），AI 直接读取决策参数而非阅读理解 600 字 Markdown。个基备忘 >30 只时截断
+- **待办事项结构化注入**：`condition` 字段解析为冻结状态+触发条件+关键备注，三层分组（🟢可执行/⛔已冻结/✅在途），带金额汇总和统一冻结原因。优先级从纯 emoji 升级为 `🔴高/🟡中/🟢低`
+- **待办新增时间戳**：`handleToggleTodo` 写入 `completedAt`/`updatedAt`，完成待办按时间倒序排列并过滤 30 天外历史数据
+- **Tool Definitions 精简（-35%）**：参数描述最小化，移除与 System Prompt 重复的规则说明
+- **持仓表格增强**：新增份额列、类型标记从 2 字短标签升级为 8 字详细分类（`基金分类器.classifyFundType`）、移除集中度告警、未标记 `⚠短` 的持仓明确标注无赎回费问题
+- **State Wrapper 四层注意力锚点**：第一优先(硬数据+风控) → 第二优先(财富目标) → 第三优先(持仓) → 第四优先(待办)，视觉分隔符防 AI 注意力稀释
+- **History 降采样增强**：多格式摘要提取兜底（`[本轮摘要]/摘要/总结/核心结论` + 首句 fallback）、更强的雷达噪音清洗
+- **第五层批量巡检补回**：重构时丢失的 `INSPECTION_ROUTINE` 恢复，含前置打分/战术拦截/防污染墙/排版 6 步骤
+- **第四层步骤四·双层自检回顾**：第 1 层 Score vs OHLC（模型是否钝化）+ 第 2 层 P&L vs 大盘 Beta（持仓是否风格错配），含 T+1 净值延迟陷阱免责声明和归因隔离铁律
+- **打分快照新增量价+P&L 字段**：`turnoverYi/upCount/downCount/volumeRatio/f3Flags` + `totalValue/totalProfit/overallXirr`，一调用 `get_recent_scores` 同时获取分数趋势和盈亏趋势
+- **Dev 模式完整 AI 思考日志**：`chat-pipeline.js` 使用 `console.groupCollapsed` 完整输出每轮思考过程、中间文本、工具结果、最终输出，折叠展示免刷屏
+
+### 修复
+- **持仓穿透数据严重失真**：东方财富 API `JZBL` 返回正确百分比值（如 `"0.99"`=0.99%），但 `normalizePct()` 将 <1 的值 ×100（0.99→99%）。移除错误归一化函数
+- **持仓穿透百分比语义混淆**：标注 `占净值比例(JZBL)` 而非 `占股票市值比`，AI 不再误判权益仓位
+- **穿透数据源盲区**：东方财富 fallback 不再限于 `proxyMode==='custom'`，全代理模式均尝试。蛋卷 API `performance_bench_mark` 解析为权益仓位锚点
+- **穿透行业分类全凭 AI 猜**：东方财富 API 自带 `INDEXCODE/INDEXNAME`（申万行业）优先使用，本地 `STOCK_SECTOR_MAP`(~120 只)降级为 fallback。未利用的 `PCTNVCHGTYPE/PCTNVCHG`（调仓方向/幅度）现已输出
+- **穿透+备忘同时出现**：AI 同一轮调 `update_fof_dictionary` + `update_decision_memo` 导致备忘写入 AI 估算的仓位。System Prompt 新增铁律：穿透同一轮禁写该基金备忘
+- **FOF 字典卡片 AI 估算仓位覆盖真实数据**：`handleFofDictWrite` 改为用户手动填写五栏(股票/债券/基金/现金/其他%)后 `equityRatio=stockPct+fundPct`，覆盖 AI 估算。ActionCard 新增五栏输入框，留空不覆盖 Firestore
+- **`renderMarkdown` 范围格式误着色**：`73-77%`、`~1-2%` 中的 `-X%` 被错误着色为绿色。加 `(?<![\d~])` 负向断言排除，同时 `whitespace-nowrap` 防止范围值中间断行
+- `get_realtime_fund_data`/`get_batch_fund_data` 丢弃 `type_desc`/`risk_level`/`totshare`/`manager_name`/`max_drawdown`/`fund_rates` → 现全部注入（零额外 HTTP）
+- `useWebSearch` 链路断裂：core→orchestrator 传递但未解构 → 移除无效传递
+- `modules.js`/`context-router.js` 死代码清理
+- 分隔线从 12 条减至 7 条，仅保留模块边界处
+
+---
+
+## [1.5.1] — 2026-06-09
+
+### 变更
+- **AI 引擎全面重构**：核心对话引擎 `core.js` 从 653 行单体架构拆分为模块化架构
+  - `orchestrator.js` — 编排器，收口所有 AI 入口，组合 Adapter + Pipeline + Context
+  - `adapters/` — AI 厂商适配层（Gemini / OpenAI / DeepSeek / SiliconFlow），统一 `buildRequest` / `parseText` / `extractToolCalls` / `applyToolResults` 接口
+  - `pipelines/chat-pipeline.js` — 工具调用循环管道，独立于厂商协议
+  - `context-manager.js` — 按意图精准选取注入数据的上下文管理器（4 个 Selector + Token 预算控制）
+  - `context-router.js` — 双层意图路由器（FastPath 关键词零成本 + SlowPath 轻量 AI 5s 超时兜底）
+  - `tools/registry.js` — 工具注册中心，策略模式映射 22 个 handler
+  - `prompts/system.js` — System Prompt 独立模块，纯静态无参数
+  - `prompts/wrapper.js` — 最新状态注入 Wrapper
+  - `prompts/modules.js` — 技能库 + 打分系统按需注入模块
+  - `context/history.js` — 历史消息降采样（今日完整 + 跨日摘要压缩）
+- 旧架构入口 `chatWithPortfolioAI` 保留为向后兼容委托层，无缝过渡
+- `fetchAdvancedMarketData` 新增 `depth` 参数（`'full'` / `'summary'`），摘要模式跳过 ~20 次分时+K线请求，大幅减少 Token 输入
+- `precompute.js` 新增 `getDataCache` 模块级缓存，同日内持仓状态不变时复用预计算结果
+
+### 修复
+- **修复设置数据丢失问题**：`firestore.rules` 中 `settings/general` 的 `targetAmount` / `targetDate` 强制约束导致 `merge:true` 局部更新被整批拒绝，API Key 等敏感字段从未成功持久化。规则放宽为 `allow read, create, update, delete: if isOwner(userId)`
+- **修复敏感字段被空字符串覆盖**：`ProxySettingsModal` 保存时无条件写入所有字段（含空字符串 API Key），现剔除敏感字段的空字符串值后写入，防止 `merge:true` 覆盖 Firestore 中的真实值
+- `handleSaveSettings` 写入失败时新增 toast 错误提示，避免静默失败
+
+---
+
 ## [1.5.0] — 2026-06-06
 
 ### 新增

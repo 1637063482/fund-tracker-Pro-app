@@ -36,9 +36,11 @@ const applyInline = (text) => {
   // 斜体
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
 
-  // 数字着色：带%号的涨跌幅自动着色（+X%红，-X%绿）
-  html = html.replace(/(\+[\d.]+%)/g, '<span class="text-red-500 font-semibold">$1</span>');
-  html = html.replace(/(-[\d.]+%)/g, '<span class="text-green-500 font-semibold">$1</span>');
+  // 数字着色：带%号的涨跌幅自动着色（+X%红，-X%绿）。排除范围格式（73-77%、~1-2%）
+  // 范围格式添加 nowrap 防止断行
+  html = html.replace(/([\d.]+)[-~]([\d.]+%)/g, '<span class="whitespace-nowrap">$1-$2</span>');
+  html = html.replace(/(?<![\d])(\+[\d.]+%)/g, '<span class="text-red-500 font-semibold">$1</span>');
+  html = html.replace(/(?<![\d~])(-[\d.]+%)/g, '<span class="text-green-500 font-semibold">$1</span>');
   // 裸正负数（前有空格的独立数字，如 "涨了 +3.2 元"），仅在中文语境着色
   html = html.replace(/([\s(（])(\+[\d.]+)([\s,，。)）]|$)/g, '$1<span class="text-red-500 font-semibold">$2</span>$3');
   html = html.replace(/([\s(（])(-[\d.]+)([\s,，。)）]|$)/g, '$1<span class="text-green-500 font-semibold">$2</span>$3');
@@ -288,9 +290,9 @@ const applyInlineForPrint = (text) => {
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong style="font-weight:700;color:#0f172a;">$1</strong>');
   // 斜体
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  // 涨跌幅着色
-  html = html.replace(/(\+[\d.]+%)/g, '<span style="color:#ef4444;font-weight:600;">$1</span>');
-  html = html.replace(/(-[\d.]+%)/g, '<span style="color:#22c55e;font-weight:600;">$1</span>');
+  // 涨跌幅着色（排除范围格式 73-77%、~1-2%）
+  html = html.replace(/(?<![\d])(\+[\d.]+%)/g, '<span style="color:#ef4444;font-weight:600;">$1</span>');
+  html = html.replace(/(?<![\d~])(-[\d.]+%)/g, '<span style="color:#22c55e;font-weight:600;">$1</span>');
   html = html.replace(/([\s(（])(\+[\d.]+)([\s,，。)）]|$)/g, '$1<span style="color:#ef4444;font-weight:600;">$2</span>$3');
   html = html.replace(/([\s(（])(-[\d.]+)([\s,，。)）]|$)/g, '$1<span style="color:#22c55e;font-weight:600;">$2</span>$3');
   return html;

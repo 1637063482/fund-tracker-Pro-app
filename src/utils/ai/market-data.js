@@ -152,7 +152,8 @@ export const fetchMultiPeriodKLines = async (code, period = 'day', count = 20, s
 };
 
 // 全息盘口探针：腾讯量价 + 多周期共振 + 东财情绪
-export const fetchAdvancedMarketData = async (settings) => {
+// depth='full' → 完整探针(含分时/多周期K线), depth='summary' → 仅核心行情摘要(零额外fetch)
+export const fetchAdvancedMarketData = async (settings, depth = 'full') => {
   let marketDataStr = "核心宽基走势: 未知";
   let totalTurnoverYi = 0;
   let upCount = 0;
@@ -340,28 +341,37 @@ export const fetchAdvancedMarketData = async (settings) => {
           }
         }
 
-        // 异步注入分时 + 多周期 K 线
-        let intradayPathDesc = "";
-        let dailyKLineDesc = "";
-        const targetCodes = ['000001', '399001', '399006', '511260', '511090'];
+        if (depth === 'summary') {
+          // 摘要模式：仅注入价格涨跌幅，零额外 HTTP
+          infos.push(`${name}: ${cur} (${pct >= 0 ? '+' : ''}${pct}%)`);
+        } else {
+          // radar / full 模式：注入分时路径 + K 线
+          let intradayPathDesc = '';
+          let dailyKLineDesc = '';
+          const targetCodes = ['000001', '399001', '399006', '511260', '511090'];
 
-        if (targetCodes.includes(code)) {
-          const prefix = (code === '000001' || code.startsWith('5')) ? 'sh' : 'sz';
-          const ifzqCode = prefix + code;
+          if (targetCodes.includes(code)) {
+            const prefix = (code === '000001' || code.startsWith('5')) ? 'sh' : 'sz';
+            const ifzqCode = prefix + code;
 
-          const pathStr = await fetchIntradayTrend(ifzqCode, settings);
-          if (pathStr) intradayPathDesc = `\n   📍 日内分时: ${pathStr}`;
+            // 分时路径：所有非 summary 模式都必须拉取
+            const pathStr = await fetchIntradayTrend(ifzqCode, settings);
+            if (pathStr) intradayPathDesc = `\n   📍 日内分时: ${pathStr}`;
 
-          const dailyStr = await fetchMultiPeriodKLines(ifzqCode, 'day', 60, settings, [{period:20, label:'20MA'}, {period:60, label:'60MA'}]);
-          const weeklyStr = await fetchMultiPeriodKLines(ifzqCode, 'week', 20, settings, [{period:20, label:'20周MA'}]);
-          const monthlyStr = await fetchMultiPeriodKLines(ifzqCode, 'month', 12, settings);
+            // 日K（60根含 20MA/60MA）：radar 和 full 都拉
+            const dailyStr = await fetchMultiPeriodKLines(ifzqCode, 'day', 60, settings, [{period:20, label:'20MA'}, {period:60, label:'60MA'}]);
+            dailyKLineDesc = dailyStr || '';
 
-          if (dailyStr || weeklyStr || monthlyStr) {
-            dailyKLineDesc = `${dailyStr}${weeklyStr}${monthlyStr}`;
+            // 周K + 月K：仅 full 模式拉取（radar 跳过以节省 ~10 次 HTTP）
+            if (depth === 'full') {
+              const weeklyStr = await fetchMultiPeriodKLines(ifzqCode, 'week', 20, settings, [{period:20, label:'20周MA'}]);
+              const monthlyStr = await fetchMultiPeriodKLines(ifzqCode, 'month', 12, settings);
+              if (weeklyStr || monthlyStr) dailyKLineDesc += `${weeklyStr}${monthlyStr}`;
+            }
           }
-        }
 
-        infos.push(`- ${name}: ${cur} (${pct > 0 ? '+' : ''}${pct}%) | 振幅: ${amp.toFixed(2)}% | 粗略形态: ${shape}${volumeConfirmation}${intradayPathDesc}${dailyKLineDesc}`);
+          infos.push(`- ${name}: ${cur} (${pct > 0 ? '+' : ''}${pct}%) | 振幅: ${amp.toFixed(2)}% | 粗略形态: ${shape}${volumeConfirmation}${intradayPathDesc}${dailyKLineDesc}`);
+        }
       }
 
       let volumeStatus = "缩量/平量博弈态";
@@ -376,11 +386,19 @@ export const fetchAdvancedMarketData = async (settings) => {
         ? `\n👉 【市场真实情绪】两市上涨 ${upCount} 家 / 下跌 ${downCount} 家 (${breadthStatus})`
         : `\n👉 【市场真实情绪】暂无盘口数据 (休市或数据获取中)`;
 
-      marketDataStr = `👉 【沪深两市总成交额】约 ${totalTurnoverYi.toFixed(2)} 亿元 (${volumeStatus})${breadthStr}\n【核心资产多因子量价走势验证】\n${infos.join('\n')}`;
+      if (depth === 'summary') {
+        const header = '【今日大盘行情摘要】';
+        const turnover = `沪深成交: ${totalTurnoverYi.toFixed(2)}亿`;
+        const breadth = `上涨: ${upCount}家 / 下跌: ${downCount}家`;
+        marketDataStr = `${header}\n${turnover} | ${breadth}\n${infos.join(' | ')}`;
+      } else {
+        marketDataStr = `👉 【沪深两市总成交额】约 ${totalTurnoverYi.toFixed(2)} 亿元 (${volumeStatus})${breadthStr}\n【核心资产多因子量价走势验证】\n${infos.join('\n')}`;
+      }
     }
   } catch (e) {
     console.error(`❌ [量价探针] 腾讯接口致命崩溃:`, e);
   }
 
-  return `\n【今日大盘全息盘口与资金面 (已过滤噪音)】\n${marketDataStr}\n`;
+  const dHeader = depth === 'summary' ? `\n【今日大盘行情摘要】\n` : `\n【今日大盘全息盘口与资金面 (已过滤噪音)】\n`;
+  return `${dHeader}${marketDataStr}\n`;
 };

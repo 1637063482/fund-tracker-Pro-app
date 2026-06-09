@@ -591,7 +591,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
     try {
       const chatHistory = newMessages.filter((_, idx) => idx > 0 && idx < newMessages.length - 1);
 
-      // 🌟 核心拦截：如果开启则下发授权口令，如果关闭则下发系统禁令，防止模型幻觉
+      // 当前架构：所有非问候消息全量注入（system prompt 缓存命中 10× 折扣，路由省不了多少 token，不如直接全量保质量）
       const activeMarketData = enableMacroRadar
           ? "FETCH_NOW"
           : "【系统指令：用户已手动关闭大盘雷达，本次对话进入纯净模式。严禁读取、臆测或分析任何 A股、债市的大盘宏观走势！请彻底抛弃大盘数据，完全基于用户的具体基金持仓和提问作答。】";
