@@ -2,8 +2,9 @@
 name: Build Android APK
 
 on:
-  push:
-    branches: [ "main" ]
+  # push:
+  #   branches: [ "main" ]
+  workflow_dispatch:  # 仅手动触发
 
 jobs:
   build:

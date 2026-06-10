@@ -1390,6 +1390,13 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
                           <span>因子总分: <b className="text-slate-700 dark:text-slate-300">{s.equity.totalRaw}</b></span>
                           <span>动量修正: <b className={s.equity.momentum > 0 ? 'text-green-500' : s.equity.momentum < 0 ? 'text-red-500' : 'text-slate-500'}>{s.equity.momentum >= 0 ? '+' : ''}{s.equity.momentum ?? 0}</b></span>
                         </div>
+                        {(s.equity.turnoverYi || s.equity.f3Flags) && (
+                          <div className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                            {s.equity.turnoverYi && <span>📊 成交{s.equity.turnoverYi}亿 ↑{s.equity.upCount ?? '?'}/↓{s.equity.downCount ?? '?'}</span>}
+                            {s.equity.volumeRatio && <span className="ml-2">量比{s.equity.volumeRatio.toFixed(1)}</span>}
+                            {s.equity.f3Flags && <span className="ml-2 text-amber-500">🏷 {s.equity.f3Flags}</span>}
+                          </div>
+                        )}
                       </>
                     )}
                     {s.bond && (
@@ -1415,6 +1422,13 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
                           </span>
                         )}
                         {s.verdict.hysteresisActive && <span className="text-amber-500 text-[10px]">🛡️ 滞回锁定</span>}
+                      </div>
+                    )}
+                    {(s.totalValue || s.totalProfit != null) && (
+                      <div className="text-[10px] text-slate-400 mt-1 leading-relaxed border-t border-slate-100 dark:border-slate-700/30 pt-1.5">
+                        💰 {s.totalValue && <span>市值{(s.totalValue/10000).toFixed(1)}万</span>}
+                        {s.totalProfit != null && <span className="ml-2">累计盈亏 <b className={s.totalProfit >= 0 ? 'text-red-500' : 'text-green-500'}>{s.totalProfit >= 0 ? '+' : ''}{Math.round(s.totalProfit).toLocaleString()}</b></span>}
+                        {s.overallXirr != null && <span className="ml-2">XIRR <b className={s.overallXirr >= 0 ? 'text-red-500' : 'text-green-500'}>{(s.overallXirr*100).toFixed(1)}%</b></span>}
                       </div>
                     )}
                   </div>

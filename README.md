@@ -1,6 +1,6 @@
-# Fund Tracker Pro
+# Fund Tracker Pro <sup>v1.7.0</sup>
 
-个人基金资产管理 + AI 量化投资 Copilot 系统
+个人基金资产管理 + AI 量化投资 Copilot 系统。AI 引擎由 DeepSeek V4 Pro 驱动，具备 22 个专属工具、五层 System Prompt、双核打分卡、双层自检回顾、结构化备忘录/待办注入。
 
 ## 核心能力
 
@@ -13,7 +13,8 @@
 
 ### 大盘行情监控
 
-- **五大核心指数**：上证、深证、创业板、10年期国债 ETF、30年期国债 ETF 实时行情
+- **六大核心指数**：上证、深证、创业板、10年期国债 ETF、30年期国债 ETF 实时行情
+- **隔夜美股行情条**：纳指/标普/道指三大指数实时价格+涨跌幅+美东时间，Apple 风格浮标，受自动刷新开关+美股开收盘状态三重控制
 - **多数据源容灾**：腾讯财经 / 新浪财经 / 雪球三源自动切换，支持 5 个公共 CORS 代理节点轮换
 - **自动刷新**：交易时段内每 5 秒轮询，休市/节假日智能拦截，不浪费请求
 - **法定节假日识别**：自动从 jsDelivr CDN 同步中国法定假日数据，周末 + 节假日双重过滤
@@ -22,27 +23,32 @@
 
 聊天框内嵌的 AI 投资助手，支持三大模型（Gemini / DeepSeek / 硅基流动），具备：
 
-**17 个专属工具调用能力**：
-- 净值数据：单基 / 批量 / 历史序列 / 多基横向对比（含相关性矩阵 + 综合评级）
-- 市场行情：历史 K 线 OHLC（开高低收）、分时路径、多周期共振
-- 资讯搜索：新浪财经多栏目快讯聚合、Tavily 搜索引擎、Exa 深度研报、Serper Google 搜索
-- 实体操作：记账（批量写入交易流水）、待办管理（增/删/改）、战略备忘录写入、FOF 字典入库
-- 可视化：QuickChart 图表生成（支持线图/柱状图/色带/趋势线/双Y轴/数据点标注）
-- 量化计算：Web Worker 沙箱执行 JS 代码（复利、相关性、波动率、最大回撤等精确计算）
+**22 个专属工具调用能力（六大类）**：
+- A. 净值行情 (5)：单基 / 批量 / 历史序列 / 多基横向对比（含相关性矩阵+综合评级）/ 多周期OHLC K线
+- B. 资讯搜索 (4)：新浪财经多栏目快讯聚合 / Tavily 搜索 / Serper Google 搜索 / Exa 深度研报
+- C. 实体操作 (5)：记账 / 待办管理 / 战略备忘录写入 / 持仓穿透 / FOF 字典入库
+- D. 可视化计算 (2)：QuickChart 图表（5 种标注/14 色/双Y轴）/ Web Worker JS 沙箱
+- E. 交易流水 (1)：完整历史流水查询
+- F. 宏观估值 (5)：指数估值(PE/PB/ROE/股息率) / 跨资产(汇率/铜/油/黄金) / 债市(信用利差) / 宏观指标(CPI/PMI) / 打分快照存取
+
+**持仓穿透增强**：双源（蛋卷基金+东方财富）自动降级，东方财富 API 自带申万行业分类（无需 AI 猜测），输出调仓方向/幅度（📈增持/📉减持/🆕新增），业绩基准解析为权益仓位锚点。FOF 字典卡片支持用户手动填入五栏（股票/债券/基金/现金/其他%），留空不覆盖已有数据。
 
 **三层战略记忆系统**：
-- 第一层「财富宪法」：全局投资目标与底线约束
-- 第二层「宏观定价锚点」：当前市场环境与极值边界
-- 第三层「资产身份挂牌」：每只基金的定调标签（战略看多 / 网格震荡 / 持有观望 / 黑名单）+ 纪律红线
+- 👑 财富宪法：全局投资目标与底线约束
+- 🌍 宏观定价锚点：当前市场环境与极值边界
+- 🏷️ 资产身份挂牌：每只基金的定调标签（BUY/HOLD/WATCH/BLACK）+ 方向/击球区/红线结构化字段
 
-**双核多周期打分卡**：
-- 权益引擎：宏观赔率极值（40分）+ 战术微观反转（30分）+ 量价验证（30分）
-- 固收引擎：宏观利率极值（50分）+ 股债跷跷板（50分）
-- 自动交叉矩阵：根据标签 × 得分，输出买入 / 持有 / 卖出 / 网格指令
+**双核全息多周期打分卡（100 分制）**：
+- 权益引擎：F1 宏观赔率极值(35) + F2 微观反转与背离(25) + F3 量价验证·量比VR(25) + F4 跨资产确认·国内+全球(15)，含天量掩护出货拦截+隔夜美股信号
+- 固收引擎：F1 宏观利率极值水位(50) + F2 股债跷跷板与日内流动性(50)
+- 动量修正(±10) + CIO 三标签矩阵（BUY/HOLD/WATCH/BLACK）+ 滞回锁定 + 全局否决
+- 打分快照存储含量价环境（成交额/涨跌比/比例因子）+ P&L 快照（市值/盈亏/XIRR），一调用追溯完整历史
 
-**周五自动巡检**：每周五弹出巡检提示，AI 自动遍历所有备忘录标的，核查最新净值，覆写过时快照数据
+**双层自检回顾（Meta-Vigilance）**：每次打分后自动执行 — 第 1 层 Score vs OHLC（查模型是否钝化）+ 第 2 层 P&L vs 大盘 Beta（查底层资产是否风格错配），含 T+1 净值延迟陷阱免责和归因隔离铁律
 
-**防幻觉协议**：多层级系统约束（净值数据唯一通道、T+1 妥协、交易日历核对、资金交收物理规律校验）
+**周五自动巡检 + 批量巡检路由**：每周五弹出巡检提示，AI 遍历所有备忘标的 → 打分 → 按标签+CIO 矩阵分发买入/卖出/持有指令，含防污染墙（单日战术分不得篡改长线战略定调）
+
+**防幻觉协议**：五层硬约束（净值数据唯一通道、T+1 妥协、交易日历核对、资金交收物理规律、实体操作防口嗨强制 Tool Call）
 
 ### Cloudflare Worker 云端巡检
 
@@ -91,7 +97,7 @@
 | UI 框架 | Tailwind CSS 3 + Lucide React 图标 |
 | 跨平台 | Capacitor 8 (Android) + PWA |
 | 后端服务 | Firebase Auth + Firestore |
-| AI 引擎 | Gemini API / DeepSeek API / 硅基流动 (SiliconFlow) |
+| AI 引擎 | DeepSeek V4 Pro (主力) / Gemini API / SiliconFlow |
 | 搜索 | Tavily / Exa / Serper (Google) |
 | 推送 | Cloudflare Worker + Ntfy / 飞书 / 钉钉 |
 | 图表 | QuickChart.io (Chart.js 渲染) + 自定义 DonutChart |
@@ -152,18 +158,26 @@ fund-tracker-pro/
     │   ├── holidayCalendar.js     # 节假日日历：判定 A 股非交易日（周末 + 法定假日）
     │   ├── renderMarkdown.jsx     # Markdown 渲染：AI 输出转 React 组件 + XSS 防护
     │   ├── ai.js                  # AI 模块重导出入口（向后兼容）
-    │   └── ai/                    # AI 引擎子模块（10 个文件）
-    │       ├── index.js           #   子模块统一导出聚合入口
-    │       ├── core.js            #   核心对话引擎：单基诊断、组合体检、聊天主循环
-    │       ├── providers.js       #   AI 供应商解析：Gemini / DeepSeek / SiliconFlow
-    │       ├── proxy.js           #   代理 URL 构建：CORS 前缀 + 基金代码转换
-    │       ├── fifo.js            #   FIFO 风控：7 日内短线赎回惩罚费计算
-    │       ├── prompts.js         #   提示词模板：系统角色 + 分层场景 Prompt 构建
-    │       ├── market-data.js     #   行情抓取：腾讯分时、多周期 K 线、东财情绪
-    │       ├── tool-handlers.js   #   工具执行器：策略模式分发 17 个 AI Function Call
-    │       ├── tools-definitions.js # 工具注册表：所有 Function Calling JSON Schema
-    │       ├── search-engines.js  #   搜索适配器：Tavily / Exa / Serper 统一封装
-    │       └── financial-news.js  #   财经快讯聚合：新浪 + 搜索引擎并行拉取去重
+    │   └── ai/                    # AI 引擎子模块（模块化架构，22+ 文件）
+    │       ├── index.js           #   统一导出聚合入口
+    │       ├── core.js            #   核心对话引擎（委托给编排器）
+    │       ├── orchestrator.js    #   编排器：组合 Adapter+Pipeline+Context
+    │       ├── context-manager.js #   上下文管理器：结构化备忘/待办注入
+    │       ├── context-router.js  #   意图路由：问候/轻量判断
+    │       ├── precompute.js      #   预计算：持仓表格/风控检测
+    │       ├── providers.js       #   AI 供应商解析
+    │       ├── proxy.js           #   代理 URL 构建
+    │       ├── fifo.js            #   FIFO 风控：短线赎回费
+    │       ├── market-data.js     #   行情抓取：分时/多周期K线/情绪
+    │       ├── tool-handlers.js   #   工具分发兼容层
+    │       ├── tools-definitions.js # 22 个工具 JSON Schema
+    │       ├── search-engines.js  #   搜索适配器
+    │       ├── financial-news.js  #   财经快讯聚合
+    │       ├── adapters/          #   AI 厂商适配层 (base/openai/gemini)
+    │       ├── pipelines/         #   工具调用循环管道
+    │       ├── prompts/           #   System Prompt 五层体系
+    │       ├── context/           #   历史降采样
+    │       └── tools/             #   工具执行引擎 (registry/channel/handlers)
     │
     └── components/
         ├── Auth/

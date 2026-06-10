@@ -320,12 +320,26 @@ const handleGetMarketHistoricalIntraday = async (ctx) => {
         totalShadow += (high - Math.max(open, close)) / open + (Math.min(open, close) - low) / open;
       });
       const n = klineData.length;
-      output += `📊 统计: 区间[${minLow.toFixed(2)}~${maxHigh.toFixed(2)}] | 振幅${((maxHigh-minLow)/minLow*100).toFixed(1)}% | 阳线${upBars}/${n} 阴线${downBars}/${n} | 均实体${(totalBody/n*100).toFixed(1)}% 均影线${(totalShadow/n*100).toFixed(1)}%\n\n逐根OHLC:\n`;
+      // 提取成交量序列（用于量比 VR 计算）。day[5]=成交量(手)，day[6]可能包含成交额
+      const volumes = klineData.map(day => {
+        const vol = parseFloat(day[5]) || 0;
+        const amt = parseFloat(day[6]) || 0; // 部分指数有成交额
+        return { date: day[0], volume: vol, amount: amt };
+      }).filter(v => v.volume > 0);
+      const hasVolume = volumes.length > 0;
+      output += `📊 统计: 区间[${minLow.toFixed(2)}~${maxHigh.toFixed(2)}] | 振幅${((maxHigh-minLow)/minLow*100).toFixed(1)}% | 阳线${upBars}/${n} 阴线${downBars}/${n} | 均实体${(totalBody/n*100).toFixed(1)}% 均影线${(totalShadow/n*100).toFixed(1)}%`;
+      if (hasVolume) {
+        const avgVol = volumes.reduce((s, v) => s + v.volume, 0) / volumes.length;
+        output += ` | 均量${(avgVol/10000).toFixed(0)}万手`;
+      }
+      output += `\n\n逐根OHLC:\n`;
       klineData.forEach(day => {
         const date=day[0], open=parseFloat(day[1]), close=parseFloat(day[2]), high=parseFloat(day[3]), low=parseFloat(day[4]);
+        const vol = parseFloat(day[5]) || 0;
+        const volStr = vol > 0 ? ` 量${(vol/10000).toFixed(0)}万手` : '';
         const ampPct = (high-low)/open*100, bodyPct = (close-open)/open*100, upperPct = (high-Math.max(open,close))/open*100, lowerPct = (Math.min(open,close)-low)/open*100;
         const barType = close >= open ? '阳' : '阴';
-        output += `- [${date}] 开:${open} 高:${high} 低:${low} 收:${close} | ${barType}线 振幅${ampPct.toFixed(2)}% 实体${bodyPct>0?'+'+bodyPct.toFixed(2):bodyPct.toFixed(2)}% 上影${upperPct.toFixed(2)}% 下影${lowerPct.toFixed(2)}%\n`;
+        output += `- [${date}] 开:${open} 高:${high} 低:${low} 收:${close} | ${barType}线 振幅${ampPct.toFixed(2)}% 实体${bodyPct>0?'+'+bodyPct.toFixed(2):bodyPct.toFixed(2)}% 上影${upperPct.toFixed(2)}% 下影${lowerPct.toFixed(2)}%${volStr}\n`;
       });
     } else {
       output += '暂无历史K线数据。\n';
@@ -897,7 +911,7 @@ const handleGetCrossAssetData = async (ctx) => {
       });
     } catch(e) { parts.push('期货数据暂时获取失败'); }
     return {
-      output: `【跨资产宏观快照】\n${parts.join('\n')}\n\n📌 USD/CNY上行=人民币贬值 | 铜价上行=经济复苏 | 原油上行=通胀压力 | 黄金上行=避险`,
+      output: `【国内跨资产宏观快照】\n${parts.join('\n')}\n\n📌 USD/CNY↑=人民币贬值 | 铜↑=复苏 | 原油↑=通胀 | 黄金↑=避险\n👉 隔夜外盘(美股/VIX)数据已在上下文中注入,直接读取即可,无需重复调用。`,
       pendingActions: []
     };
   } catch (e) {

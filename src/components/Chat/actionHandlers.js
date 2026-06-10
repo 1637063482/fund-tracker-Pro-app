@@ -252,7 +252,6 @@ export async function handleLedgerTransaction({ action, formData, user, settings
 // ---- 5. 打分快照自动存储（无需用户确认） ----
 export async function handleScoreRecord({ action, user }) {
   if (!user || !db) return;
-  // Firestore 文档 ID 不能含 /，将 "2026/06/05" 规范化为 "2026-06-05"
   const safeDate = (action.date || new Date().toISOString().split('T')[0]).replace(/\//g, '-');
   const snapRef = doc(db, 'artifacts', appId, 'users', user.uid, 'scoring_snapshots', safeDate);
   await setDoc(snapRef, {
@@ -260,7 +259,10 @@ export async function handleScoreRecord({ action, user }) {
     createdAt: action.createdAt || new Date().toISOString(),
     equity: action.equity || null,
     bond: action.bond || null,
-    verdict: action.verdict || null
+    verdict: action.verdict || null,
+    totalValue: action.totalValue ?? null,
+    totalProfit: action.totalProfit ?? null,
+    overallXirr: action.overallXirr ?? null
   }, { merge: true });
 }
 

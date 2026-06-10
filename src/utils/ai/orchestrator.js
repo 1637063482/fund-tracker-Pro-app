@@ -32,8 +32,45 @@ export async function orchestratorChat(input) {
   if (radarEnabled) {
     onStatus && onStatus({ type: 'thinking', label: '📡 大盘雷达全量扫描中…' });
     marketStr = await fetchAdvancedMarketData(settings, 'full');
+
+    // 隔夜外盘 — 纳斯达克/标普500/VIX（A股开盘前美股已收盘，无T+1延迟）
+    let overnightStr = '';
+    try {
+      const usUrl = `https://qt.gtimg.cn/q=us.IXIC,us.INX,us.DJI`;
+      const usRes = await fetch(usUrl, { cache: 'no-store' });
+      if (usRes.ok) {
+        const buf = await usRes.arrayBuffer();
+        const text = new TextDecoder('gbk').decode(buf);
+        const usParts = [];
+        (text || '').split(';').filter(l => l.includes('v_')).forEach(line => {
+          const arr = line.substring(line.indexOf('="') + 2).split('~');
+          if (arr.length < 5) return;
+          const name = arr[1], price = parseFloat(arr[3]);
+          const pct = parseFloat(arr[32]) || 0; // API 自带涨跌幅
+          if (name && !isNaN(price)) {
+            const sigil = pct >= 1 ? '📈' : pct <= -1 ? '📉' : '➡️';
+            usParts.push(`${sigil} ${name}: ${price.toFixed(2)} (${pct > 0 ? '+' : ''}${pct.toFixed(2)}%)`);
+          }
+        });
+        if (usParts.length > 0) {
+          const spxLine = usParts.find(p => p.includes('标普'));
+          const ixLine = usParts.find(p => p.includes('纳斯达克'));
+          let signal = '';
+          const spxPct = parseFloat(spxLine?.match(/([+-]?[\d.]+)%/)?.[1] || 0);
+          const ixPct = parseFloat(ixLine?.match(/([+-]?[\d.]+)%/)?.[1] || 0);
+          const worstPct = Math.min(spxPct, ixPct);
+          if (worstPct < -2) signal = '🚨 美股暴跌>2%,全球Risk-off';
+          else if (worstPct < -1) signal = '📉 美股收跌>1%,偏空';
+          else if (spxPct > 1) signal = '📈 美股收涨>1%,Risk-on';
+          else signal = '➡️ 美股窄幅震荡,中性';
+          overnightStr = `\n【隔夜外盘（A股开盘前美股已收盘）】\n${usParts.join('\n')}\n👉 全球信号: ${signal}\n`;
+        }
+      }
+    } catch (e) { console.warn('[外盘] 获取失败:', e.message); }
+
     // 雷达开启时显式告知 AI 必须基于实时数据全面分析+双核打分
-    radarOverride = '🚨 雷达全量开启：本轮已注入完整大盘盘口（日内分时+日K/周K/月K多周期共振），你必须基于此实时数据进行全面分析与双核打分。\n\n';
+    radarOverride = '🚨 雷达全量开启：本轮已注入完整大盘盘口（日内分时+日K/周K/月K多周期共振）+ 隔夜外盘，你必须基于此实时数据进行全面分析与双核打分。\n\n';
+    marketStr = marketStr + overnightStr;
   } else {
     marketStr = marketData; // 已经是纯文本关闭提示
   }

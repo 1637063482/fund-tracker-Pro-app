@@ -135,6 +135,7 @@ import { PortfolioChat } from './components/Chat/PortfolioChat';
 import { CompoundInterestCard } from './components/Dashboard/CompoundInterestCard';
 // 行情卡片网格（tickDirs 状态内部隔离，防止行情涨跌动画触发 App 级重渲染）
 import { MarketCardsGrid } from './components/Dashboard/MarketCardsGrid';
+import { OvernightUSMarkets } from './components/Dashboard/OvernightUSMarkets';
 
 // 刷新按钮：自管理 loading 状态（用内部 useState 替代全局 isFetchingMarket），
 // 确保刷新请求不触发 App 级重渲染，仅按钮自身显示 spinner
@@ -528,7 +529,9 @@ export default function App() {
     });
   };
 
+  const [manualFetchCount, setManualFetchCount] = useState(0);
   const manualFetch = useCallback(async () => {
+     setManualFetchCount(c => c + 1);
      if (isFetchingRef.current) return;
      isFetchingRef.current = true;
      try {
@@ -862,6 +865,7 @@ export default function App() {
               {marketError && <div className="text-amber-500 text-sm mb-4 flex items-center animate-in fade-in slide-in-from-top-2 duration-300"><AlertCircle size={14} className="mr-1"/>{marketError}</div>}
               
               <MarketCardsGrid marketData={marketData} />
+              <div className="mt-3"><OvernightUSMarkets isAutoRefresh={isAutoRefresh} manualFetch={manualFetchCount} /></div>
             </section>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

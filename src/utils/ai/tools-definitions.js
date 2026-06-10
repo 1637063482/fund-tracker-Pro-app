@@ -331,7 +331,7 @@ export const defineTools = (settings) => {
     type: "function",
     function: {
       name: "get_cross_asset_data",
-      description: "获取USD/CNY汇率、沪铜主力、SC原油主力、黄金(AU9999)实时价格与涨跌幅。F4打分前必须调用。",
+      description: "获取国内跨资产(汇率/铜/油/黄金/期货)。隔夜外盘已在上下文中注入,直接读取。F4打分前必须调用。",
       parameters: { type: "object", properties: {}, required: [] }
     }
   });
@@ -388,7 +388,7 @@ export const defineTools = (settings) => {
               turnoverYi: { type: "number", description: "当日两市成交额(亿),如27927" },
               upCount: { type: "number", description: "上涨家数" },
               downCount: { type: "number", description: "下跌家数" },
-              volumeRatio: { type: "number", description: "比例因子(近期均量÷8000亿,上限2.5)" },
+              volumeRatio: { type: "number", description: "量比VR(今日成交÷近5日均量),如2.3" },
               f3Flags: { type: "string", description: "F3档位说明,如'天量出货拦截'/'放量普涨'/'缩量阴跌'/'正常博弈'" }
             },
             required: ["totalRaw", "F1", "F2", "F3", "F4", "momentum", "final"]
