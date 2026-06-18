@@ -46,12 +46,21 @@ async function fetchSinaFeed(settings, lid, limit) {
   let data;
   try { data = JSON.parse(text); } catch { return []; }
 
-  return (data?.result?.data || []).map(item => ({
-    title: (item.title || '').replace(/<[^>]+>/g, '').trim(),
-    content: (item.intro || '').replace(/<[^>]+>/g, '').trim(),
-    time: item.ctime ? new Date(parseInt(item.ctime) * 1000).toISOString().replace('T', ' ').substring(0, 19) : '',
-    source: '新浪',
-  }));
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+  let items = (data?.result?.data || [])
+    .map(item => ({
+      title: (item.title || '').replace(/<[^>]+>/g, '').trim(),
+      content: (item.intro || '').replace(/<[^>]+>/g, '').trim(),
+      time: item.ctime ? new Date(parseInt(item.ctime) * 1000).toISOString().replace('T', ' ').substring(0, 19) : '',
+      ts: item.ctime ? parseInt(item.ctime) * 1000 : 0,
+      source: '新浪',
+    }))
+    .filter(item => item.ts > 0);
+  // 优先保留 24h 内，不足时放宽到 72h
+  const recent = items.filter(i => now - i.ts < DAY);
+  if (recent.length >= 3) return recent;
+  return items.filter(i => now - i.ts < 3 * DAY);
 }
 
 async function fetchAllSina(settings, topic, limit) {

@@ -102,14 +102,22 @@ export const precomputePortfolioInsights = (portfolioStats, settings) => {
       concentrationRisks.push({ type: '单只>30%', fund: name, weight: weight.toFixed(1) + '%' });
     }
 
-    // 基金列表
+    	    // 资产配置（用户手动填写）
+	    const alloc = f.assetAllocation || {};
+	    const stockPct = parseFloat(alloc.stock) || 0;
+	    const fundPct = parseFloat(alloc.fund) || 0;
+	    const bondPct = parseFloat(alloc.bond) || 0;
+	    const equityStr = (stockPct + fundPct) > 0 ? (stockPct + fundPct).toFixed(0) + "%" : "-";
+	    const bondStr = bondPct > 0 ? bondPct.toFixed(0) + "%" : "-";
+
+	    // 基金列表
     fundList.push({ name, code, value, profitRate, xirr, weight, typeTag, trapMark });
 
-    // 紧凑行：名称│代码│份额│市值│盈亏率│XIRR│占比│类型│标记
+    // 紧凑行：名称│代码│份额│市值│盈亏率│XIRR│占比│类型│权益│债券│标记
     const xirrStr = xirr !== null ? xirr.toFixed(1) + '%' : '-';
     const profitStr = (profitRate >= 0 ? '+' : '') + profitRate.toFixed(1) + '%';
     const sharesStr = shares > 0 ? (shares >= 1000 ? Math.round(shares).toLocaleString() : shares.toFixed(2)) : '?';
-    portfolioTable += `${name.padEnd(8)}│${code}│${sharesStr.padStart(8)}│${String(Math.round(value)).padStart(8)}│${profitStr.padStart(7)}│${xirrStr.padStart(6)}│${weight.toFixed(1).padStart(4)}%│${typeTag.padEnd(9)}${trapMark}\n`;
+    portfolioTable += `${name.padEnd(8)}│${code}│${sharesStr.padStart(8)}│${String(Math.round(value)).padStart(8)}│${profitStr.padStart(7)}│${xirrStr.padStart(6)}│${weight.toFixed(1).padStart(4)}%│${typeTag.padEnd(9)}│${equityStr.padStart(4)}│${bondStr.padStart(4)}${trapMark}\n`;
   }
 
   // 大类集中度检测

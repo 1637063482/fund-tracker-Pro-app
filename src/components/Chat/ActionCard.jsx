@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Activity } from 'lucide-react';
 
-export const ActionCard = ({ action, onConfirm, onCancel, todos = [] }) => {
+export const ActionCard = React.memo(({ action, onConfirm, onCancel, todos = [] }) => {
   const [form, setForm] = useState({
     date: action.date || new Date().toISOString().split('T')[0],
     feeInput: '',
@@ -226,4 +226,20 @@ export const ActionCard = ({ action, onConfirm, onCancel, todos = [] }) => {
       )}
     </div>
   );
-};
+}, (prevProps, nextProps) => {
+  // 自定义比较：只在这些关键字段变化时才重新渲染
+  return (
+    prevProps.action.cardId === nextProps.action.cardId &&
+    prevProps.action.status === nextProps.action.status &&
+    prevProps.action.toolType === nextProps.action.toolType &&
+    prevProps.action.amount === nextProps.action.amount &&
+    prevProps.action.fundCode === nextProps.action.fundCode &&
+    prevProps.action.fundName === nextProps.action.fundName &&
+    prevProps.action.coreLogic === nextProps.action.coreLogic &&
+    prevProps.action.decisionType === nextProps.action.decisionType &&
+    prevProps.action.condition === nextProps.action.condition &&
+    prevProps.action.manageType === nextProps.action.manageType &&
+    prevProps.action.actionType === nextProps.action.actionType &&
+    prevProps.todos === nextProps.todos
+  );
+});

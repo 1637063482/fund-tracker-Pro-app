@@ -2,9 +2,13 @@
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    // 统一规范化 pathname：合并多余斜杠（如 //api/sync → /api/sync）
+    const normalizedPath = url.pathname.replace(/\/{2,}/g, '/');
 
+    // CORS 预检：对所有 OPTIONS 请求统一响应
     if (request.method === 'OPTIONS') {
       return new Response(null, {
+        status: 204,
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -13,7 +17,8 @@ export default {
       });
     }
 
-    if (request.method === 'POST' && url.pathname === '/api/sync') {
+    // 受保护的 POST：完整账本同步
+    if (request.method === 'POST' && normalizedPath === '/api/sync') {
       try {
         const data = await request.json();
         if (data.syncSecret !== env.SYNC_SECRET) {
@@ -28,20 +33,24 @@ export default {
       }
     }
 
-    if (request.method === 'GET' && url.pathname === '/api/test_cron') {
+    // 手动测试巡检
+    if (request.method === 'GET' && normalizedPath === '/api/test_cron') {
       try {
         const result = await this.runInspection(env, true, request);
         return new Response('测试巡检执行成功！\n\n推送结果：\n' + result, {
-          headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+          headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Access-Control-Allow-Origin': '*' }
         });
       } catch (e) {
         return new Response('测试执行失败: ' + e.message, {
-          headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+          headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Access-Control-Allow-Origin': '*' }
         });
       }
     }
 
-    return new Response('Fund Tracker Pro - Cloudflare Worker is active.');
+    // 默认响应也带上 CORS 头，方便前端调试
+    return new Response('Fund Tracker Pro - Cloudflare Worker is active.', {
+      headers: { 'Access-Control-Allow-Origin': '*' }
+    });
   },
 
   async scheduled(event, env, ctx) {
@@ -548,5 +557,196 @@ export default {
     }
 
     return '账本核算：成功 (' + periodLabel + ': ' + periodTotalProfitStr + ' | 累计总利润: ' + portfolioTotalProfit.toFixed(2) + ')\n\n推送内容预览：\n' + fullReport + '\n\n推送状态：' + pushResult;
+  },
+
+  // [microstructure 端点已迁移至 my-cors-proxy.js — 统一在一个 Worker 中管理]
+  async _fetchMicrostructure_removed(env) {
+    const result = {
+      liquidity: {},        // 银行间流动性
+      derivatives: {},      // 期指基差
+      repo_rates: {},       // 回购利率（SHIBOR/DR007 代理）
+      indices_spot: {},     // 现货指数快照
+      overall_signal: ''    // 综合定性结论
+    };
+
+    // ── 并行抓取 3 路数据（涨跌家数由大盘雷达注入，此处不重复拉取）──
+    const [sinaIndices, sinaFutures, sinaRepo] = await Promise.allSettled([
+      fetch('https://hq.sinajs.cn/list=sh000001,sz399001,sh000300,sh000016,sh000905,sh000852,sh000688', {
+        headers: { 'Referer': 'https://finance.sina.com.cn' }
+      }).then(r => r.text()).catch(() => ''),
+      fetch('https://hq.sinajs.cn/list=CFF_RE_IM0,CFF_RE_IF0,CFF_RE_IC0', {
+        headers: { 'Referer': 'https://finance.sina.com.cn' }
+      }).then(r => r.text()).catch(() => ''),
+      fetch('https://hq.sinajs.cn/list=sh204001,sh204007', {
+        headers: { 'Referer': 'https://finance.sina.com.cn' }
+      }).then(r => r.text()).catch(() => '')
+    ]);
+
+    // ── 1. 解析回购利率（GC001=隔夜/SHIBOR代理, GC007=7天/DR007代理）──
+    if (sinaRepo.status === 'fulfilled' && sinaRepo.value) {
+      const parseRepo = (line, label) => {
+        const m = line.match(/var hq_str_\w+="([^"]+)"/);
+        if (!m) return null;
+        const p = m[1].split(',');
+        if (p.length < 4) return null;
+        const name = p[0];
+        const open = parseFloat(p[1]) || 0;
+        const prevClose = parseFloat(p[2]) || 0;    // 昨日收盘（利率基准）
+        const current = parseFloat(p[3]) || 0;       // 当前价=最新利率
+        const high = parseFloat(p[4]) || 0;
+        const low = parseFloat(p[5]) || 0;
+        const change = current - prevClose;           // 利率变动（bp）
+        return { name, current, prevClose, high, low, change, open };
+      };
+      const lines = sinaRepo.value.split(';').filter(l => l.includes('hq_str_'));
+      for (const line of lines) {
+        const parsed = parseRepo(line);
+        if (!parsed) continue;
+        if (parsed.name === 'GC001') {
+          result.repo_rates.GC001 = parsed;
+          // 定性判定：隔夜利率 < 1.5% 宽松, 1.5-2.0% 中性, 2.0-2.5% 偏紧, >2.5% 紧缩
+          const r = parsed.current;
+          const delta = parsed.change;
+          let level = '中性';
+          if (r < 1.5) level = '宽松';
+          else if (r < 2.0) level = '中性';
+          else if (r < 2.5) level = '偏紧';
+          else level = '紧缩';
+          // 日变动 > 30bp = 急剧变化
+          if (Math.abs(delta) > 0.30) level = delta > 0 ? '急剧收紧（央行可能在收水）' : '急剧放松（央行可能在放水）';
+          result.liquidity.ON_rate = r;
+          result.liquidity.ON_level = level;
+          result.liquidity.ON_change_bp = Math.round(delta * 100);
+        }
+        if (parsed.name === 'GC007') {
+          result.repo_rates.GC007 = parsed;
+          const r = parsed.current;
+          const delta = parsed.change;
+          let level = '中性';
+          if (r < 1.7) level = '宽松';
+          else if (r < 2.2) level = '中性';
+          else if (r < 2.8) level = '偏紧';
+          else level = '紧缩';
+          if (Math.abs(delta) > 0.30) level = delta > 0 ? '急剧收紧' : '急剧放松';
+          result.liquidity.DR007_proxy_rate = r;
+          result.liquidity.DR007_proxy_level = level;
+          result.liquidity.DR007_change_bp = Math.round(delta * 100);
+        }
+      }
+    }
+
+    // ── 2. 解析指数现货快照 ──
+    if (sinaIndices.status === 'fulfilled' && sinaIndices.value) {
+      const parseIndex = (line) => {
+        const m = line.match(/var hq_str_\w+="([^"]+)"/);
+        if (!m) return null;
+        const p = m[1].split(',');
+        if (p.length < 6) return null;
+        return {
+          name: p[0],
+          open: parseFloat(p[1]) || 0,
+          prevClose: parseFloat(p[2]) || 0,
+          current: parseFloat(p[3]) || 0,
+          high: parseFloat(p[4]) || 0,
+          low: parseFloat(p[5]) || 0,
+          changePct: p[2] > 0 ? ((parseFloat(p[3]) - parseFloat(p[2])) / parseFloat(p[2]) * 100) : 0
+        };
+      };
+      const indexLines = sinaIndices.value.split(';').filter(l => l.includes('hq_str_'));
+      for (const line of indexLines) {
+        const d = parseIndex(line);
+        if (!d) continue;
+        const key = d.name.includes('上证综') || d.name.includes('上证指') ? 'SH' :
+                    d.name.includes('沪深300') ? 'HS300' :
+                    d.name.includes('上证50') ? 'SZ50' :
+                    d.name.includes('中证500') ? 'ZZ500' :
+                    d.name.includes('中证1000') ? 'ZZ1000' :
+                    d.name.includes('科创') ? 'STAR50' :
+                    d.name.includes('深证') ? 'SZ' : null;
+        if (key) result.indices_spot[key] = d;
+      }
+    }
+
+    // ── 3. 解析期指 → 计算基差（升贴水）──
+    if (sinaFutures.status === 'fulfilled' && sinaFutures.value) {
+      const parseFuture = (line) => {
+        const m = line.match(/var hq_str_\w+="([^"]+)"/);
+        if (!m) return null;
+        const p = m[1].split(',');
+        if (p.length < 38) return null;
+        return {
+          name: p[37] || '',
+          open: parseFloat(p[0]) || 0,
+          settlement: parseFloat(p[1]) || 0,   // 最新价（结算价）
+          high: parseFloat(p[3]) || 0,
+          low: parseFloat(p[2]) || 0,
+          volume: parseInt(p[4]) || 0,
+          amount: parseFloat(p[5]) || 0,
+          openInterest: parseInt(p[6]) || 0,
+          prevSettlement: parseFloat(p[7]) || 0
+        };
+      };
+      const futLines = sinaFutures.value.split(';').filter(l => l.includes('hq_str_'));
+      for (const line of futLines) {
+        const d = parseFuture(line);
+        if (!d) continue;
+        let spotKey = null;
+        let futKey = null;
+        if (d.name.includes('中证1000')) { spotKey = 'ZZ1000'; futKey = 'IM'; }
+        else if (d.name.includes('沪深300')) { spotKey = 'HS300'; futKey = 'IF'; }
+        else if (d.name.includes('中证500')) { spotKey = 'ZZ500'; futKey = 'IC'; }
+        if (!spotKey || !futKey) continue;
+
+        const spot = result.indices_spot[spotKey];
+        const basis = spot ? (d.settlement - spot.current) : null;
+        const basisPct = spot && spot.current > 0 ? ((basis / spot.current) * 100) : null;
+
+        result.derivatives[futKey] = {
+          name: d.name,
+          settlement: d.settlement,
+          spotClose: spot?.current || null,
+          basis,
+          basisPct: basisPct !== null ? basisPct.toFixed(2) + '%' : null,
+          volume: d.volume,
+          openInterest: d.openInterest
+        };
+      }
+    }
+
+    // ── 4. 综合信号 — 纯机器旗标，系统提示做F3熔断匹配（涨跌家数由大盘雷达注入，此处不判定）──
+    const warnings = [];
+
+    // 4a. 流动性极端判定
+    const onLevel = result.liquidity.ON_level || '';
+    const d7Level = result.liquidity.DR007_proxy_level || '';
+    if (onLevel.includes('收紧') || d7Level.includes('收紧')) {
+      warnings.push('资金面紧缩');
+    }
+
+    // 4b. 期指基差极端判定
+    const imBasis = result.derivatives.IM?.basisPct || null;
+    const ifBasis = result.derivatives.IF?.basisPct || null;
+    const icBasis = result.derivatives.IC?.basisPct || null;
+    if (imBasis && parseFloat(imBasis) < -0.8) warnings.push('IM深度贴水');
+    if (ifBasis && parseFloat(ifBasis) < -0.8) warnings.push('IF深度贴水');
+    if (icBasis && parseFloat(icBasis) < -0.8) warnings.push('IC深度贴水');
+
+    // 4c. 旗标输出
+    const tight = onLevel.includes('收紧') || d7Level.includes('收紧');
+    const loose = onLevel === '宽松' && d7Level === '宽松';
+    if (warnings.length >= 2) {
+      result.overall_signal = '🚨 fatal';
+    } else if (warnings.length === 1) {
+      result.overall_signal = '⚠️ warn';
+    } else if (loose && !tight) {
+      result.overall_signal = '✅ clear';
+    } else {
+      result.overall_signal = '⚪ neutral';
+    }
+
+    result.warnings = warnings;
+    result.timestamp = new Date().toISOString();
+
+    return result;
   }
 };

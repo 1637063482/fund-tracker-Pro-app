@@ -1,14 +1,27 @@
 // 基金指标统一计算 Hook：合并 useBaseFundsData + usePortfolioStats
 // XIRR 同步计算，消除 setTimeout(0) + setXirrMap 导致的双重重算
+// v2: 分层 useMemo —— AI 参数等无关 settings 字段不再触发全量 XIRR 重算
 import { useMemo } from 'react';
 import { evaluateExpression, calculateXIRR } from '../utils/helpers';
 
 export function useFundMetrics(funds, fundNavs, settings, fundProfiles) {
-  return useMemo(() => {
+  const safeFunds = funds || [];
+  const safeNavs = fundNavs || {};
+  const safeSettings = settings || {};
+  const safeProfiles = fundProfiles || {};
+  // 提取真正影响组合计算的 settings 字段，避免 AI 参数（temperature、
+  // maxOutputTokens、reasoningEffort、aiProvider 等）变更触发全量重算
+  const targetAmount = safeSettings.targetAmount;
+  const targetDate = safeSettings.targetDate;
+  const targetAnnualRate = safeSettings.targetAnnualRate;
+
+  // ━━━ 第一层：基金基础指标 + XIRR + 全盘汇总 + 衍生指标 ━━━
+  // 仅依赖 funds / fundNavs / fundProfiles，不受 AI 参数等 settings 变更影响
+  const baseResult = useMemo(() => {
     const globalCashFlows = [];
 
     // ── 第一步：逐只基金基础指标 + XIRR ──
-    const baseFunds = funds.map(f => {
+    const baseFunds = safeFunds.map(f => {
       let totalInvested = 0;
       let realizedReturns = 0;
       const cashFlows = [];
@@ -35,7 +48,7 @@ export function useFundMetrics(funds, fundNavs, settings, fundProfiles) {
       if (f.isArchived) {
         currentVal = 0;
       } else if (f.mode === 'auto') {
-        const navObj = fundNavs[f.fundCode];
+        const navObj = safeNavs[f.fundCode];
         const nav = navObj ? navObj.nav : (f.lastNav || 0);
         currentVal = (Number(f.shares) || 0) * nav;
         if (currentVal === 0 && f.currentValueRaw) {
@@ -105,7 +118,7 @@ export function useFundMetrics(funds, fundNavs, settings, fundProfiles) {
     const assetAllocation = {};
     computedFundsWithMetrics.forEach(f => {
       if (f.currentValue <= 0 || f.isArchived) return;
-      const profile = fundProfiles[f.fundCode];
+      const profile = safeProfiles[f.fundCode];
       let category = "其他偏股/未分类";
       if (profile?.op_fund?.fund_tags) {
         const typeTag = profile.op_fund.fund_tags.find(t => t.category === "1");
@@ -125,32 +138,73 @@ export function useFundMetrics(funds, fundNavs, settings, fundProfiles) {
     const rankedBySimpleReturn = [...computedFundsWithMetrics].filter(f => f.transactions?.length > 0).sort((a, b) => b.simpleReturn - a.simpleReturn);
     const rankedByProfit = [...computedFundsWithMetrics].filter(f => f.transactions?.length > 0).sort((a, b) => b.profit - a.profit);
 
-    // ── 第四步：目标规划（Alpha、偏离、投影等） ──
     const netTotalInvested = Math.max(0, portfolioTotalCurrentValue - portfolioTotalProfit);
-    const safeTargetAmount = Number(settings.targetAmount) || 0;
+
+    return {
+      baseFunds,
+      globalCashFlows,
+      portfolioTotalCurrentValue,
+      overallXirr,
+      portfolioTotalProfit,
+      overallSimpleReturn,
+      pieData,
+      contributionPieData,
+      assetAllocationData,
+      rankedByXirr,
+      rankedBySimpleReturn,
+      rankedByProfit,
+      computedFundsWithMetrics,
+      netTotalInvested,
+    };
+  }, [funds, fundNavs, fundProfiles]);
+
+  // ━━━ 第二层：目标规划 + 最终合并 ━━━
+  // 仅在 baseResult 或三个目标设定字段变化时重算。
+  // AI 参数（temperature / maxOutputTokens / reasoningEffort 等）变更
+  // 不会穿透第一层，此处仅执行轻量算术运算。
+  const result = useMemo(() => {
+    const {
+      baseFunds,
+      globalCashFlows,
+      portfolioTotalCurrentValue,
+      overallXirr,
+      portfolioTotalProfit,
+      overallSimpleReturn,
+      pieData,
+      contributionPieData,
+      assetAllocationData,
+      rankedByXirr,
+      rankedBySimpleReturn,
+      rankedByProfit,
+      computedFundsWithMetrics,
+      netTotalInvested,
+    } = baseResult;
+
+    // ── 第四步：目标规划（Alpha、偏离、投影等） ──
+    const safeTargetAmount = Number(targetAmount) || 0;
     const gap = Math.max(0, safeTargetAmount - portfolioTotalProfit);
     const today = new Date();
-    const target = new Date(settings.targetDate);
+    const target = new Date(targetDate);
     const monthsLeft = Math.max(1, (target.getFullYear() - today.getFullYear()) * 12 + target.getMonth() - today.getMonth());
     let projectedAssets = portfolioTotalCurrentValue;
     if (overallXirr > 0 && monthsLeft > 0) {
       projectedAssets = portfolioTotalCurrentValue * Math.pow(1 + overallXirr, monthsLeft / 12);
     }
 
-    const targetAnnualRate = Number(settings.targetAnnualRate) || 5;
+    const rate = Number(targetAnnualRate) || 5;
     let baselineValue = 0;
     globalCashFlows.forEach(cf => {
       if (cf.amount < 0) {
         const days = (new Date() - new Date(cf.date)) / (1000 * 60 * 60 * 24);
         const years = Math.max(0, days / 365);
-        baselineValue += Math.abs(cf.amount) * Math.pow(1 + (targetAnnualRate / 100), years);
+        baselineValue += Math.abs(cf.amount) * Math.pow(1 + (rate / 100), years);
       } else if (cf.amount > 0 && !cf.isTerminal) {
         baselineValue -= cf.amount;
       }
     });
     baselineValue = Math.max(0, baselineValue);
     const deviationAmount = portfolioTotalCurrentValue - baselineValue;
-    const alpha = overallXirr - (targetAnnualRate / 100);
+    const alpha = overallXirr - (rate / 100);
 
     return {
       // 前端渲染需要的原始基金列表
@@ -171,10 +225,12 @@ export function useFundMetrics(funds, fundNavs, settings, fundProfiles) {
         computedFundsWithMetrics,
         alpha,
         gap, monthsLeft, requiredMonthly: gap / monthsLeft,
-        safeTargetAmount, targetAnnualRate,
+        safeTargetAmount, targetAnnualRate: rate,
         projectedAssets,
-        baselineValue, deviationAmount
-      }
+        baselineValue, deviationAmount,
+      },
     };
-  }, [funds, fundNavs, settings, fundProfiles]);
+  }, [baseResult, targetAmount, targetDate, targetAnnualRate]);
+
+  return result;
 }

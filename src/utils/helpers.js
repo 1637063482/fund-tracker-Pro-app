@@ -107,92 +107,35 @@ export const checkIsTradingTime = () => {
 };
 
 // ============================================================================
-// 🔍 底层资产穿透与全局集中度引擎 (X-Ray)
+// 🔍 全盘资产配置 X-Ray — 从用户填写的 assetAllocation 计算权益/固收敞口
 // ============================================================================
-
-// 1. 提取单只基金的前十大重仓 (支持股/债双擎)
-export const extractFundHoldings = (profile) => {
-  if (!profile || !profile.fund_position) return [];
-  const holdings = [];
-  const { stock_list, bond_list } = profile.fund_position;
-
-  // 提取股票重仓
-  if (Array.isArray(stock_list)) {
-    stock_list.forEach(item => {
-      holdings.push({
-        name: item.name,
-        symbol: item.symbol,
-        percent: parseFloat(item.percent) || 0,
-        type: 'stock'
-      });
-    });
-  }
-
-  // 提取债券重仓
-  if (Array.isArray(bond_list)) {
-    bond_list.forEach(item => {
-      holdings.push({
-        name: item.name,
-        symbol: item.symbol || item.name, // 债券有时未提供代码，用名称兜底
-        percent: parseFloat(item.percent) || 0,
-        type: 'bond'
-      });
-    });
-  }
-
-  // 按持仓权重降序排列
-  return holdings.sort((a, b) => b.percent - a.percent);
-};
-
-// ============================================================================
-// 🔍 机构级 FOF 穿透雷达引擎 (Dual-Core X-Ray)
-// ============================================================================
-
-// 删掉之前的硬编码常量配置！
-
-// 🌟 FOF 双核重构版：直接接收云端传来的 fofDictionary
-export const calculatePortfolioXRay = (activeFunds, fofDictionary, portfolioTotalValue) => {
-  let trueEquityTotalValue = 0; 
-  const sectorMap = {};         
+export const calculatePortfolioXRay = (activeFunds, portfolioTotalValue) => {
+  let totalEquity = 0, totalBond = 0, totalCash = 0, totalFund = 0, totalOther = 0;
 
   if (!activeFunds || activeFunds.length === 0 || portfolioTotalValue <= 0) {
-    return { aggregatedHoldings: [], warnings: [], trueEquityTotalValue: 0, equityExposureRate: 0 };
+    return { totalEquity, totalBond, totalCash, totalFund, totalOther, equityExposureRate: 0, bondExposureRate: 0 };
   }
 
   activeFunds.forEach(fund => {
-    if (fund.currentValue <= 0 || fund.isArchived || !fund.fundCode) return;
-
-    // 🌟 核心：直接使用传进来的动态字典
-    const dictConfig = fofDictionary[fund.fundCode];
-    if (!dictConfig || dictConfig.equityRatio <= 0) return;
-
-    const fundEquityValue = fund.currentValue * dictConfig.equityRatio;
-    trueEquityTotalValue += fundEquityValue;
-
-    if (dictConfig.sectors) {
-        Object.entries(dictConfig.sectors).forEach(([sectorName, ratio]) => {
-          const sectorValue = fundEquityValue * ratio;
-          if (!sectorMap[sectorName]) sectorMap[sectorName] = 0;
-          sectorMap[sectorName] += sectorValue;
-        });
-    }
+    if (fund.currentValue <= 0 || fund.isArchived) return;
+    const alloc = fund.assetAllocation;
+    if (!alloc || Object.values(alloc).every(v => v === '' || v == null)) return;
+    const stock = parseFloat(alloc.stock) || 0;
+    const bond = parseFloat(alloc.bond) || 0;
+    const cash = parseFloat(alloc.cash) || 0;
+    const fnd = parseFloat(alloc.fund) || 0;
+    const other = parseFloat(alloc.other) || 0;
+    const weight = fund.currentValue / portfolioTotalValue;
+    totalEquity += fund.currentValue * (stock + fnd) / 100;
+    totalBond += fund.currentValue * bond / 100;
+    totalCash += fund.currentValue * cash / 100;
+    totalFund += fund.currentValue * fnd / 100;
+    totalOther += fund.currentValue * other / 100;
   });
 
-  if (trueEquityTotalValue === 0) {
-    return { aggregatedHoldings: [], warnings: [], trueEquityTotalValue: 0, equityExposureRate: 0 };
-  }
-
-  const aggregatedHoldings = Object.entries(sectorMap)
-    .map(([name, value]) => ({
-      name, symbol: name, type: 'sector', value: value,
-      globalPercent: (value / trueEquityTotalValue) * 100 
-    }))
-    .sort((a, b) => b.globalPercent - a.globalPercent);
-
-  const warnings = aggregatedHoldings.filter(h => h.globalPercent >= 30);
-
-  return { 
-    aggregatedHoldings, warnings, trueEquityTotalValue,
-    equityExposureRate: (trueEquityTotalValue / portfolioTotalValue) * 100 
+  return {
+    totalEquity, totalBond, totalCash, totalFund, totalOther,
+    equityExposureRate: portfolioTotalValue > 0 ? (totalEquity / portfolioTotalValue) * 100 : 0,
+    bondExposureRate: portfolioTotalValue > 0 ? (totalBond / portfolioTotalValue) * 100 : 0
   };
 };

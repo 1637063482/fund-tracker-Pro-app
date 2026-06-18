@@ -82,8 +82,7 @@ const hasActiveAnalysisContext = (chatHistory) => {
   const recent = chatHistory.slice(-5);
   const indicators = [
     '对比', '比较', '选哪只', '推荐', '穿透', '重仓股',
-    '组合分析', '组合体检', '组合诊断', '资产配置', '持仓分析',
-    '基金经理', '行业分布', '相关性', '同质化',
+    '组合分析', '组合体检', '组合诊断', '资产配置', '持仓分析', '基金经理', '相关性', '同质化',
   ];
   for (const msg of recent) {
     const content = (msg.content || '').toLowerCase();

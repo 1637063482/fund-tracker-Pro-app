@@ -74,8 +74,8 @@ html {
 
   .apple-glass {
     background-color: rgba(255, 255, 255, 0.75);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border-bottom: 1px solid rgba(255, 255, 255, 0.2);
   }
   .dark .apple-glass {
@@ -331,15 +331,10 @@ select {
 }
 
 .custom-scrollbar,
-.custom-scrollbar div,
-.custom-scrollbar span,
 .user-select-text {
   -webkit-touch-callout: default !important;
   -webkit-user-select: text !important;
   user-select: text !important;
-  transform: translateZ(0);
-  -webkit-transform: translateZ(0);
-  will-change: transform;
 }
 
 #global-splash[style*="opacity: 0"],

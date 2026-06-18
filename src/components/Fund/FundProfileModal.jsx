@@ -1,5 +1,5 @@
 // 基金详情弹窗组件：展示单只基金的 AI 深度分析报告，支持从 Firestore 缓存读取或重新生成
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { RefreshCw, X, BarChart2, Award, User, PieChart, Calendar, TrendingDown, Target, Activity, Sparkles, AlertTriangle, Send, Check } from 'lucide-react';
 import { renderMarkdown } from '../../utils/renderMarkdown';
 import { analyzeFundWithAI } from '../../utils/ai';
@@ -8,10 +8,8 @@ import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { useModalAnimation } from '../../hooks/useModalAnimation';
 
 export const FundProfileModal = ({ fund, profile, marketData, settings, onClose, triggerRect }) => {
-  const { isOpen, open, close, overlayStyle, panelStyle } = useModalAnimation(onClose, triggerRect, settings.animationSpeed || 1.0);
+  const { isOpen, open, close, overlayStyle, panelStyle } = useModalAnimation(onClose, triggerRect, settings.animationSpeed || 1.0, undefined, undefined, true);
   const focusRef = useFocusTrap(isOpen);
-
-  useEffect(() => { open(); }, []);
   const[aiReport, setAiReport] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');

@@ -4,7 +4,7 @@ import { Sun, Moon, Activity, AlertCircle, Mail, Lock, RefreshCw, LogIn } from '
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../../config/firebase';
 
-export const LoginScreen = ({ theme, setTheme, dbError }) => {
+export const LoginScreen = ({ theme, toggleTheme, dbError }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -30,7 +30,7 @@ export const LoginScreen = ({ theme, setTheme, dbError }) => {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-slate-900 dark:to-slate-800 py-12 px-4 sm:px-6 lg:px-8 transition-colors duration-500">
       <div className="absolute top-4 right-4">
-        <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2.5 rounded-full bg-white/50 hover:bg-white/80 dark:bg-slate-800/50 dark:hover:bg-slate-700/80 backdrop-blur-sm text-slate-500 dark:text-slate-400 transition-all hover:scale-110 active:scale-95 shadow-sm">
+        <button onClick={toggleTheme} className="p-2.5 rounded-full bg-white/50 hover:bg-white/80 dark:bg-slate-800/50 dark:hover:bg-slate-700/80 backdrop-blur-sm text-slate-500 dark:text-slate-400 transition-all hover:scale-110 active:scale-95 shadow-sm">
           {theme === 'dark' ? <Sun size={20} className="text-yellow-400"/> : <Moon size={20}/>}
         </button>
       </div>

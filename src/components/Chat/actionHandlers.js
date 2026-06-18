@@ -78,43 +78,7 @@ export async function handleMemoWrite({ action, user }) {
   }, { merge: true });
 }
 
-// ---- 3. FOF 穿透字典写入处理器 ----
-export async function handleFofDictWrite({ action, user, formData }) {
-  const dictRef = doc(db, 'artifacts', appId, 'users', user.uid, 'fof_dict', action.fundCode);
-
-  // 基础字段
-  const payload = {
-    fundCode: action.fundCode,
-    fundName: action.fundName,
-    sectors: action.sectors,
-    updatedAt: new Date().toISOString()
-  };
-
-  // 五栏分配 — 仅当用户手动填入时才覆盖
-  const allocFields = ['stockPct', 'bondPct', 'fundPct', 'cashPct', 'otherPct'];
-  let userStockPct = null, userFundPct = null;
-  for (const field of allocFields) {
-    const rawVal = formData?.[field] ?? action[field];
-    if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
-      const num = parseFloat(rawVal);
-      if (!isNaN(num) && num >= 0 && num <= 100) {
-        payload[field] = num / 100;
-        if (field === 'stockPct') userStockPct = num / 100;
-        if (field === 'fundPct') userFundPct = num / 100;
-      }
-    }
-  }
-
-  // equityRatio：用户填了股票/基金 → 用真实数据；否则用 AI 估算
-  if (userStockPct !== null || userFundPct !== null) {
-    payload.equityRatio = (userStockPct || 0) + (userFundPct || 0);
-  } else {
-    payload.equityRatio = action.equityRatio; // AI 估算值作为 fallback
-  }
-
-  await setDoc(dictRef, payload, { merge: true });
-}
-
+// [FOF字典处理器已删除]
 // ---- 4. 待办事项 CRUD 处理器 ----
 export async function handleTodoCRUD({ action, onAddTodo, onUpdateTodo, onDeleteTodo }) {
   let mType = 'add';

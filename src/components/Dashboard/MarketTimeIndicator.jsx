@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Clock, Bell } from 'lucide-react';
 import { isHolidayToday } from '../../utils/holidayCalendar';
 
-export const MarketTimeIndicator = () => {
+export const MarketTimeIndicator = React.memo(() => {
   const [timeObj, setTimeObj] = useState(new Date());
 
   useEffect(() => {
@@ -65,7 +65,7 @@ export const MarketTimeIndicator = () => {
   const { status, isTrading, countdown, urgent } = getMarketStatus(timeObj);
 
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center text-sm font-medium transform-gpu" style={{ willChange: 'transform' }}>
+    <div className="flex flex-col sm:flex-row sm:items-center text-sm font-medium">
       <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2 sm:mb-0 sm:mr-4">
          <div className="flex items-center text-slate-700 dark:text-slate-300">
            <Clock className="mr-1.5 text-slate-500 w-[18px] h-[18px] xl:w-[24px] xl:h-[24px]" />
@@ -86,4 +86,4 @@ export const MarketTimeIndicator = () => {
       )}
     </div>
   );
-};
+});

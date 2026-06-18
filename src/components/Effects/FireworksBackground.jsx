@@ -6,12 +6,16 @@ import React, { useRef, useEffect, useCallback } from 'react';
 // ---- 烟花色盘（真实烟花常见色系）----
 const PALETTES = [
   { name: '金橙',   colors: ['#FFD700','#FFA500','#FFEC8B','#FFC125'], core: '#FFFEF0' },
+  { name: '赤红',   colors: ['#FF2400','#DC143C','#FF4444','#FF6B4A'], core: '#FFFFFF' },
   { name: '红金',   colors: ['#FF6B6B','#FF3B3B','#FFD93D','#FFAAAA'], core: '#FFFFFF' },
-  { name: '冷蓝',   colors: ['#4ECDC4','#70A1FF','#A29BFE','#7BED9F'], core: '#E8F8FF' },
+  { name: '桃红',   colors: ['#FF69B4','#FF1493','#FFB6C1','#FF85A2'], core: '#FFF0F5' },
   { name: '玫紫',   colors: ['#FDA7DF','#FF69B4','#DDA0DD','#FFB6C1'], core: '#FFF0F5' },
-  { name: '银白',   colors: ['#E8E8E8','#C0C0C0','#FFFFFF','#F5F5F5'], core: '#FFFFFF' },
+  { name: '紫罗兰', colors: ['#8B5CF6','#A78BFA','#C084FC','#7C3AED'], core: '#EDE9FE' },
+  { name: '冷蓝',   colors: ['#4ECDC4','#70A1FF','#A29BFE','#7BED9F'], core: '#E8F8FF' },
+  { name: '青蓝',   colors: ['#00FFFF','#00BFFF','#1E90FF','#87CEEB'], core: '#F0FFFF' },
   { name: '蓝金',   colors: ['#00D2FF','#3A7BD5','#FFD700','#87CEEB'], core: '#FFFFFF' },
   { name: '翠绿',   colors: ['#7FFF00','#00FA9A','#ADFF2F','#32CD32'], core: '#F0FFF0' },
+  { name: '银白',   colors: ['#E8E8E8','#C0C0C0','#FFFFFF','#F5F5F5'], core: '#FFFFFF' },
   { name: '香槟',   colors: ['#E8D5B7','#D4AF37','#F0E6D3','#C9A96E'], core: '#FFFEFA' },
 ];
 
@@ -271,7 +275,7 @@ class Rocket {
       this.particles.push(new StreakParticle(this.x, this.y, vx, vy,
         colors[Math.floor(Math.random() * colors.length)],
         1.0 + Math.random() * 1.5,
-        { gravity: 0.010, friction: 0.991, decay: 0.003, trailLen: 8 }));
+        { gravity: 0.018, friction: 0.988, decay: 0.010, trailLen: 5 }));
     }
 
     // 内层慢速高亮
@@ -285,7 +289,7 @@ class Rocket {
       this.particles.push(new StreakParticle(this.x, this.y, vx, vy,
         isCore ? core : colors[Math.floor(Math.random() * colors.length)],
         1.4 + Math.random() * 2,
-        { gravity: 0.006, friction: 0.995, decay: 0.0025, trailLen: 7, isCore }));
+        { gravity: 0.012, friction: 0.992, decay: 0.008, trailLen: 4, isCore }));
     }
   }
 
@@ -301,7 +305,7 @@ class Rocket {
       this.particles.push(new StreakParticle(this.x, this.y, vx, vy,
         wColors[Math.floor(Math.random() * wColors.length)],
         0.7 + Math.random() * 1.1,
-        { gravity: 0.028, friction: 0.995, decay: 0.0016, trailLen: 16 }));
+        { gravity: 0.035, friction: 0.993, decay: 0.004, trailLen: 10 }));
     }
     // 顶部雾状光点
     for (let i = 0; i < 20; i++) {
@@ -310,7 +314,7 @@ class Rocket {
       this.particles.push(new StreakParticle(this.x, this.y,
         Math.cos(theta) * speed, Math.sin(theta) * speed,
         '#FFFFFF', 1 + Math.random() * 1.6,
-        { gravity: 0.005, decay: 0.008, trailLen: 4, isCore: true }));
+        { gravity: 0.008, decay: 0.012, trailLen: 3, isCore: true }));
     }
   }
 
@@ -326,7 +330,7 @@ class Rocket {
       this.particles.push(new StreakParticle(this.x, this.y, vx, vy,
         colors[Math.floor(Math.random() * colors.length)],
         0.7 + Math.random() * 1.2,
-        { gravity: 0.008, friction: 0.991, decay: 0.0018, trailLen: 12 }));
+        { gravity: 0.014, friction: 0.989, decay: 0.007, trailLen: 7 }));
     }
     // 密集白色核心
     for (let i = 0; i < 35; i++) {
@@ -335,7 +339,7 @@ class Rocket {
       this.particles.push(new StreakParticle(this.x, this.y,
         Math.cos(theta) * speed, Math.sin(theta) * speed,
         core, 2 + Math.random() * 2.5,
-        { gravity: 0.003, decay: 0.008, trailLen: 5, isCore: true }));
+        { gravity: 0.006, decay: 0.015, trailLen: 3, isCore: true }));
     }
   }
 
@@ -353,7 +357,7 @@ class Rocket {
       this.particles.push(new StreakParticle(this.x, this.y, vx, vy,
         colors[Math.floor(Math.random() * colors.length)],
         0.8 + Math.random() * 1.3,
-        { gravity: 0.004, decay: 0.003, trailLen: 8 }));
+        { gravity: 0.008, decay: 0.009, trailLen: 5 }));
     }
     // 延迟爆心（30 帧后）
     this._ringCenterPending = true;
@@ -371,7 +375,7 @@ class Rocket {
       this.particles.push(new StreakParticle(this.x, this.y, vx, vy,
         branchColors[Math.floor(Math.random() * branchColors.length)],
         2.2 + Math.random() * 1.8,
-        { gravity: 0.013, friction: 0.995, decay: 0.0014, trailLen: 18, isCore: true }));
+        { gravity: 0.020, friction: 0.993, decay: 0.005, trailLen: 10, isCore: true }));
     }
   }
 
@@ -384,7 +388,7 @@ class Rocket {
         this.particles.push(new StreakParticle(b.x, b.y,
           Math.cos(theta) * speed, Math.sin(theta) * speed,
           '#FFFEF0', 0.3 + Math.random() * 0.6,
-          { gravity: 0.020, decay: 0.015, trailLen: 4, isCore: true }));
+          { gravity: 0.028, decay: 0.025, trailLen: 2, isCore: true }));
       }
     }
   }
@@ -406,7 +410,7 @@ class Rocket {
         const p = new StreakParticle(bx, by, vx, vy,
           colors[Math.floor(Math.random() * colors.length)],
           0.6 + Math.random() * 1.6,
-          { gravity: 0.003, decay: 0.018, trailLen: 4, isCore: true });
+          { gravity: 0.005, decay: 0.022, trailLen: 3, isCore: true });
         // 延迟可见
         p._hideFrames = delay;
         const origUpd = p.update.bind(p);
@@ -478,7 +482,7 @@ class Rocket {
       this.particles.push(new StreakParticle(this.x, this.y,
         Math.cos(theta) * speed, Math.sin(theta) * speed,
         core, 1 + Math.random() * 1.8,
-        { gravity: 0.005, decay: 0.01, trailLen: 5, isCore: true }));
+        { gravity: 0.010, decay: 0.012, trailLen: 3, isCore: true }));
     }
     this.starBursts.push(new StarBurst(this.x, this.y, 0.7));
   }
@@ -497,6 +501,8 @@ const FireworksBackground = ({
   const rocketsRef = useRef([]);
   const lastLaunchRef = useRef(0);
   const dimsRef = useRef({ w: 0, h: 0 });
+  const visibleRef = useRef(false); // IntersectionObserver 控制显隐
+  const runningRef = useRef(false); // RAF 是否正在运行
 
   const resize = useCallback(() => {
     const canvas = canvasRef.current;
@@ -528,6 +534,49 @@ const FireworksBackground = ({
     if (dims.w === 0 || dims.h === 0) return;
 
     let running = true;
+    runningRef.current = true;
+
+    const stopLoop = () => {
+      running = false;
+      runningRef.current = false;
+      if (animRef.current) {
+        cancelAnimationFrame(animRef.current);
+        animRef.current = null;
+      }
+    };
+
+    const startLoop = () => {
+      if (running) return;
+      running = true;
+      runningRef.current = true;
+      lastLaunchRef.current = performance.now();
+      animRef.current = requestAnimationFrame(loop);
+    };
+
+    // 🔋 性能优化：IntersectionObserver 检测可见性，不可见时停止动画
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        visibleRef.current = entry.isIntersecting;
+        if (entry.isIntersecting && !runningRef.current) {
+          startLoop();
+        } else if (!entry.isIntersecting && runningRef.current) {
+          stopLoop();
+        }
+      },
+      { threshold: 0.01 }
+    );
+    observer.observe(canvas);
+
+    // 🔋 性能优化：页面不可见时（切换标签页）暂停动画
+    const handleVisibility = () => {
+      if (document.hidden && runningRef.current) {
+        stopLoop();
+      } else if (!document.hidden && visibleRef.current && !runningRef.current) {
+        startLoop();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
     lastLaunchRef.current = performance.now();
 
     const loop = (timestamp) => {
@@ -571,9 +620,10 @@ const FireworksBackground = ({
     const t0 = setTimeout(() => { animRef.current = requestAnimationFrame(loop); }, 400);
 
     return () => {
-      running = false;
+      observer.disconnect();
+      document.removeEventListener('visibilitychange', handleVisibility);
+      stopLoop();
       clearTimeout(t0);
-      if (animRef.current) cancelAnimationFrame(animRef.current);
     };
   }, [density, minInterval, maxInterval]);
 

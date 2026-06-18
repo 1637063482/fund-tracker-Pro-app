@@ -3,7 +3,7 @@ import { buildProxyUrl, buildAllOriginsUrl } from '../proxy';
 import { fetchSerperSearch, fetchTavilySearch, fetchExaSearch } from '../search-engines';
 import { formatCashFlows } from '../market-data';
 import { fetchFinancialNews } from '../financial-news';
-import { collection, query, where, orderBy, limit, getDocs, setDoc, doc } from 'firebase/firestore';
+import { collection, query, where, orderBy, limit, getDocs, getDoc, setDoc, doc } from 'firebase/firestore';
 import { themeColors, getThemeColor } from './colors';
 
 // ============================================================================
@@ -294,53 +294,218 @@ const handleSearchTools = async (ctx) => {
 };
 
 // ============================================================================
-// 工具 7: 历史K线 (多周期OHLC)
+// ============================================================================
+// 指标计算器 — ATR / RSI / MACD / Volume Profile
+// ============================================================================
+function calcEMA(values, period) {
+  if (values.length < period) return values.length > 0 ? values.reduce((a,b)=>a+b,0)/values.length : 0;
+  const k = 2 / (period + 1);
+  let ema = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < values.length; i++) ema = values[i] * k + ema * (1 - k);
+  return ema;
+}
+
+function calcATR(klineData, period = 14) {
+  if (klineData.length < period + 1) return 0;
+  const trs = [];
+  for (let i = 1; i < klineData.length; i++) {
+    const h = klineData[i].high, l = klineData[i].low, prevC = klineData[i - 1].close;
+    trs.push(Math.max(h - l, Math.abs(h - prevC), Math.abs(l - prevC)));
+  }
+  const atr = calcEMA(trs, period);
+  const lastClose = klineData[klineData.length - 1].close;
+  return { atr, atrPct: lastClose > 0 ? (atr / lastClose * 100) : 0 };
+}
+
+function calcRSI(klineData, period = 14) {
+  if (klineData.length < period + 1) return { rsi: 50 };
+  const changes = [];
+  for (let i = 1; i < klineData.length; i++) changes.push(klineData[i].close - klineData[i - 1].close);
+  let avgGain = 0, avgLoss = 0;
+  for (let i = 0; i < period; i++) {
+    if (changes[i] > 0) avgGain += changes[i]; else avgLoss += Math.abs(changes[i]);
+  }
+  avgGain /= period; avgLoss /= period;
+  const rsiSeq = [];
+  for (let i = period; i < changes.length; i++) {
+    if (changes[i] > 0) { avgGain = (avgGain * (period - 1) + changes[i]) / period; avgLoss = (avgLoss * (period - 1)) / period; }
+    else { avgGain = (avgGain * (period - 1)) / period; avgLoss = (avgLoss * (period - 1) + Math.abs(changes[i])) / period; }
+    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    rsiSeq.push({ rsi: 100 - 100 / (1 + rs), date: klineData[i + 1].date });
+  }
+  const last = rsiSeq.length > 0 ? rsiSeq[rsiSeq.length - 1].rsi : 50;
+  const recentRSI = rsiSeq.slice(-5).map(r => r.rsi);
+  // 底背离检测：近5日价格低点 vs RSI低点
+  const last5Prices = klineData.slice(-5).map(d => d.close);
+  const priceMin = Math.min(...last5Prices);
+  const priceMinIdx = last5Prices.indexOf(priceMin);
+  const rsiAtPriceMin = recentRSI[priceMinIdx];
+  const rsiEarlier = recentRSI.slice(0, priceMinIdx);
+  const divergence = rsiEarlier.length > 0 && rsiAtPriceMin > Math.min(...rsiEarlier) ? '疑似底背离(价格新低但RSI未新低)' : '';
+  return { rsi: Math.round(last * 10) / 10, recentRSI, divergence };
+}
+
+function calcMACD(klineData) {
+  if (klineData.length < 26) return {};
+  const closes = klineData.map(d => d.close);
+  const ema12 = calcEMA(closes, 12);
+  const ema26 = calcEMA(closes, 26);
+  // 逐点 MACD 用于输出最新值
+  let ema12v = closes.slice(0, 12).reduce((a, b) => a + b, 0) / 12;
+  let ema26v = closes.slice(0, 26).reduce((a, b) => a + b, 0) / 26;
+  let dea = 0, dif = 0, macdBar = 0;
+  for (let i = 26; i < closes.length; i++) {
+    const k12 = 2 / 13, k26 = 2 / 27;
+    ema12v = closes[i] * k12 + ema12v * (1 - k12);
+    ema26v = closes[i] * k26 + ema26v * (1 - k26);
+    dif = ema12v - ema26v;
+    dea = dif * (2 / 10) + dea * (1 - 2 / 10);
+    macdBar = (dif - dea) * 2;
+  }
+  return { dif: dif.toFixed(3), dea: dea.toFixed(3), macdBar: macdBar.toFixed(3) };
+}
+
+function calcBollingerBands(klineData, period = 20) {
+  if (klineData.length < period) return null;
+  const closes = klineData.slice(-period).map(d => d.close);
+  const sma = closes.reduce((a, b) => a + b, 0) / period;
+  const variance = closes.reduce((s, c) => s + (c - sma) ** 2, 0) / period;
+  const stddev = Math.sqrt(variance);
+  const upper = sma + 2 * stddev;
+  const lower = sma - 2 * stddev;
+  const bandwidth = sma > 0 ? ((upper - lower) / sma * 100) : 0;
+  // Check historical bandwidth range for squeeze detection
+  let bwMin = bandwidth, bwMax = bandwidth;
+  for (let i = period; i <= klineData.length; i++) {
+    const slice = klineData.slice(i - period, i);
+    if (slice.length < period) continue;
+    const c = slice.map(d => d.close);
+    const s = c.reduce((a, b) => a + b, 0) / period;
+    const v = c.reduce((a, b) => a + (b - s) ** 2, 0) / period;
+    const sd = Math.sqrt(v);
+    const bw = s > 0 ? ((s + 2*sd - (s - 2*sd)) / s * 100) : 0;
+    if (bw < bwMin) bwMin = bw;
+    if (bw > bwMax) bwMax = bw;
+  }
+  const bwPercentile = bwMax > bwMin ? ((bandwidth - bwMin) / (bwMax - bwMin) * 100) : 50;
+  return {
+    middle: sma.toFixed(1), upper: upper.toFixed(1), lower: lower.toFixed(1),
+    bandwidth: bandwidth.toFixed(2), bwPercentile: bwPercentile.toFixed(0),
+    squeeze: bandwidth < 1.5 ? '⚠️带宽极窄，变盘窗口临近' : (bandwidth < 2.5 ? '带宽偏窄' : '正常')
+  };
+}
+
+function calcVolumeProfile(klineData, currentPrice) {
+  if (klineData.length < 60) return '';
+  const zones = {};
+  let totalVol = 0;
+  for (const d of klineData) {
+    const vol = d.volume || 0;
+    if (vol <= 0) continue;
+    totalVol += vol;
+    // 按 2% 宽度分桶
+    const bucket = d.close > 0 ? Math.round(d.close / (d.close * 0.02)) * (d.close * 0.02) : Math.round(d.close);
+    const key = bucket.toFixed(0);
+    zones[key] = (zones[key] || 0) + vol;
+  }
+  if (Object.keys(zones).length === 0) return '';
+  const sorted = Object.entries(zones).sort((a, b) => b[1] - a[1]);
+  const poc = parseFloat(sorted[0][0]);
+  // 70% 成交量区间
+  let cumVol = 0;
+  const vaPrices = [];
+  for (const [p, v] of sorted) { cumVol += v; vaPrices.push(parseFloat(p)); if (cumVol / totalVol > 0.7) break; }
+  const vaLow = Math.min(...vaPrices);
+  const vaHigh = Math.max(...vaPrices);
+  const pos = currentPrice > vaHigh ? '上方' : currentPrice < vaLow ? '下方' : '内部';
+  return `POC(最大成交量价): ${poc} | VA(70%成交量): ${vaLow}-${vaHigh} | 当前价在VA${pos}`;
+}
+
+// ============================================================================
+// 工具 7: 历史K线 (多周期OHLC + 量化指标)
 // ============================================================================
 const handleGetMarketHistoricalIntraday = async (ctx) => {
   try {
     let code = (ctx.args.code || '').toLowerCase();
     if (/^\d{6}$/.test(code)) code = (code === '000001' || code.startsWith('5')) ? 'sh'+code : 'sz'+code;
     const period = (ctx.args.period || 'day').toLowerCase();
-    const count = Math.min(ctx.args.count || (period === 'day' ? 60 : period === 'week' ? 20 : 12), 100);
+    const count = Math.min(ctx.args.count || (period === 'day' ? 60 : period === 'week' ? 20 : 12), 250);
     const targetUrl = `https://ifzq.gtimg.cn/appstock/app/kline/kline?param=${code},${period},,,${count},`;
     const fetchUrl = ctx.settings.proxyMode === 'custom' && ctx.settings.customProxyUrl ? buildProxyUrl(ctx.settings, targetUrl) : buildAllOriginsUrl(targetUrl);
     const res = await fetch(fetchUrl, { cache: 'no-store' });
     const resData = await res.json();
     const klineData = resData?.data?.[code]?.[period] || resData?.data?.[code]?.[`qfq${period}`];
-    const periodLabel = { day: '日K(60日)', week: '周K(20周)', month: '月K(12月)' }[period] || `${period}K`;
-    let output = `【${ctx.args.code} ${periodLabel}，共 ${count} 根 OHLC 微观结构数据】\n(注：实体/影线百分比基准为当日开盘价)\n`;
+    const periodLabel = { day: '日K', week: '周K', month: '月K' }[period] || `${period}K`;
+    let output = `【${ctx.args.code} ${periodLabel}，共 ${count} 根】\n`;
     if (klineData && Array.isArray(klineData)) {
-      let maxHigh = -Infinity, minLow = Infinity, upBars = 0, downBars = 0, totalBody = 0, totalShadow = 0;
-      klineData.forEach(day => {
+      // 解析 K 线
+      const bars = [];
+      for (const day of klineData) {
         const open = parseFloat(day[1]), close = parseFloat(day[2]), high = parseFloat(day[3]), low = parseFloat(day[4]);
-        if (high > maxHigh) maxHigh = high;
-        if (low < minLow) minLow = low;
-        if (close >= open) upBars++; else downBars++;
-        totalBody += Math.abs((close - open) / open);
-        totalShadow += (high - Math.max(open, close)) / open + (Math.min(open, close) - low) / open;
-      });
-      const n = klineData.length;
-      // 提取成交量序列（用于量比 VR 计算）。day[5]=成交量(手)，day[6]可能包含成交额
-      const volumes = klineData.map(day => {
-        const vol = parseFloat(day[5]) || 0;
-        const amt = parseFloat(day[6]) || 0; // 部分指数有成交额
-        return { date: day[0], volume: vol, amount: amt };
-      }).filter(v => v.volume > 0);
-      const hasVolume = volumes.length > 0;
-      output += `📊 统计: 区间[${minLow.toFixed(2)}~${maxHigh.toFixed(2)}] | 振幅${((maxHigh-minLow)/minLow*100).toFixed(1)}% | 阳线${upBars}/${n} 阴线${downBars}/${n} | 均实体${(totalBody/n*100).toFixed(1)}% 均影线${(totalShadow/n*100).toFixed(1)}%`;
-      if (hasVolume) {
-        const avgVol = volumes.reduce((s, v) => s + v.volume, 0) / volumes.length;
+        if (isNaN(open)) continue;
+        bars.push({ date: day[0], open, close, high, low, volume: parseFloat(day[5]) || 0 });
+      }
+      const n = bars.length;
+      if (n === 0) { output += '暂无历史K线数据。\n'; return { output, pendingActions: [] }; }
+
+      let maxHigh = -Infinity, minLow = Infinity, upBars = 0, downBars = 0, totalBody = 0, totalShadow = 0;
+      for (const b of bars) {
+        if (b.high > maxHigh) maxHigh = b.high;
+        if (b.low < minLow) minLow = b.low;
+        if (b.close >= b.open) upBars++; else downBars++;
+        totalBody += Math.abs((b.close - b.open) / b.open);
+        totalShadow += (b.high - Math.max(b.open, b.close)) / b.open + (Math.min(b.open, b.close) - b.low) / b.open;
+      }
+      const hasVol = bars.some(b => b.volume > 0);
+      output += `📊 统计: 区间[${minLow.toFixed(2)}~${maxHigh.toFixed(2)}] | 振幅${((maxHigh-minLow)/minLow*100).toFixed(1)}% | 阳${upBars}/${n} 阴${downBars}/${n} | 均实体${(totalBody/n*100).toFixed(1)}% 均影线${(totalShadow/n*100).toFixed(1)}%`;
+      if (hasVol) {
+        const avgVol = bars.reduce((s, b) => s + b.volume, 0) / bars.filter(b => b.volume > 0).length;
         output += ` | 均量${(avgVol/10000).toFixed(0)}万手`;
       }
-      output += `\n\n逐根OHLC:\n`;
-      klineData.forEach(day => {
-        const date=day[0], open=parseFloat(day[1]), close=parseFloat(day[2]), high=parseFloat(day[3]), low=parseFloat(day[4]);
-        const vol = parseFloat(day[5]) || 0;
-        const volStr = vol > 0 ? ` 量${(vol/10000).toFixed(0)}万手` : '';
-        const ampPct = (high-low)/open*100, bodyPct = (close-open)/open*100, upperPct = (high-Math.max(open,close))/open*100, lowerPct = (Math.min(open,close)-low)/open*100;
-        const barType = close >= open ? '阳' : '阴';
-        output += `- [${date}] 开:${open} 高:${high} 低:${low} 收:${close} | ${barType}线 振幅${ampPct.toFixed(2)}% 实体${bodyPct>0?'+'+bodyPct.toFixed(2):bodyPct.toFixed(2)}% 上影${upperPct.toFixed(2)}% 下影${lowerPct.toFixed(2)}%${volStr}\n`;
-      });
+      output += '\n';
+
+	      // ── 量化指标（日线+周线均计算）──
+	      if ((period === 'day' || period === 'week') && n >= 14) {
+	        const atrInfo = calcATR(bars);
+	        const rsiInfo = calcRSI(bars);
+	        const macdInfo = calcMACD(bars);
+	        const bbInfo = calcBollingerBands(bars);
+	        const lastPrice = bars[n - 1].close;
+	        const label = period === 'week' ? '周线' : '';
+	        output += `\n【${label}量化指标】\n`;
+	        output += `ATR(14): ${atrInfo.atr.toFixed(3)} (${atrInfo.atrPct.toFixed(2)}%) | 1.5×ATR=${(atrInfo.atr*1.5).toFixed(3)}\n`;
+	        output += `RSI(14): ${rsiInfo.rsi} | 近5根: [${rsiInfo.recentRSI.join(', ')}]`;
+	        if (rsiInfo.divergence) output += ` | ⚠️ ${rsiInfo.divergence}`;
+	        output += '\n';
+	        if (macdInfo.dif) {
+	          output += `MACD(12,26,9): DIF=${macdInfo.dif} DEA=${macdInfo.dea} 柱=${macdInfo.macdBar}`;
+	          if (period === 'week') {
+	            const dif = parseFloat(macdInfo.dif), dea = parseFloat(macdInfo.dea);
+	            if (dif > dea) output += ' | 🟢金叉状态';
+	            else output += ' | 🔴死叉状态';
+	          }
+	          output += '\n';
+	        }
+	        if (bbInfo) {
+	          output += `布林带(20,2): 上轨=${bbInfo.upper} 中轨=${bbInfo.middle} 下轨=${bbInfo.lower} | 带宽${bbInfo.bandwidth}%(${bbInfo.squeeze}) | 1年分位${bbInfo.bwPercentile}%\n`;
+	        }
+	        // 筹码分布（仅日线≥120根）
+	        if (period === 'day' && n >= 120 && hasVol) {
+	          const vp = calcVolumeProfile(bars, lastPrice);
+	          if (vp) output += `【年筹码】${vp}\n`;
+	        }
+	      }
+
+      // 逐根 OHLC（只展示最近 30 根，控制输出长度）
+      const showBars = bars.slice(-30);
+      output += `\n逐根OHLC(最近${showBars.length}根):\n`;
+      for (const b of showBars) {
+        const ampPct = (b.high-b.low)/b.open*100, bodyPct = (b.close-b.open)/b.open*100;
+        const upperPct = (b.high-Math.max(b.open,b.close))/b.open*100, lowerPct = (Math.min(b.open,b.close)-b.low)/b.open*100;
+        const barType = b.close >= b.open ? '阳' : '阴';
+        const volStr = b.volume > 0 ? ` 量${(b.volume/10000).toFixed(0)}万` : '';
+        output += `- [${b.date}] 开:${b.open} 高:${b.high} 低:${b.low} 收:${b.close} | ${barType} 幅${ampPct.toFixed(1)}% 体${bodyPct>0?'+'+bodyPct.toFixed(1):bodyPct.toFixed(1)}% 影${upperPct.toFixed(1)}/${lowerPct.toFixed(1)}%${volStr}\n`;
+      }
     } else {
       output += '暂无历史K线数据。\n';
     }
@@ -559,240 +724,6 @@ const handleUpdateDecisionMemo = async (ctx) => {
 };
 
 // ============================================================================
-// 工具 13: FOF 字典写入
-// ============================================================================
-const handleUpdateFofDictionary = async (ctx) => {
-  return {
-    output: '【系统提示】FOF 穿透字典入库单据已生成。请在回复中提示用户点击卡片确认写入云端。',
-    pendingActions: [{ ...ctx.args, toolType: 'fof_dict' }]
-  };
-};
-
-// ============================================================================
-// 工具 14: 持仓穿透 — 双源（蛋卷 + 东方财富）+ 行业预分类
-// ============================================================================
-
-// 股票名 → 申万一级行业映射（覆盖 A 股 top 持仓中的高频股票，约 80 只）
-const STOCK_SECTOR_MAP = {
-  '贵州茅台': '食品饮料', '五粮液': '食品饮料', '泸州老窖': '食品饮料', '山西汾酒': '食品饮料',
-  '宁德时代': '电力设备', '比亚迪': '汽车', '阳光电源': '电力设备', '隆基绿能': '电力设备',
-  '中国平安': '非银金融', '招商银行': '银行', '兴业银行': '银行', '工商银行': '银行', '建设银行': '银行',
-  '迈瑞医疗': '医药生物', '药明康德': '医药生物', '恒瑞医药': '医药生物', '片仔癀': '医药生物',
-  '美的集团': '家用电器', '格力电器': '家用电器', '海尔智家': '家用电器',
-  '立讯精密': '电子', '海康威视': '计算机', '中芯国际': '电子', '韦尔股份': '电子', '兆易创新': '电子',
-  '中国石油': '石油石化', '中国石化': '石油石化', '中国海油': '石油石化',
-  '紫金矿业': '有色金属', '洛阳钼业': '有色金属', '赣锋锂业': '有色金属', '天齐锂业': '有色金属',
-  '牧原股份': '农林牧渔', '温氏股份': '农林牧渔', '海大集团': '农林牧渔', '新希望': '农林牧渔',
-  '万华化学': '基础化工', '恒力石化': '石油石化', '荣盛石化': '石油石化',
-  '长江电力': '公用事业', '中国核电': '公用事业', '华能国际': '公用事业',
-  '中国建筑': '建筑装饰', '中国中铁': '建筑装饰', '中国交建': '建筑装饰',
-  '顺丰控股': '交通运输', '中远海控': '交通运输', '京沪高铁': '交通运输', '大秦铁路': '交通运输',
-  '伊利股份': '食品饮料', '海天味业': '食品饮料', '金龙鱼': '农林牧渔', '双汇发展': '食品饮料',
-  '中兴通讯': '通信', '中国联通': '通信', '中际旭创': '通信', '新易盛': '通信',
-  '万科A': '房地产', '保利发展': '房地产', '招商蛇口': '房地产',
-  '中国神华': '煤炭', '陕西煤业': '煤炭', '兖矿能源': '煤炭', '中煤能源': '煤炭',
-  '中国中免': '商贸零售', '永辉超市': '商贸零售', '王府井': '商贸零售',
-  '东方财富': '非银金融', '中信证券': '非银金融', '华泰证券': '非银金融',
-  '三一重工': '机械设备', '中联重科': '机械设备', '徐工机械': '机械设备',
-  '金山办公': '计算机', '科大讯飞': '计算机', '用友网络': '计算机',
-  '北方华创': '电子', '中微公司': '电子', '寒武纪': '电子',
-  '宝钢股份': '钢铁', '鞍钢股份': '钢铁',
-  '通威股份': '电力设备', '天合光能': '电力设备', '晶澳科技': '电力设备', '晶科能源': '电力设备',
-  '航发动力': '国防军工', '中航沈飞': '国防军工', '中国船舶': '国防军工', '中航西飞': '国防军工',
-  '福耀玻璃': '汽车', '长城汽车': '汽车', '上汽集团': '汽车', '长安汽车': '汽车',
-  '中国移动': '通信', '中国电信': '通信', '中国广核': '公用事业',
-  '恒生电子': '计算机', '广联达': '计算机', '深信服': '计算机',
-  '爱尔眼科': '医药生物', '泰格医药': '医药生物', '智飞生物': '医药生物', '长春高新': '医药生物',
-  '分众传媒': '传媒', '芒果超媒': '传媒', '三七互娱': '传媒',
-  '青岛啤酒': '食品饮料', '洋河股份': '食品饮料', '古井贡酒': '食品饮料',
-  '国电南瑞': '电力设备', '特变电工': '电力设备', '思源电气': '电力设备',
-  '汇川技术': '机械设备', '先导智能': '机械设备', '杰瑞股份': '机械设备',
-  '中航光电': '国防军工', '中国重工': '国防军工', '中航机电': '国防军工',
-  '杭州银行': '银行', '宁波银行': '银行', '平安银行': '银行',
-  '韦尔股份': '电子', '澜起科技': '电子', '卓胜微': '电子', '圣邦股份': '电子',
-  '药明生物': '医药生物', '百济神州': '医药生物', '信达生物': '医药生物',
-  '腾讯控股': '传媒', '阿里巴巴': '商贸零售', '美团': '社会服务', '快手': '传媒',
-};
-
-function classifyStock(name) {
-  if (STOCK_SECTOR_MAP[name]) return STOCK_SECTOR_MAP[name];
-  for (const [stockName, sector] of Object.entries(STOCK_SECTOR_MAP)) {
-    if (name.includes(stockName) || stockName.includes(name)) return sector;
-  }
-  return '其他';
-}
-
-const handleGetFundHoldingsPenetration = async (ctx) => {
-  try {
-    const fundCode = ctx.args.fundCode;
-    let actualData = null;
-
-    // ── 数据源 1：蛋卷基金 ──
-    try {
-      const targetUrl = `https://danjuanfunds.com/djapi/fund/${fundCode}`;
-      const fetchUrl = ctx.settings.proxyMode === 'custom' && ctx.settings.customProxyUrl
-        ? buildProxyUrl(ctx.settings, targetUrl)
-        : buildAllOriginsUrl(targetUrl);
-      const res = await fetch(fetchUrl, { cache: 'no-store' });
-      const data = await res.json();
-      actualData = ctx.settings.proxyMode === 'custom' ? data : JSON.parse(data.contents);
-    } catch (e) {
-      console.warn(`[穿透] 蛋卷 API 失败: ${e.message}`);
-    }
-
-    // ── 数据源 2：东方财富（全代理模式均尝试，不再限于 custom）──
-    try {
-      const hasStock = actualData?.data?.fund_position?.stock_list?.length > 0;
-      const hasBond = actualData?.data?.fund_position?.bond_list?.length > 0;
-      if (!hasStock && !hasBond) {
-        const fakeDeviceId = Math.random().toString(36).substring(2, 15);
-        const emUrl = `https://fundmobapi.eastmoney.com/FundMNewApi/FundMNInverstPosition?FCODE=${fundCode}&deviceid=${fakeDeviceId}&plat=Android&product=EFund&version=6.6.8`;
-        const emFetchUrl = ctx.settings.proxyMode === 'custom' && ctx.settings.customProxyUrl
-          ? buildProxyUrl(ctx.settings, emUrl)
-          : buildAllOriginsUrl(emUrl);
-        const emRes = await fetch(emFetchUrl, { cache: 'no-store' });
-        if (emRes.ok) {
-          const raw = await emRes.text();
-          let emData;
-          try { emData = JSON.parse(raw); } catch { emData = JSON.parse(JSON.parse(raw).contents); }
-          if (emData?.Datas && !emData.ErrCode) {
-            // JZBL 直接 parseFloat，东方财富已返回正确百分比值（如 "0.99"=0.99%, "1.46"=1.46%）
-            // 东方财富自带行业分类 (INDEXCODE/INDEXNAME)，优先使用
-            const stock_list = (emData.Datas.fundStocks || []).map(s => ({
-              name: s.GPJC,
-              code: s.GPDM || '',
-              percent: parseFloat(s.JZBL) || 0,
-              sector: s.INDEXNAME || '',           // API 自带申万行业
-              changeType: s.PCTNVCHGTYPE || '',     // 调仓方向: 新增/增持/减持/不变
-              changePct: s.PCTNVCHG || ''           // 调仓幅度
-            }));
-            const bond_list = (emData.Datas.fundbonds || []).map(b => ({
-              name: b.ZQMC,
-              code: b.ZQDM || '',
-              percent: parseFloat(b.ZJZBL) || 0  // 债券用 ZJZBL（占净值比例）
-            }));
-            if (!actualData) actualData = { data: {} };
-            if (!actualData.data) actualData.data = {};
-            actualData.data.fund_position = { stock_list, bond_list, source: 'eastmoney' };
-          }
-        }
-      }
-    } catch (e) {
-      console.warn(`[穿透] 东方财富 API 失败: ${e.message}`);
-    }
-
-    // ── 解析业绩基准，提取权益仓位锚点 ──
-    const parseBenchmark = (bm) => {
-      if (!bm) return null;
-      // 匹配沪深300/中证500/中证800/创业板/上证等权益指数及其权重
-      const equityIndices = /(?:沪深300|中证[58]00|创业板|科创[5慧]0|上证[5慧]0|恒生|标普|纳斯达克)/;
-      let equityPct = 0;
-      // 模式: 指数名×权重% 或 指数名收益率×权重%
-      const matches = bm.matchAll(/(?:[中沪深创科上恒标纳][一-龥\d]+(?:指数)?)(?:收益率)?[×xX]\s*(\d+(?:\.\d+)?)\s*%/g);
-      for (const m of matches) {
-        const idxName = m[0];
-        if (equityIndices.test(idxName)) {
-          equityPct += parseFloat(m[1]);
-        }
-      }
-      return equityPct > 0 ? equityPct / 100 : null;
-    };
-
-    // ── 构建输出 ──
-    const benchmark = actualData?.data?.performance_bench_mark || '';
-    const benchmarkEquity = parseBenchmark(benchmark);
-    const fundPosition = actualData?.data?.fund_position;
-    if (fundPosition) {
-      const stocks = fundPosition.stock_list || [];
-      const bonds = fundPosition.bond_list || [];
-      const stockPercent = stocks.reduce((sum, s) => sum + (parseFloat(s.percent) || 0), 0);
-      const bondPercent = bonds.reduce((sum, b) => sum + (parseFloat(b.percent) || 0), 0);
-      const sourceLabel = fundPosition.source === 'eastmoney' ? '东方财富' : '蛋卷基金';
-      const typeDesc = actualData?.data?.type_desc || '';
-
-      let output = `【基金 ${fundCode} 底层穿透（数据源: ${sourceLabel}, 来自最新季报/年报）】\n`;
-      output += `⚠️ 以下百分比均为「占基金净值比例」(JZBL)，不是占股票市值比。\n`;
-      if (typeDesc) output += `基金类型: ${typeDesc}\n`;
-      if (benchmark) {
-        output += `业绩基准: ${benchmark}`;
-        if (benchmarkEquity) output += ` → 权益仓位锚≈${(benchmarkEquity * 100).toFixed(0)}%`;
-        output += '\n';
-      }
-
-      if (stocks.length > 0) {
-        // 行业分布：优先用东方财富 API 自带分类，其次用本地 STOCK_SECTOR_MAP
-        const getSector = (s) => s.sector || classifyStock(s.name);
-        const sectors = {};
-        for (const s of stocks) {
-          const sec = getSector(s);
-          sectors[sec] = (sectors[sec] || 0) + s.percent;
-        }
-        const sectorSummary = Object.entries(sectors)
-          .sort((a, b) => b[1] - a[1])
-          .map(([n, p]) => `${n}${p.toFixed(1)}%`)
-          .join('、');
-
-        output += `\n【股票持仓 (${stocks.length}只)】\n`;
-        output += `前十大占净值比合计: ${stockPercent.toFixed(2)}%（⚠️ 占净值比例，非占股票市值比）\n`;
-        output += `【申万行业分布】${sectorSummary}\n\n`;
-        // 检查是否有调仓信息（东方财富 API 专有）
-        const hasChanges = stocks.some(s => s.changeType);
-        output += '【股票明细】\n' + stocks.map(s => {
-          const sec = getSector(s);
-          const code = s.code ? `(${s.code})` : '';
-          let changeStr = '';
-          if (s.changeType && s.changeType !== '不变') {
-            const arrow = s.changeType === '增持' ? '📈' : s.changeType === '减持' ? '📉' : '🆕';
-            const pctChange = s.changePct ? ` ${s.changePct}%` : '';
-            changeStr = ` ${arrow}${s.changeType}${pctChange}`;
-          }
-          return `- ${s.name}${code}: ${s.percent.toFixed(2)}% → ${sec}${changeStr}`;
-        }).join('\n') + '\n\n';
-        if (hasChanges) {
-          output += '📈增持 📉减持 🆕新增 — 调仓方向反映基金经理最新观点\n\n';
-        }
-
-        // equityRatio：优先用业绩基准解析，其次 type_desc，最后前十大占比推断
-        let equityRatioHint;
-        if (benchmarkEquity) {
-          equityRatioHint = benchmarkEquity.toFixed(2);  // 业绩基准最准
-        } else if (typeDesc.includes('股票') || typeDesc.includes('偏股')) equityRatioHint = '0.85';
-        else if (typeDesc.includes('混合') && !typeDesc.includes('偏债')) equityRatioHint = '0.65';
-        else if (typeDesc.includes('灵活')) equityRatioHint = '0.50';
-        else if (typeDesc.includes('债') || typeDesc.includes('固收')) equityRatioHint = '0.20';
-        else if (typeDesc.includes('指数') || typeDesc.includes('ETF')) equityRatioHint = '0.95';
-        else if (typeDesc.includes('货币')) equityRatioHint = '0.00';
-        else equityRatioHint = (stockPercent / 100).toFixed(2);
-
-        // 前十大集中度
-        const estEquity = parseFloat(equityRatioHint);
-        if (estEquity > 0.05 && stockPercent > 0) {
-          const concentration = stockPercent / (estEquity * 100);
-          const concLabel = concentration > 0.8 ? '高度集中' : concentration > 0.5 ? '中等集中' : '持股分散';
-          output += `权益仓位锚≈${(estEquity * 100).toFixed(0)}%（${benchmarkEquity ? '来自业绩基准' : '来自类型推断'}），前十大占权益约${(concentration * 100).toFixed(0)}%（${concLabel}）\n`;
-        } else if (estEquity <= 0.05) {
-          output += `权益仓位锚≈${(estEquity * 100).toFixed(0)}%（纯债/货币型）\n`;
-        }
-
-        output += `👉 请调 update_fof_dictionary 入库。equityRatio=${equityRatioHint}。`;
-      } else if (bonds.length > 0) {
-        output += `【债券持仓 (${bonds.length}只)】占净值比合计: ${bondPercent.toFixed(2)}%\n`;
-        output += bonds.map(b => `- ${b.name}: ${b.percent.toFixed(2)}%`).join('\n') + '\n';
-        output += '👉 纯债/货币基金，禁止入库 FOF 字典。';
-      } else {
-        output += '【未发现持仓数据】该基金可能为纯债/货币型或季报未披露。禁止入库字典。';
-      }
-      return { output, pendingActions: [] };
-    }
-
-    return { output: `基金 ${fundCode} 暂无底层持仓数据。可能原因：纯债/货币基金不披露前十大、季报未更新、或接口暂不可用。`, pendingActions: [] };
-  } catch (e) {
-    console.error(`[穿透] 异常: ${e.message}`);
-    return { output: `持仓穿透查询异常: ${e.message}`, pendingActions: [] };
-  }
-};
-
-// ============================================================================
 // 工具 15: 交易流水查询
 // ============================================================================
 const handleGetFundTransactionHistory = async (ctx) => {
@@ -1006,7 +937,8 @@ const handleGetRecentScores = async (ctx) => {
     output += `格式: 日期 | 权益分(F1/F2/F3/F4→最终) | 固收分 | CIO | 量价 | P&L\n`;
     snapshot.forEach(doc => {
       const s = doc.data();
-      let line = `\n${s.date} | `;
+      const timeStr = s.createdAt ? new Date(s.createdAt).toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+      let line = `\n${s.date}${timeStr ? ' '+timeStr : ''} | `;
       if (s.equity) {
         line += `权益 F1=${s.equity.F1} F2=${s.equity.F2} F3=${s.equity.F3} F4=${s.equity.F4}→${s.equity.final}`;
         if (s.equity.f3Flags) line += `(${s.equity.f3Flags})`;
@@ -1036,8 +968,171 @@ const handleStoreScoringSnapshot = async (ctx) => {
 };
 
 // ============================================================================
+// ============================================================================
+// 工具 22: 基金风险指标 — Sharpe / MDD / IR / 跟踪误差
+// ============================================================================
+const handleGetFundRiskMetrics = async (ctx) => {
+  try {
+    const fundCode = ctx.args.fundCode;
+    const benchmarkCode = ctx.args.benchmark || 'sh000001'; // 默认上证
+
+    // 获取基金历史净值
+    const fundUrl = `https://api.fund.eastmoney.com/f10/lsjz?fundCode=${fundCode}&pageIndex=1&pageSize=120`;
+    const fundFetchUrl = ctx.settings.proxyMode === 'custom' && ctx.settings.customProxyUrl
+      ? buildProxyUrl(ctx.settings, fundUrl) : buildAllOriginsUrl(fundUrl);
+    const fundRes = await fetch(fundFetchUrl, { cache: 'no-store' });
+    const fundRaw = await fundRes.text();
+    let fundData;
+    try { fundData = JSON.parse(fundRaw); } catch { fundData = JSON.parse(JSON.parse(fundRaw).contents); }
+    const navList = (fundData?.Data?.LSJZList || []).map(item => ({
+      date: item.FSRQ,
+      nav: parseFloat(item.DWJZ)
+    })).reverse();
+    if (navList.length < 20) return { output: '净值数据不足（<20日），无法计算风险指标。', pendingActions: [] };
+
+    // 获取基准 K 线
+    let benchmarkReturns = [];
+    try {
+      const bmCode = benchmarkCode.startsWith('sh') || benchmarkCode.startsWith('sz') ? benchmarkCode : 'sh' + benchmarkCode;
+      const bmUrl = `https://ifzq.gtimg.cn/appstock/app/kline/kline?param=${bmCode},day,,,120,`;
+      const bmFetchUrl = ctx.settings.proxyMode === 'custom' && ctx.settings.customProxyUrl
+        ? buildProxyUrl(ctx.settings, bmUrl) : buildAllOriginsUrl(bmUrl);
+      const bmRes = await fetch(bmFetchUrl, { cache: 'no-store' });
+      const bmData = await bmRes.json();
+      const bmKline = bmData?.data?.[bmCode]?.day || bmData?.data?.[bmCode]?.qfqday || [];
+      const bmCloses = bmKline.map(d => parseFloat(d[2])).filter(v => !isNaN(v));
+      for (let i = 1; i < bmCloses.length; i++) {
+        if (bmCloses[i - 1] > 0) benchmarkReturns.push((bmCloses[i] - bmCloses[i - 1]) / bmCloses[i - 1]);
+      }
+    } catch (e) { /* 基准失败不影响主要计算 */ }
+
+    // 计算日收益率
+    const dailyReturns = [];
+    for (let i = 1; i < navList.length; i++) {
+      if (navList[i - 1].nav > 0) dailyReturns.push((navList[i].nav - navList[i - 1].nav) / navList[i - 1].nav);
+    }
+    if (dailyReturns.length < 10) return { output: '日收益率序列不足（<10日）。', pendingActions: [] };
+    const n = dailyReturns.length;
+    const daysPerYear = 252;
+
+    // 年化收益率
+    const firstNav = navList[0].nav, lastNav = navList[navList.length - 1].nav;
+    const years = n / daysPerYear;
+    const annualReturn = years > 0 ? (Math.pow(lastNav / firstNav, 1 / years) - 1) : 0;
+
+    // 年化波动率
+    const meanReturn = dailyReturns.reduce((a, b) => a + b, 0) / n;
+    const variance = dailyReturns.reduce((s, r) => s + Math.pow(r - meanReturn, 2), 0) / n;
+    const annualVol = Math.sqrt(variance) * Math.sqrt(daysPerYear);
+
+    // Sharpe 比率（无风险利率按 2%）
+    const riskFree = 0.02;
+    const sharpe = annualVol > 0 ? ((annualReturn - riskFree) / annualVol) : 0;
+
+    // 最大回撤 MDD
+    let peak = navList[0].nav, mdd = 0, mddStart = '', mddEnd = '';
+    for (const point of navList) {
+      if (point.nav > peak) peak = point.nav;
+      const dd = (peak - point.nav) / peak;
+      if (dd > mdd) { mdd = dd; mddEnd = point.date; }
+    }
+    // 找 MDD 起点
+    let foundPeak = false;
+    for (const point of navList) {
+      if (point.nav / (1 - mdd) >= peak * 0.99 && !foundPeak) { mddStart = point.date; foundPeak = true; }
+    }
+
+    // 回撤恢复天数
+    let recoveryDays = 0;
+    const mddEndIdx = navList.findIndex(p => p.date === mddEnd);
+    if (mddEndIdx >= 0) {
+      for (let i = mddEndIdx + 1; i < navList.length; i++) {
+        recoveryDays++;
+        if (navList[i].nav >= peak) break;
+      }
+    }
+
+    // vs 基准：超额收益 + 跟踪误差 + IR
+    let excessReturn = 0, trackingError = 0, ir = 0;
+    if (benchmarkReturns.length > 0) {
+      const minLen = Math.min(dailyReturns.length, benchmarkReturns.length);
+      const fundR = dailyReturns.slice(-minLen), bmR = benchmarkReturns.slice(-minLen);
+      const excess = fundR.map((r, i) => r - bmR[i]);
+      const meanExcess = excess.reduce((a, b) => a + b, 0) / excess.length;
+      excessReturn = meanExcess * daysPerYear;
+      const excessVar = excess.reduce((s, r) => s + Math.pow(r - meanExcess, 2), 0) / excess.length;
+      trackingError = Math.sqrt(excessVar) * Math.sqrt(daysPerYear);
+      ir = trackingError > 0 ? excessReturn / trackingError : 0;
+    }
+
+    let output = `【基金 ${fundCode} 风险指标 — ${navList.length}个交易日】\n\n`;
+    output += `📈 收益指标\n`;
+    output += `年化收益: ${(annualReturn*100).toFixed(2)}% | 年化波动: ${(annualVol*100).toFixed(2)}% | Sharpe: ${sharpe.toFixed(2)}\n\n`;
+    output += `📉 风险指标\n`;
+    output += `最大回撤(MDD): -${(mdd*100).toFixed(2)}% (${mddStart}→${mddEnd}) | 恢复天数: ${recoveryDays}天\n\n`;
+    if (benchmarkReturns.length > 0) {
+      output += `⚖️ vs ${benchmarkCode} 基准\n`;
+      output += `超额收益: ${excessReturn >= 0 ? '+' : ''}${(excessReturn*100).toFixed(2)}% | 跟踪误差: ${(trackingError*100).toFixed(2)}% | IR: ${ir.toFixed(2)}\n`;
+      output += `IR评估: `;
+      if (ir > 1.0) output += '✅ IR>1.0 持续超额能力显著';
+      else if (ir > 0.5) output += '✅ IR>0.5 具备超额能力';
+      else if (ir > 0) output += '⚠️ IR偏低,超额不稳定';
+      else output += '❌ IR≤0 跑输基准';
+      output += '\n';
+    }
+    output += `\n👉 MDD用于击球区设定：若历史MDD=-${(mdd*100).toFixed(0)}%,击球区下沿应≥${(mdd*50).toFixed(1)}%。`;
+
+    return { output, pendingActions: [] };
+  } catch (e) {
+    return { output: `风险指标计算异常: ${e.message}`, pendingActions: [] };
+  }
+};
+
 // HANDLER_MAP — 策略模式映射表
 // ============================================================================
+
+// I. 深度微观结构探测器 — 调Worker做数据降维，返回定性信号
+const handleGetMarketMicrostructure = async (ctx) => {
+  const { settings } = ctx;
+  // 优先使用自定义代理Worker（microstructure端点部署在my-cors-proxy）
+  // customProxyUrl格式: "https://xxx.workers.dev/?url={{url}}" → 剥离?url=模板
+  const proxyUrl = (settings?.customProxyUrl || '').trim();
+  const cfUrl = (settings?.cfWorkerUrl || '').trim();
+  const workerUrl = proxyUrl || cfUrl;
+  if (!workerUrl) {
+    return { output: '❌ 未配置 Worker URL（自定义代理或巡检大脑至少填一个），无法查询微观结构数据。', pendingActions: [] };
+  }
+  try {
+    // 剥离可能存在的模板参数 (?url={{url}}) 和尾部斜杠
+    const base = workerUrl.split('?')[0].replace(/\/+$/, '');
+    const res = await fetch(base + '/api/market-microstructure');
+    if (!res.ok) throw new Error('Worker returned ' + res.status);
+    const data = await res.json();
+
+    // 压缩为精炼文本注入 AI — 只提供原始数据，不做定性判断
+    let output = '【深度微观结构探测】\n';
+    // 银行间流动性
+    if (data.liquidity?.ON_level != null) {
+      output += `├ 隔夜利率(GC001): ${data.liquidity.ON_rate?.toFixed(3)}% | 水位: ${data.liquidity.ON_level} (日变${data.liquidity.ON_change_bp ?? '?'}bp)\n`;
+    }
+    if (data.liquidity?.DR007_proxy_level != null) {
+      output += `├ 7日利率(GC007): ${data.liquidity.DR007_proxy_rate?.toFixed(3)}% | 水位: ${data.liquidity.DR007_proxy_level} (日变${data.liquidity.DR007_change_bp ?? '?'}bp)\n`;
+    }
+    // 期指基差 — 只给原始数据
+    for (const [key, fut] of Object.entries(data.derivatives || {})) {
+      if (fut.settlement != null) {
+        output += `├ 期指${key}: 结算${fut.settlement?.toFixed(1)} vs 现货${fut.spotClose?.toFixed(1)} | 基差${fut.basisPct ?? 'N/A'} | 成交${(fut.volume/10000).toFixed(0)}万手 持仓${(fut.openInterest/10000).toFixed(0)}万手\n`;
+      }
+    }
+    output += `└ 旗标: ${data.overall_signal || 'N/A'}`;
+    output += `\n\n📌 以上为原始数据。涨跌家数/涨跌比请从上下文【市场真实情绪】中读取，此处仅提供流动性+期指维度。请自行结合F1-F4全维度做独立判定。`;
+
+    return { output, pendingActions: [] };
+  } catch (e) {
+    return { output: `⚠️ 微观结构数据获取失败: ${e.message}。继续按标准流程分析，不做熔断。`, pendingActions: [] };
+  }
+};
+
 export const HANDLER_MAP = new Map([
   ['get_realtime_fund_data', handleGetRealtimeFundData],
   ['get_batch_fund_data', handleGetBatchFundData],
@@ -1053,8 +1148,6 @@ export const HANDLER_MAP = new Map([
   ['update_ledger', handleUpdateLedger],
   ['manage_plan_todo', handleManagePlanTodo],
   ['update_decision_memo', handleUpdateDecisionMemo],
-  ['update_fof_dictionary', handleUpdateFofDictionary],
-  ['get_fund_holdings_penetration', handleGetFundHoldingsPenetration],
   ['get_fund_transaction_history', handleGetFundTransactionHistory],
   ['get_index_valuation', handleGetIndexValuation],
   ['get_cross_asset_data', handleGetCrossAssetData],
@@ -1062,4 +1155,6 @@ export const HANDLER_MAP = new Map([
   ['get_macro_data', handleGetMacroData],
   ['get_recent_scores', handleGetRecentScores],
   ['store_scoring_snapshot', handleStoreScoringSnapshot],
+  ['get_fund_risk_metrics', handleGetFundRiskMetrics],
+  ['get_market_microstructure', handleGetMarketMicrostructure],
 ]);

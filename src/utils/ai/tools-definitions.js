@@ -56,13 +56,13 @@ export const defineTools = (settings) => {
     type: "function",
     function: {
       name: "get_market_historical_intraday",
-      description: "获取指数/ETF多周期OHLC(开高低收)K线。日K 60根/周K 20根/月K 12根。复盘量价博弈、检测背离、识别支撑阻力。",
+      description: "获取指数/ETF多周期OHLC(开高低收)K线，日K含ATR/RSI/MACD/筹码分布等量化指标。日K上线250根(1年)。",
       parameters: {
         type: "object",
         properties: {
           code: { type: "string", description: "sh000001(上证)/sh511260(国债ETF)/sz399006(创业板)等" },
           period: { type: "string", enum: ["day", "week", "month"], description: "day默认60根/week=20根/month=12根" },
-          count: { type: "number", description: "返回根数，最大100" }
+          count: { type: "number", description: "返回根数，日K最大250(筹码分析用≥120根)" }
         },
         required: ["code"]
       }
@@ -210,37 +210,7 @@ export const defineTools = (settings) => {
     }
   });
 
-  tools.push({
-    type: "function",
-    function: {
-      name: "get_fund_holdings_penetration",
-      description: "获取基金前十大重仓股明细（系统已预分类申万行业+预估算equityRatio）。双源蛋卷+东方财富，数据来自最新季报有1-2月滞后。",
-      parameters: { type: "object", properties: { fundCode: { type: "string", description: "6位数基金代码" } }, required: ["fundCode"] }
-    }
-  });
-
-  tools.push({
-    type: "function",
-    function: {
-      name: "update_fof_dictionary",
-      description: "将持仓穿透分析结果写入云端X-Ray字典。系统无法穿透总仓位(仅前十大JZBL)，用户可手动补充五栏(股票/债券/基金/现金/其他)精确占比。纯债/货币基金禁入库。",
-      parameters: {
-        type: "object",
-        properties: {
-          fundCode: { type: "string" },
-          fundName: { type: "string" },
-          equityRatio: { type: "number", description: "真实股票仓位比,如85%填0.85" },
-          sectors: { type: "object", description: "申万一级行业分布,如{'电子':0.4,'医药':0.3}" },
-          stockPct: { type: "number", description: "可选:股票占净值比,如22%填0.22。AI无法穿透时不填" },
-          bondPct: { type: "number", description: "可选:债券占净值比" },
-          fundPct: { type: "number", description: "可选:基金(FOF)占净值比" },
-          cashPct: { type: "number", description: "可选:现金/存款占净值比" },
-          otherPct: { type: "number", description: "可选:其他资产占净值比" }
-        },
-        required: ["fundCode", "fundName", "equityRatio", "sectors"]
-      }
-    }
-  });
+  // [FOF字典/穿透工具已删除 — 资产配置随持仓表格直接注入AI]
 
   // ── D. 可视化与计算 ──
   tools.push({
@@ -354,7 +324,24 @@ export const defineTools = (settings) => {
     }
   });
 
-  // ── G. 打分存储 ──
+  // ── G. 风险指标 ──
+  tools.push({
+    type: "function",
+    function: {
+      name: "get_fund_risk_metrics",
+      description: "计算基金风险指标：年化收益/波动率/Sharpe/MDD(最大回撤+恢复天数)/vs基准(超额收益+跟踪误差+IR信息比率)。用于击球区MDD约束和选基决策。",
+      parameters: {
+        type: "object",
+        properties: {
+          fundCode: { type: "string", description: "基金6位数代码" },
+          benchmark: { type: "string", description: "基准代码,默认sh000001(上证),可选sh000300(沪深300)" }
+        },
+        required: ["fundCode"]
+      }
+    }
+  });
+
+  // ── H. 打分存储 ──
   tools.push({
     type: "function",
     function: {
@@ -362,7 +349,7 @@ export const defineTools = (settings) => {
       description: "查询最近N个交易日的双核打分快照(权益F1-F4+动量修正+最终得分+固收分+上次CIO判定)，用于动量修正和滞回锁定。跨对话共享。",
       parameters: {
         type: "object",
-        properties: { days: { type: "number", description: "查询最近几天，默认5天" } },
+        properties: { days: { type: "number", description: "查询最近几天，默认10天" } },
         required: []
       }
     }
@@ -372,7 +359,7 @@ export const defineTools = (settings) => {
     type: "function",
     function: {
       name: "store_scoring_snapshot",
-      description: "保存当日双核打分完整快照到云端(每天多次打分仅保留最后一次)。必须附带量价环境+P&L快照(totalValue/totalProfit)，供自检回顾对比打分趋势与实际盈亏。",
+      description: "保存当日双核打分完整快照到云端(每天多次打分仅保留最后一次)。P&L字段可选附带供人工复盘,不参与自动判定。",
       parameters: {
         type: "object",
         properties: {
@@ -417,6 +404,20 @@ export const defineTools = (settings) => {
           }
         },
         required: ["date", "verdict"]
+      }
+    }
+  });
+
+  // ── I. 深度微观结构探测器 ──
+  tools.push({
+    type: "function",
+    function: {
+      name: "get_market_microstructure",
+      description: "【必调】获取A股深度微观结构信号(银行间流动性+期指基差+回购利率)，数据在后端做降维压缩，返回定性结论而非原始数据。用于F3量价验证的熔断判定：若返回'致命信号'则F3强制归零。",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: []
       }
     }
   });

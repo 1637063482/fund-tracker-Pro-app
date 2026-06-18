@@ -28,6 +28,10 @@ import { TodoListCard } from './components/Dashboard/TodoListCard';
 import { FundTable } from './components/Dashboard/FundTable';
 import { useFundMetrics } from './hooks/useFundMetrics';
 import { useModalAnimation } from './hooks/useModalAnimation';
+import { useThemeSettings } from './hooks/useThemeSettings';
+import { useMarketPolling } from './hooks/useMarketPolling';
+import { useFirestoreFunds } from './hooks/useFirestoreFunds';
+import { useTodoManager } from './hooks/useTodoManager';
 import { debugLog } from './utils/debugLog';
 import { AnimatedModal } from './components/UI/AnimatedModal';
 import { SmartInput } from './components/UI/SmartInput';
@@ -157,74 +161,22 @@ RefreshButton.displayName = 'RefreshButton';
 export default function App() {
   const[user, setUser] = useState(null); 
   const[authLoading, setAuthLoading] = useState(true);
-  const [funds, setFunds] = useState([]); 
-  const [todos, setTodos] = useState([]);
+  const [dbError, setDbError] = useState('');
+  const[isDbConnected, setIsDbConnected] = useState(false);
 
-  // 监听待办事项数据库
-  useEffect(() => {
-    if (!user || !db) return;
-    const todosRef = collection(db, 'artifacts', appId, 'users', user.uid, 'todos');
-    const unsubTodos = onSnapshot(query(todosRef), (snapshot) => {
-      const data = [];
-      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
-      setTodos(data);
-    }, (err) => {
-      console.error('待办事项读取失败:', err);
-      if (auth.currentUser) setDbError('读取待办数据失败，请检查 Firestore 规则。');
-    });
-    return () => unsubTodos();
-  }, [user]);
+  // ── Hooks: extracted state management ──
+  const { settings, setSettings, settingsReady, theme, setTheme, toggleTheme, showAmounts, togglePrivacy, handleSaveSettings, fmt } = useThemeSettings(user);
+  const { marketData, marketError, isAutoRefresh, setIsAutoRefresh, manualFetch, manualFetchCount, activeProxyIndex } = useMarketPolling(user, settings, settingsReady);
+  const { funds, fundNavs, setFundNavs, fetchingNavCodes, setFetchingNavCodes, handleDeleteFund, deleteConfirm, setDeleteConfirm, confirmDeleteFund } = useFirestoreFunds(user);
+  const { todos, handleAddTodo, handleUpdateTodo, handleDeleteTodo, handleToggleTodo } = useTodoManager(user);
 
-  const handleAddTodo = async (todoData) => {
-    if (!user || !db) return;
-    const todosRef = collection(db, 'artifacts', appId, 'users', user.uid, 'todos');
-    await addDoc(todosRef, todoData);
-  };
+  // [funds state now managed by useFirestoreFunds hook]
+  // [todos state now managed by useTodoManager hook]
+  // [todos Firestore listener now managed by useTodoManager hook]
 
-  const handleToggleTodo = async (id, isCompleted) => {
-    if (!user || !db) return;
-    const todoRef = doc(db, 'artifacts', appId, 'users', user.uid, 'todos', id);
-    const now = new Date().toISOString();
-    await setDoc(todoRef, { isCompleted, completedAt: isCompleted ? now : null, updatedAt: now }, { merge: true });
-  };
-
-  const handleDeleteTodo = async (id) => {
-    if (!user || !db) return;
-    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'todos', id));
-  };
-  const handleUpdateTodo = async (id, newData) => {
-    if (!user || !db) return;
-    const todoRef = doc(db, 'artifacts', appId, 'users', user.uid, 'todos', id);
-    await setDoc(todoRef, newData, { merge: true });
-  };
-  const[settings, setSettings] = useState({
-    targetAmount: 100000,
-    targetDate: '2030-12-31',
-    targetAnnualRate: 5,
-    proxyMode: 'custom',
-    customProxyUrl: '',
-    dataSource: 'tencent',
-    navDataSource: 'tiantian',
-    aiProvider: 'gemini',
-    aiApiKey: '',
-    ntfyTopic: '',
-    idleFunds: 0,
-    tavilyApiKey: '',
-    exaApiKey: '',
-    serperApiKey: '',
-    cfWorkerUrl: '',
-    cfWorkerSecret: '',
-    reasoningEffort: 'max',
-    temperature: 0.1,
-    topP: 0.1,
-    maxOutputTokens: 8192,
-    maxHistoryMessages: 20,
-    maxToolLoops: 12,
-    marketRefreshInterval: 5000,
-    autoLogoutMinutes: 15,
-    searchResultCount: 6
-  });
-  const[theme, setTheme] = useState('light'); 
+  // [handleAddTodo/handleToggleTodo/handleDeleteTodo/handleUpdateTodo now provided by useTodoManager hook]
+  // [settings state now managed by useThemeSettings hook]
+  // [theme state now managed by useThemeSettings hook]
 
   // ==========================================
   // 🌟 新增：全局法定节假日初始化引擎
@@ -250,41 +202,36 @@ export default function App() {
     initHolidayData();
   }, []);
   
-  const [marketData, setMarketData] = useState([]);
-  const[marketError, setMarketError] = useState('');
-  const [activeProxyIndex, setActiveProxyIndex] = useState(0);
+  // [marketData now managed by useMarketPolling hook]
+  // [marketError now managed by useMarketPolling hook]
+  // [activeProxyIndex now managed by useMarketPolling hook]
 
   // marketError 兜底：fetchMarketService 内部通过 setMarketError 更新，
   // 此处仅保留手动 catch 块中的 setMarketError 调用
 
   const isFetchingRef = useRef(false);
-  const [settingsReady, setSettingsReady] = useState(false); // 防止 Firestore settings 未就绪时提前 fetch
-  // 【关键修改1】初始状态默认开启，把控制权完全交给用户
-  const [isAutoRefresh, setIsAutoRefresh] = useState(true); 
+  // [settingsReady now managed by useThemeSettings hook]
+  // [isAutoRefresh now managed by useMarketPolling hook]
+  // [isFetchingRef kept once above]
 
   const[editingFundId, setEditingFundId] = useState(null);
   const[isProxyModalOpen, setProxyModalOpen] = useState(false);
   const [modalTriggerRect, setModalTriggerRect] = useState(null);
-  const [deleteConfirm, setDeleteConfirm] = useState(null); // { id, message, onConfirm }
+  // [deleteConfirm now managed by useFirestoreFunds hook]
   const[isPortfolioModalOpen, setPortfolioModalOpen] = useState(false);
-  const[dbError, setDbError] = useState(''); 
-  const[isDbConnected, setIsDbConnected] = useState(false);
+  // [dbError/isDbConnected now declared above via hook block]
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' }); 
   const[fundTab, setFundTab] = useState('active'); 
   
-  const[fundNavs, setFundNavs] = useState({});
-  const[fetchingNavCodes, setFetchingNavCodes] = useState({}); 
+  // [fundNavs now managed by useFirestoreFunds hook]
+  // [fetchingNavCodes now managed by useFirestoreFunds hook]
   
   const[fundProfiles, setFundProfiles] = useState({});
   const[viewingProfileCode, setViewingProfileCode] = useState(null);
 
-  const [showAmounts, setShowAmounts] = useState(true);
-  const togglePrivacy = useCallback(() => setShowAmounts(prev => !prev), []);
-  const fmt = useMemo(() => ({
-    money: (val) => showAmounts ? formatMoney(val) : '****',
-    percent: (val) => showAmounts ? formatPercent(val) : '**.**%',
-    raw: (val, suffix = '') => showAmounts ? `${val}${suffix}` : `***${suffix}`,
-  }), [showAmounts]);
+  // [showAmounts/togglePrivacy/fmt now managed by useThemeSettings hook]
+  // [togglePrivacy now in useThemeSettings]
+  // [fmt now managed by useThemeSettings hook]
 
   const INACTIVITY_LIMIT = useMemo(
     () => (settings.autoLogoutMinutes ?? 15) * 60 * 1000,
@@ -296,17 +243,7 @@ export default function App() {
   const targetRateTimeoutRef = useRef(null);
 
 
-// ==========================================
-  // 【核心修复区 1】恢复昼夜模式的 CSS 类名切换驱动
-  // ==========================================
-  useEffect(() => {
-    if (theme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [theme]);
-
+  // [theme useEffect now managed by useThemeSettings hook]
   // ==========================================
   // 【核心修复区 3】处理前端 DOM 开屏动画 (跟随 authLoading)
   // ==========================================
@@ -421,37 +358,7 @@ export default function App() {
     };
   },[]); 
 
-  useEffect(() => {
-    if (!user || !db) return;
-    
-    setIsDbConnected(false);
-    const fundsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'funds');
-    
-    const unsubFunds = onSnapshot(query(fundsRef), (snapshot) => {
-      const data =[];
-      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
-      setFunds(data);
-      setDbError(''); 
-      setIsDbConnected(true);
-    }, (err) => {
-      console.error(err);
-      if (auth.currentUser) setDbError('读取资金数据失败，请检查 Firestore 规则。');
-      setIsDbConnected(false);
-    });
-
-    const settingsDocRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'general');
-    const unsubSettings = onSnapshot(settingsDocRef, (docSnap) => {
-      setSettingsReady(true);
-      if (docSnap.exists()) {
-         setSettings(prev => ({ ...prev, ...docSnap.data() }));
-      }
-    }, (err) => {
-      console.error('设置读取失败:', err);
-      if (auth.currentUser) setDbError('读取设置数据失败，请检查 Firestore 规则。');
-    });
-
-    return () => { unsubFunds(); unsubSettings(); setIsDbConnected(false); };
-  }, [user]);
+  // [funds/settings Firestore listeners now managed by hooks]
 
   const fetchDanjuanProfile = async (code) => {
       if (!code) return null;
@@ -521,46 +428,9 @@ export default function App() {
      fetchFundNavManually();
   },[user, funds, settings.proxyMode, settings.customProxyUrl, settings.navDataSource]);
 
-  const fetchMarketAPI = async () => {
-    if (!user) return;
-    return fetchMarketService({
-      settings, activeProxyIndex,
-      setMarketData, setMarketError
-    });
-  };
+  // [fetchMarketAPI now provided by useMarketPolling hook]
 
-  const [manualFetchCount, setManualFetchCount] = useState(0);
-  const manualFetch = useCallback(async () => {
-     setManualFetchCount(c => c + 1);
-     if (isFetchingRef.current) return;
-     isFetchingRef.current = true;
-     try {
-        await fetchMarketAPI();
-     } catch (error) {
-        setMarketError(settings.proxyMode === 'custom' ? `代理/数据源请求失败 (${settings.dataSource})` : `节点不可用，正在切换...`);
-        if (settings.proxyMode !== 'custom') {
-           setActiveProxyIndex(prev => (prev + 1) % PROXY_NODES.length);
-        }
-     } finally {
-        isFetchingRef.current = false;
-     }
-  },[activeProxyIndex, user, settings.proxyMode, settings.customProxyUrl, settings.dataSource]);
-
-   useEffect(() => {
-    if (!user) return;
-    // 等待 Firestore settings 就绪后再执行首次行情拉取，避免默认配置导致的虚假失败
-    if (!settingsReady) return;
-    manualFetch();
-
-    if (!isAutoRefresh) return;
-    const intervalId = setInterval(() => {
-      // 【关键修改2】底层时钟动态拦截：即使用户开着自动刷新，只要当前是休市/节假日，就静默跳过请求，绝不浪费资源！
-      if (checkIsTradingTime()) {
-        manualFetch();
-      }
-    }, settings.marketRefreshInterval || 5000);
-    return () => clearInterval(intervalId);
-  },[isAutoRefresh, manualFetch, user, settings.marketRefreshInterval, settingsReady]);
+  // [manualFetch/manualFetchCount/auto-refresh useEffect now provided by useMarketPolling hook]
 
   const handleCloseEditor = () => {
     setEditingFundId(null);
@@ -596,6 +466,7 @@ export default function App() {
       lastNav: fundNavs[fund.fundCode]?.nav || fund.lastNav || 0,
       lastNavDate: fundNavs[fund.fundCode]?.date || fund.lastNavDate || '',
       redemptionFees: fund.redemptionFees || {},
+      assetAllocation: fund.assetAllocation || { stock: '', bond: '', cash: '', fund: '', other: '' },
       updatedAt: new Date().toISOString()
     };
 
@@ -607,29 +478,9 @@ export default function App() {
     }
   };
 
-  const handleDeleteFund = async (id) => {
-    if (!user || !db) return;
-    setDeleteConfirm({ id });
-  };
+  // [handleDeleteFund/confirmDeleteFund now provided by useFirestoreFunds hook]
 
-  const confirmDeleteFund = async () => {
-    if (!deleteConfirm) return;
-    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'funds', deleteConfirm.id));
-  };
-
-  const handleSaveSettings = async (newSettings) => {
-    if (!user || !db) return;
-    setSettings(prev => ({ ...prev, ...newSettings }));
-    try {
-      const settingsDocRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'general');
-      await setDoc(settingsDocRef, newSettings, { merge: true });
-    } catch (error) {
-      console.error("保存云端设置失败:", error);
-      // 保存失败时回滚 local state，避免 UI 与 Firestore 不一致
-      setSettings(prev => ({ ...prev }));
-      toast('设置保存失败，请检查网络连接或刷新后重试', 'error');
-    }
-  };
+  // [handleSaveSettings now provided by useThemeSettings hook with rollback]
 
   const handleTargetAmountChange = (e) => {
     const val = e.target.value;
@@ -771,7 +622,7 @@ export default function App() {
       )}
 
       {!authLoading && !user && (
-         <LoginScreen theme={theme} setTheme={setTheme} dbError={dbError} />
+         <LoginScreen theme={theme} toggleTheme={toggleTheme} dbError={dbError} />
       )}
 
       {!authLoading && user && (
@@ -820,7 +671,7 @@ export default function App() {
                   </div>
                 )}
 
-                <button type="button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors active:scale-90">
+                <button type="button" onClick={toggleTheme} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors active:scale-90">
                   {theme === 'dark' ? <Sun size={20} className="text-yellow-400"/> : <Moon size={20}/>}
                 </button>
                 <PrivacyEyeButton />

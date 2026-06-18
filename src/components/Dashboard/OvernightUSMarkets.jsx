@@ -49,19 +49,60 @@ const OvernightUSMarkets = React.memo(({ isAutoRefresh, manualFetch }) => {
     }
   }, [manualFetch]);
 
-  // 自动刷新：仅当自动刷新开 + 美股交易中
+  // 自动刷新：仅当自动刷新开 + 美股交易中 + 页面可见
   useEffect(() => {
-    clearInterval(timerRef.current);
-    if (isAutoRefresh && isUSOpen()) {
-      timerRef.current = setInterval(fetchUS, 5000);
-    }
-    return () => clearInterval(timerRef.current);
+    let timerId = null;
+
+    const startTimer = () => {
+      if (timerId) clearInterval(timerId);
+      if (isAutoRefresh && isUSOpen() && !document.hidden) {
+        timerId = setInterval(fetchUS, 5000);
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        if (timerId) { clearInterval(timerId); timerId = null; }
+      } else {
+        startTimer();
+      }
+    };
+
+    startTimer();
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (timerId) clearInterval(timerId);
+    };
   }, [isAutoRefresh]);
 
-  // 实时时钟
+  // 实时时钟 — 页面不可见时暂停
   useEffect(() => {
-    const clock = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(clock);
+    let clockId = null;
+
+    const startClock = () => {
+      if (clockId) clearInterval(clockId);
+      if (!document.hidden) {
+        clockId = setInterval(() => setNow(new Date()), 1000);
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        if (clockId) { clearInterval(clockId); clockId = null; }
+      } else {
+        startClock();
+      }
+    };
+
+    startClock();
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (clockId) clearInterval(clockId);
+    };
   }, []);
 
   if (error || !usData || usData.length === 0) return null;

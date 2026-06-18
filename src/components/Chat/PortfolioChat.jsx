@@ -7,6 +7,7 @@ import { debugLog } from '../../utils/debugLog';
 import { renderMarkdown, renderMarkdownForPrint } from '../../utils/renderMarkdown';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { useModalAnimation } from '../../hooks/useModalAnimation';
+import { useFileUpload } from '../../hooks/useFileUpload';
 import { ActionCard } from './ActionCard';
 import { dispatchAction, handleScoreRecord } from './actionHandlers';
 import { ImageModal } from '../UI/ImageModal';
@@ -86,11 +87,14 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   const handleOpen = useCallback((e) => {
     setChatTriggerRect(e.currentTarget.getBoundingClientRect());
     setShowButton(false);
+    setIsChatClosing(false);
     open();
   }, [open]);
 
   const handleClose = useCallback(() => {
     setShowButton(true);
+    setShowAiParams(false);
+    setIsChatClosing(true);
     animClose();
   }, [animClose]);
   const focusRef = useFocusTrap(isOpen);
@@ -98,31 +102,72 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   const [enableMacroRadar, setEnableMacroRadar] = useState(false);
   const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
   const [zoomedImage, setZoomedImage] = useState(null);
-  const [attachment, setAttachment] = useState(null);
-  const [previewUrl, setPreviewUrl] = useState(null);
-  const fileInputRef = useRef(null);
-  const [ocrEngine, setOcrEngine] = useState('gemini');
+  // [attachment/previewUrl/fileInputRef/ocrEngine now provided by useFileUpload hook]
+  const { attachment, setAttachment, previewUrl, setPreviewUrl, ocrEngine, setOcrEngine, fileInputRef, handleFileChange, removeAttachment: removeAttachmentHook } = useFileUpload();
   const [showAiParams, setShowAiParams] = useState(false);
+  const [aiParamsTriggerRect, setAiParamsTriggerRect] = useState(null);
+  const [isChatClosing, setIsChatClosing] = useState(false);
   const [confirmAction, setConfirmAction] = useState(null);
   const [confirmTriggerRect, setConfirmTriggerRect] = useState(null);
   const [isMemoClosing, setIsMemoClosing] = useState(false);
   const [isMemoOpening, setIsMemoOpening] = useState(true);
-  const [scoringHistory, setScoringHistory] = useState(null); // 手动拉取打分历史
+  const [scoringHistory, setScoringHistory] = useState(null); // 当前展示的打分历史（null=面板关闭）
   const [isScoringClosing, setIsScoringClosing] = useState(false);
   const [isScoringOpening, setIsScoringOpening] = useState(true);
   const [scoringTriggerRect, setScoringTriggerRect] = useState(null);
-  const [isScoringLoading, setIsScoringLoading] = useState(false);
+  const [isScoringLoading, setIsScoringLoading] = useState(false);   // 硬加载（无缓存时显示 spinner）
+  const [isScoringRefreshing, setIsScoringRefreshing] = useState(false); // 后台刷新中（有缓存时显示小指示器）
+  const scoringCacheRef = useRef({ data: null, fetchedAt: 0 });     // 内存缓存
 
-  // 手动拉取打分快照（按需加载，不设实时监听器，避免性能问题）
-  const fetchScoringHistory = useCallback(async () => {
+  // 带缓存的打分快照拉取（stale-while-revalidate）
+  const loadScoringHistory = useCallback(async ({ forceRefresh = false } = {}) => {
     if (!user || !db) return;
+    const CACHE_TTL = 5 * 60 * 1000;       // 5分钟内视为新鲜
+    const STALE_TTL = 30 * 60 * 1000;      // 30分钟内可复用但后台刷新
+    const now = Date.now();
+    const cache = scoringCacheRef.current;
+    const cacheAge = now - cache.fetchedAt;
+    const hasCache = cache.data !== null;
+
+    // 有缓存且新鲜 → 直接展示，不发请求
+    if (hasCache && cacheAge < CACHE_TTL && !forceRefresh) {
+      setScoringHistory(cache.data);
+      setIsScoringLoading(false);
+      setIsScoringRefreshing(false);
+      return;
+    }
+
+    // 有缓存但过期 → 先展示缓存，后台静默刷新
+    if (hasCache && cacheAge < STALE_TTL && !forceRefresh) {
+      setScoringHistory(cache.data);
+      setIsScoringLoading(false);
+      setIsScoringRefreshing(true);
+      try {
+        const snapRef = collection(db, 'artifacts', appId, 'users', user.uid, 'scoring_snapshots');
+        const q = query(snapRef, orderBy('date', 'desc'), limit(30));
+        const snapshot = await getDocs(q);
+        const data = [];
+        snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
+        scoringCacheRef.current = { data, fetchedAt: Date.now() };
+        setScoringHistory(data);
+      } catch (err) {
+        console.error('后台刷新打分快照失败:', err);
+      } finally {
+        setIsScoringRefreshing(false);
+      }
+      return;
+    }
+
+    // 无缓存或缓存太旧 → 硬加载
     setIsScoringLoading(true);
+    setIsScoringRefreshing(false);
     try {
       const snapRef = collection(db, 'artifacts', appId, 'users', user.uid, 'scoring_snapshots');
       const q = query(snapRef, orderBy('date', 'desc'), limit(30));
       const snapshot = await getDocs(q);
       const data = [];
       snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
+      scoringCacheRef.current = { data, fetchedAt: Date.now() };
       setScoringHistory(data);
     } catch (err) {
       console.error('拉取打分快照失败:', err);
@@ -160,19 +205,8 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
     return { tx: bx - cx, ty: by - cy, scale: Math.max(scoringTriggerRect.width / 600, 0.12) };
   }, [scoringTriggerRect]);
 
-  const handleFileChange = (e) => {
-      const file = e.target.files[0];
-      if (file) {
-          setAttachment(file);
-          setPreviewUrl(URL.createObjectURL(file));
-      }
-  };
-
-  const removeAttachment = () => {
-      setAttachment(null);
-      setPreviewUrl(null);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-  };
+  // [handleFileChange/removeAttachment now provided by useFileUpload hook]
+  const removeAttachment = removeAttachmentHook;
 
   // 🌟 新增：周五例行巡检黄条的显示状态
   const [showInspectionBanner, setShowInspectionBanner] = useState(false);
@@ -241,7 +275,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
       }
       
       // 3. 填入最高级系统指令
-      const inspectionPrompt = "【系统自动触发：记忆库例行深度巡检】当前是例行维护日。请提取当前备忘录中的所有基金/资产代码，主动调用工具获取它们的最新精确净值与涨跌幅。然后，请使用 update_decision_memo 逐一覆写并更新那些包含‘过时时效性数字’（如：近1月收益、当前距离击球区的百分比、最新价格等）的记忆卡片。注意：除非基本面逻辑破裂，否则请保留原有的【战略定调】和【击球区阈值】。全部更新完毕后，请输出一份《记忆库洗盘与资产巡检报告》。";
+      const inspectionPrompt = "执行例行巡检。\n\n请严格按照第五层批量巡检步骤执行：\n1. 量化重算：get_market_historical_intraday(sh000001,day,120)取ATR/RSI/年筹码 → 遍历权益标的调get_fund_risk_metrics取MDD+IR → 基于ATR×1.5重算网格步长+筹码验证+斐波那契\n2. 执行第四层完整打分\n3. 战术拦截：逐只按标签+得分矩阵分发指令\n4. 防污染墙：禁止单日战术分篡改长线战略备忘\n5. 输出巡检报告：每只标注得分|CIO判定|击球区(ATR步长)|MDD约束|筹码支撑。过时净值/快照数据直接覆写，战略定调仅在基本面逻辑破裂时修改。";
       setInput(inspectionPrompt);
       
       // 4. 延迟 200ms 等待 React 状态更新后触发发送
@@ -729,6 +763,29 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
     });
   };
 
+  // 删除单条消息：从数组中移除 → 更新 state → 同步 Firestore → 被删内容不再注入 AI 上下文
+  const handleDeleteMessage = useCallback((index, e) => {
+    if (e?.currentTarget) {
+      setConfirmTriggerRect(e.currentTarget.getBoundingClientRect());
+    }
+    const targetMsg = messages[index];
+    const roleLabel = targetMsg?.role === 'user' ? '你的提问' : 'AI 的回复';
+    const preview = (targetMsg?.content || '').substring(0, 40).replace(/\n/g, ' ');
+    setConfirmAction({
+      message: `确定要删除这条${roleLabel}吗？\n\n"${preview}${(targetMsg?.content || '').length > 40 ? '…' : ''}"\n\n删除后该内容将不再注入 AI 上下文。`,
+      onConfirm: () => {
+        setMessages(prev => {
+          const updated = prev.filter((_, i) => i !== index);
+          if (user && db) {
+            persistConversation(activeConvIdRef.current, updated, user, conversationsRef.current)
+              .catch(err => console.error('删除消息同步失败:', err));
+          }
+          return updated;
+        });
+      }
+    });
+  }, [messages, user, db]);
+
   // 【核心性能修复】使用 useMemo 阻断打字时触发的无效历史消息渲染
   const renderedMessages = useMemo(() => {
     return messages.map((msg, idx) => (
@@ -739,7 +796,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
           </div>
           <div className={`px-4 py-3 text-[15px] leading-relaxed min-w-0 overflow-x-auto custom-scrollbar ${msg.role === 'user' ? 'bg-blue-500 text-white rounded-[1.25rem] shadow-apple-sm' : 'bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/60 rounded-[1.25rem] shadow-apple-sm'}`}>
             {msg.role === 'user' ? msg.content : renderMarkdown(msg.content)}
-            
+
             {/* 🌟 核心：遍历 msg.actions 渲染多个卡片 */}
             {msg.isAction && msg.actions && msg.actions.map(action => (
                 <ActionCard
@@ -763,13 +820,21 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
             )}
           </div>
         </div>
-        {/* 消息时间戳 — 默认隐藏，鼠标悬浮显示 */}
-        <div className={`text-[10px] text-slate-400 dark:text-slate-500 mt-1 px-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 select-none ${msg.role === 'user' ? 'text-right mr-1' : 'text-left ml-1'}`}>
-          {formatMessageTime(msg.timestamp)}
+        {/* 消息时间戳 + 删除按钮 — 默认隐藏，鼠标悬浮显示 */}
+        <div className={`text-[10px] text-slate-400 dark:text-slate-500 mt-1 px-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 select-none inline-flex items-center gap-0.5 ${msg.role === 'user' ? 'mr-1' : 'ml-1'}`}>
+          <Tooltip content="删除此消息（不再注入AI上下文）">
+            <button
+              onClick={(e) => { e.stopPropagation(); handleDeleteMessage(idx, e); }}
+              className="p-0.5 rounded-full text-slate-300 hover:text-red-500 hover:bg-red-50 dark:text-slate-500 dark:hover:text-red-400 dark:hover:bg-red-900/30 transition-colors"
+            >
+              <Trash2 size={11} />
+            </button>
+          </Tooltip>
+          <span>{formatMessageTime(msg.timestamp)}</span>
         </div>
       </div>
     ));
-}, [messages, handleCancelAction, handleConfirmAction, handleShareAsPDF, todos]);
+}, [messages, handleCancelAction, handleConfirmAction, handleShareAsPDF, handleDeleteMessage, todos]);
 
   return (
     <>
@@ -783,7 +848,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
       </button>
 
       {/* 遮罩层 + 面板 — FLIP动画 */}
-      <div style={overlayStyle} onClick={handleClose}>
+      <div style={overlayStyle} onClick={handleClose} className={isChatClosing ? "pointer-events-none" : ""}>
         <div ref={focusRef} style={panelStyle} className="w-full h-[92dvh] sm:h-[98vh] sm:max-w-5xl bg-white dark:bg-slate-900 sm:rounded-[1.25rem] rounded-[1.75rem] shadow-apple-2xl flex flex-col overflow-hidden border border-slate-200/50 dark:border-slate-700/40 safe-top safe-bottom" onClick={e => e.stopPropagation()}>
           
           {/* 头部 — Apple毛玻璃风格 */}
@@ -810,9 +875,9 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
               </Tooltip>
               {/* 打分历史按钮（手动拉取，无实时监听） */}
               <Tooltip key={`score-tip-${scoringHistory !== null}`} content="量化打分历史">
-                <button onClick={(e) => { setScoringTriggerRect(e.currentTarget.getBoundingClientRect()); setScoringHistory([]); setIsScoringOpening(true); requestAnimationFrame(() => requestAnimationFrame(() => setIsScoringOpening(false))); fetchScoringHistory(); }} className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-[0.625rem] transition-colors relative">
+                <button onClick={(e) => { setScoringTriggerRect(e.currentTarget.getBoundingClientRect()); setIsScoringOpening(true); requestAnimationFrame(() => requestAnimationFrame(() => setIsScoringOpening(false))); loadScoringHistory(); }} className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-[0.625rem] transition-colors relative">
                   <Activity size={18} />
-                  {isScoringLoading && <span className="absolute inset-0 flex items-center justify-center"><RefreshCw size={12} className="animate-spin text-indigo-500" /></span>}
+                  {(isScoringLoading || isScoringRefreshing) && <span className="absolute inset-0 flex items-center justify-center"><RefreshCw size={12} className={`animate-spin ${isScoringRefreshing ? 'text-indigo-300' : 'text-indigo-500'}`} /></span>}
                 </button>
               </Tooltip>
               {/* 新建对话按钮 */}
@@ -953,112 +1018,6 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
                   rows={1}
               />
 
-              {/* AI 参数弹出面板 */}
-              {showAiParams && (
-                <div className="absolute bottom-full left-2 mb-3 w-72 bg-white dark:bg-slate-900 rounded-modal border border-slate-200/60 dark:border-slate-700/40 shadow-apple-2xl p-4 animate-spring-up z-50 max-h-[70vh] overflow-y-auto custom-scrollbar">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center">
-                      <Sparkles size={14} className="text-slate-500 mr-1.5" />
-                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">AI 参数设置</span>
-                    </div>
-                    <button onClick={() => setShowAiParams(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 p-0.5 rounded-[0.625rem] hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
-                      <X size={14} />
-                    </button>
-                  </div>
-
-                  {(settings.aiProvider === 'deepseek' || settings.aiProvider === 'siliconflow') && (
-                    <div className="mb-3 pb-3 border-b border-slate-100 dark:border-slate-700/50">
-                      <span className="text-[11px] font-bold text-purple-700 dark:text-purple-300 block mb-2">推理深度</span>
-                      <div className="grid grid-cols-3 gap-1.5">
-                        {[
-                          { id: 'disabled', label: '⚡ 快速', desc: '禁用推理' },
-                          { id: 'high', label: '🔍 深度', desc: '平衡推理' },
-                          { id: 'max', label: '🧠 极致', desc: '最强推理' },
-                        ].map(opt => (
-                          <button
-                            key={opt.id}
-                            type="button"
-                            onClick={() => onSaveSettings({ reasoningEffort: opt.id })}
-                            className={`p-2 border rounded-[0.625rem] flex flex-col items-center transition-all duration-200 active:scale-[0.97] text-[10px] leading-tight ${
-                              (settings.reasoningEffort || 'max') === opt.id
-                                ? 'bg-purple-100 border-purple-400 text-purple-700 dark:bg-purple-900/40 dark:border-purple-500 dark:text-purple-300 shadow-sm'
-                                : 'border-slate-200 text-slate-500 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700'
-                            }`}
-                          >
-                            <span className="font-bold text-[11px]">{opt.label}</span>
-                            <span className="text-[9px] opacity-70 mt-0.5">{opt.desc}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="space-y-3 pb-3 border-b border-purple-100 dark:border-purple-800/50">
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[11px] font-medium text-purple-700 dark:text-purple-300">Temperature</span>
-                        <span className="text-[11px] font-mono font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-0.5 rounded-[0.625rem]">{(settings.temperature ?? 0.1).toFixed(2)}</span>
-                      </div>
-                      <input type="range" min="0" max="1" step="0.05" value={settings.temperature ?? 0.1}
-                        onChange={e => onSaveSettings({ temperature: parseFloat(e.target.value) })}
-                        className="w-full h-1.5 bg-purple-200 dark:bg-purple-700 rounded-full appearance-none cursor-pointer accent-purple-600 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-600 [&::-webkit-slider-thumb]:shadow" />
-                      <p className="text-[9px] text-purple-500 dark:text-purple-400 mt-0.5">越低越严谨确定，越高越有创造性</p>
-                    </div>
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[11px] font-medium text-purple-700 dark:text-purple-300">Top-P</span>
-                        <span className="text-[11px] font-mono font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-0.5 rounded-[0.625rem]">{(settings.topP ?? 0.1).toFixed(2)}</span>
-                      </div>
-                      <input type="range" min="0" max="1" step="0.05" value={settings.topP ?? 0.1}
-                        onChange={e => onSaveSettings({ topP: parseFloat(e.target.value) })}
-                        className="w-full h-1.5 bg-purple-200 dark:bg-purple-700 rounded-full appearance-none cursor-pointer accent-purple-600 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-600 [&::-webkit-slider-thumb]:shadow" />
-                      <p className="text-[9px] text-purple-500 dark:text-purple-400 mt-0.5">核采样阈值，控制输出多样性</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2.5 mt-3">
-                    <div>
-                      <label className="text-[11px] font-medium text-slate-600 dark:text-slate-300 block mb-1">最大输出 Token</label>
-                      <AppleSelect value={String(settings.maxOutputTokens || 8192)} onChange={(val) => onSaveSettings({ maxOutputTokens: parseInt(val) })}
-                        triggerClassName="px-2.5 py-2 text-[11px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
-                        options={[
-                          { value: '2048', label: '2,048' },
-                          { value: '4096', label: '4,096' },
-                          { value: '8192', label: '8,192 (默认)' },
-                          { value: '16384', label: '16,384' },
-                        ]}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-medium text-slate-600 dark:text-slate-300 block mb-1">聊天历史窗口</label>
-                      <AppleSelect value={String(settings.maxHistoryMessages || 20)} onChange={(val) => onSaveSettings({ maxHistoryMessages: parseInt(val) })}
-                        triggerClassName="px-2.5 py-2 text-[11px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
-                        options={[
-                          { value: '5', label: '5 条' },
-                          { value: '10', label: '10 条' },
-                          { value: '20', label: '20 条 (默认)' },
-                          { value: '30', label: '30 条' },
-                        ]}
-                      />
-                      <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5">更大的窗口让 AI 记住更多，但消耗更多 Token</p>
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-medium text-slate-600 dark:text-slate-300 block mb-1">工具调用最大轮次</label>
-                      <AppleSelect value={String(settings.maxToolLoops || 12)} onChange={(val) => onSaveSettings({ maxToolLoops: parseInt(val) })}
-                        triggerClassName="px-2.5 py-2 text-[11px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
-                        options={[
-                          { value: '4', label: '4 轮' },
-                          { value: '8', label: '8 轮' },
-                          { value: '12', label: '12 轮 (默认)' },
-                          { value: '20', label: '20 轮' },
-                        ]}
-                      />
-                      <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5">更多轮次 = 更深研究，更高 API 调用费用</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {/* 2. 下半部分：操作底栏 */}
               <div className="flex items-center justify-between mt-1 px-1">
 
@@ -1083,7 +1042,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
                   </Tooltip>
 
                   <Tooltip content="AI 参数设置">
-                    <button onClick={() => setShowAiParams(!showAiParams)} className={`p-2 rounded-[0.625rem] transition-colors ${showAiParams ? 'text-purple-500 bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/30 dark:text-purple-400' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-700 dark:text-slate-500'}`}>
+                    <button onClick={(e) => { setAiParamsTriggerRect(e.currentTarget.getBoundingClientRect()); setShowAiParams(!showAiParams); }} className={`p-2 rounded-[0.625rem] transition-colors ${showAiParams ? 'text-purple-500 bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/30 dark:text-purple-400' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-700 dark:text-slate-500'}`}>
                       <SlidersHorizontal size={18} />
                     </button>
                   </Tooltip>
@@ -1107,7 +1066,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
           {isMemoModalOpen && (
             <div
               style={{ transition: `opacity ${0.2 * (settings.animationSpeed || 1) * (isMemoClosing ? 2.0 : 1)}s ease-out` }}
-              className={`absolute inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm ${isMemoOpening ? 'opacity-0' : isMemoClosing ? 'opacity-0' : 'opacity-100'}`}
+              className={`absolute inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm ${isMemoOpening || isMemoClosing ? "pointer-events-none" : ""} ${isMemoOpening ? 'opacity-0' : isMemoClosing ? 'opacity-0' : 'opacity-100'}`}
               onClick={() => { setIsMemoClosing(true); setTimeout(() => { setIsMemoModalOpen(false); setIsMemoClosing(false); }, Math.round(780 * (settings.animationSpeed || 1) * 2.0)); }}
             >
               <div
@@ -1241,7 +1200,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
           {showConvList && (
             <div
               style={{ transition: `opacity ${0.2 * (settings.animationSpeed || 1) * (isConvListClosing ? 2.0 : 1)}s ease-out` }}
-              className={`absolute inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm ${isConvListOpening ? 'opacity-0' : isConvListClosing ? 'opacity-0' : 'opacity-100'}`}
+              className={`absolute inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm ${isConvListOpening || isConvListClosing ? "pointer-events-none" : ""} ${isConvListOpening ? 'opacity-0' : isConvListClosing ? 'opacity-0' : 'opacity-100'}`}
               onClick={() => { setIsConvListClosing(true); setTimeout(() => { setShowConvList(false); setIsConvListClosing(false); }, Math.round(780 * (settings.animationSpeed || 1) * 2.0)); }}
             >
               <div
@@ -1324,11 +1283,128 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
         </div> {/* 整个聊天框大界面的 div 闭合处 */}
       </div> {/* 遮罩层的 div 闭合处 */}
 
+      {/* AI 参数设置面板 — 毛玻璃效果，fixed 定位在齿轮按钮上方 */}
+      {showAiParams && isOpen && (
+        <div
+          className="fixed z-[70] w-72 bg-white/30 dark:bg-slate-900/30 backdrop-blur-xl rounded-modal border border-slate-200/60 dark:border-slate-700/40 shadow-apple-2xl p-4 animate-spring-up max-h-[70vh] overflow-y-auto custom-scrollbar"
+          style={{
+            left: aiParamsTriggerRect
+              ? Math.min(Math.max(aiParamsTriggerRect.left + aiParamsTriggerRect.width / 2 - 144, 8), window.innerWidth - 296)
+              : '50%',
+            bottom: aiParamsTriggerRect
+              ? window.innerHeight - aiParamsTriggerRect.top + 8
+              : '50%',
+            transform: aiParamsTriggerRect ? 'none' : 'translate(-50%, 50%)',
+          }}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center">
+              <Sparkles size={14} className="text-slate-500 mr-1.5" />
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">AI 参数设置</span>
+            </div>
+            <button onClick={() => setShowAiParams(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 p-0.5 rounded-[0.625rem] hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+              <X size={14} />
+            </button>
+          </div>
+
+          {(settings.aiProvider === 'deepseek' || settings.aiProvider === 'siliconflow') && (
+            <div className="mb-3 pb-3 border-b border-slate-100 dark:border-slate-700/50">
+              <span className="text-[11px] font-bold text-purple-700 dark:text-purple-300 block mb-2">推理深度</span>
+              <div className="grid grid-cols-3 gap-1.5">
+                {[
+                  { id: 'disabled', label: '⚡ 快速', desc: '禁用推理' },
+                  { id: 'high', label: '🔍 深度', desc: '平衡推理' },
+                  { id: 'max', label: '🧠 极致', desc: '最强推理' },
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => onSaveSettings({ reasoningEffort: opt.id })}
+                    className={`p-2 border rounded-[0.625rem] flex flex-col items-center transition-all duration-200 active:scale-[0.97] text-[10px] leading-tight ${
+                      (settings.reasoningEffort || 'max') === opt.id
+                        ? 'bg-purple-100 border-purple-400 text-purple-700 dark:bg-purple-900/40 dark:border-purple-500 dark:text-purple-300 shadow-sm'
+                        : 'border-slate-200 text-slate-500 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    <span className="font-bold text-[11px]">{opt.label}</span>
+                    <span className="text-[9px] opacity-70 mt-0.5">{opt.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-3 pb-3 border-b border-purple-100 dark:border-purple-800/50">
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-medium text-purple-700 dark:text-purple-300">Temperature</span>
+                <span className="text-[11px] font-mono font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-0.5 rounded-[0.625rem]">{(settings.temperature ?? 0.1).toFixed(2)}</span>
+              </div>
+              <input type="range" min="0" max="1" step="0.05" value={settings.temperature ?? 0.1}
+                onChange={e => onSaveSettings({ temperature: parseFloat(e.target.value) })}
+                className="w-full h-1.5 bg-purple-200 dark:bg-purple-700 rounded-full appearance-none cursor-pointer accent-purple-600 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-600 [&::-webkit-slider-thumb]:shadow" />
+              <p className="text-[9px] text-purple-500 dark:text-purple-400 mt-0.5">越低越严谨确定，越高越有创造性</p>
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-medium text-purple-700 dark:text-purple-300">Top P</span>
+                <span className="text-[11px] font-mono font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-0.5 rounded-[0.625rem]">{(settings.topP ?? 0.85).toFixed(2)}</span>
+              </div>
+              <input type="range" min="0" max="1" step="0.05" value={settings.topP ?? 0.85}
+                onChange={e => onSaveSettings({ topP: parseFloat(e.target.value) })}
+                className="w-full h-1.5 bg-purple-200 dark:bg-purple-700 rounded-full appearance-none cursor-pointer accent-purple-600 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-600 [&::-webkit-slider-thumb]:shadow" />
+              <p className="text-[9px] text-purple-500 dark:text-purple-400 mt-0.5">控制词汇多样性，配合 Temperature 使用</p>
+            </div>
+          </div>
+
+          <div className="space-y-3 pt-3">
+            <div>
+              <label className="text-[11px] font-medium text-slate-600 dark:text-slate-300 block mb-1">最大输出 Token</label>
+              <AppleSelect value={String(settings.maxOutputTokens || 8192)} onChange={(val) => onSaveSettings({ maxOutputTokens: parseInt(val) })}
+                triggerClassName="px-2.5 py-2 text-[11px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
+                options={[
+                  { value: '2048', label: '2,048' },
+                  { value: '4096', label: '4,096' },
+                  { value: '8192', label: '8,192 (默认)' },
+                  { value: '16384', label: '16,384' },
+                ]}
+              />
+              <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5">限制 AI 单次回复最大输出，防止过量消耗</p>
+            </div>
+            <div>
+              <label className="text-[11px] font-medium text-slate-600 dark:text-slate-300 block mb-1">上下文窗口</label>
+              <AppleSelect value={String(settings.maxHistoryMessages || 20)} onChange={(val) => onSaveSettings({ maxHistoryMessages: parseInt(val) })}
+                triggerClassName="px-2.5 py-2 text-[11px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
+                options={[
+                  { value: '5', label: '5 条' },
+                  { value: '10', label: '10 条' },
+                  { value: '20', label: '20 条 (默认)' },
+                  { value: '30', label: '30 条' },
+                ]}
+              />
+              <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5">更大的窗口让 AI 记住更多，但消耗更多 Token</p>
+            </div>
+            <div>
+              <label className="text-[11px] font-medium text-slate-600 dark:text-slate-300 block mb-1">工具调用最大轮次</label>
+              <AppleSelect value={String(settings.maxToolLoops || 12)} onChange={(val) => onSaveSettings({ maxToolLoops: parseInt(val) })}
+                triggerClassName="px-2.5 py-2 text-[11px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
+                options={[
+                  { value: '4', label: '4 轮' },
+                  { value: '8', label: '8 轮' },
+                  { value: '12', label: '12 轮 (默认)' },
+                  { value: '20', label: '20 轮' },
+                ]}
+              />
+              <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5">更多轮次 = 更深研究，更高 API 调用费用</p>
+            </div>
+          </div>
+        </div>
+      )}
       {/* 打分历史查看面板（手动拉取，按需展示） — Apple FLIP 动画 */}
       {scoringHistory !== null && (
         <div
           style={{ transition: `opacity ${0.2 * (settings.animationSpeed || 1) * (isScoringClosing ? 2.0 : 1)}s ease-out` }}
-          className={`fixed inset-0 z-[65] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm ${isScoringOpening ? 'opacity-0' : isScoringClosing ? 'opacity-0' : 'opacity-100'}`}
+          className={`fixed inset-0 z-[65] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm ${isScoringOpening || isScoringClosing ? "pointer-events-none" : ""} ${isScoringOpening ? 'opacity-0' : isScoringClosing ? 'opacity-0' : 'opacity-100'}`}
           onClick={() => { setIsScoringClosing(true); setTimeout(() => { setScoringHistory(null); setIsScoringClosing(false); }, Math.round(780 * (settings.animationSpeed || 1) * 2.0)); }}
         >
           <div
@@ -1345,19 +1421,22 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
               <h3 className="font-bold flex items-center text-slate-800 dark:text-slate-200 text-sm">
                 <Activity className="mr-2 text-indigo-500" size={18} />
                 量化打分历史
+                {isScoringRefreshing && <span className="ml-2 text-[10px] font-normal text-indigo-400 flex items-center gap-1"><RefreshCw size={10} className="animate-spin" />刷新中</span>}
               </h3>
               <button onClick={() => { setIsScoringClosing(true); setTimeout(() => { setScoringHistory(null); setIsScoringClosing(false); }, Math.round(780 * (settings.animationSpeed || 1) * 2.0)); }} className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors">
                 <X size={18} />
               </button>
             </div>
             <div className="p-4 overflow-y-auto custom-scrollbar space-y-3">
-              {scoringHistory.length === 0 ? (
+              {isScoringLoading ? (
+                <div className="text-center text-slate-400 py-12 text-sm min-h-[200px] flex flex-col items-center justify-center"><RefreshCw size={20} className="animate-spin mx-auto mb-2 text-indigo-500" />加载中...</div>
+              ) : scoringHistory.length === 0 ? (
                 <div className="text-center text-slate-400 py-8 text-sm">暂无打分记录</div>
               ) : (
                 scoringHistory.map((s, i) => (
                   <div key={s.id} className="bg-slate-50 dark:bg-slate-800/50 rounded-[0.875rem] p-3.5 border border-slate-100 dark:border-slate-700/30">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">{s.date}</span>
+                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">{s.date}{s.createdAt ? ` · ${new Date(s.createdAt).toLocaleString("zh-CN", {month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}` : ""}</span>
                       <div className="flex items-center gap-1.5">
                         {s.equity && (
                           <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full"

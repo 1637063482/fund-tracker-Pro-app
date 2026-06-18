@@ -304,7 +304,7 @@ export class ContextManager {
   // ── 持仓明细 ──
   _buildPortfolio() {
     if (!this.cache?.portfolioTable) return '';
-    return `名称(截8字)│代码  │    份额│   市值│  盈亏率│ XIRR│ 占比│类型      │标记\n${this.cache.portfolioTable}⚠️ 快照不可反推净值/日收益。份额为系统记录值，有微小舍入误差。`;
+    return `名称(截8字)│代码  │    份额│   市值│  盈亏率│ XIRR│ 占比│类型      │权益│债券│标记\n${this.cache.portfolioTable}⚠️ 快照不可反推净值/日收益。份额为系统记录值，有微小舍入误差。`;
   }
 
   // ── 风控标记 ──

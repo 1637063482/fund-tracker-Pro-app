@@ -24,48 +24,21 @@ export const PortfolioAnalysisModal = ({ portfolioStats, settings, marketData, f
   const [isPushing, setIsPushing] = useState(false);
   const [pushSuccess, setPushSuccess] = useState(false);
 
-  // 控制 X-Ray 引擎是否启动的开关
+  // 控制 资产透视 引擎是否启动的开关
+  // X-Ray 直接读取基金文档 assetAllocation，无需拉取 FOF 字典
   const [isXRayEnabled, setIsXRayEnabled] = useState(false);
-  const [liveXRayProfiles, setLiveXRayProfiles] = useState({});
-  const[isXRayScanning, setIsXRayScanning] = useState(false);
-
-useEffect(() => {
-    if (!isXRayEnabled) return;
-
-    const fetchFofDictionary = async () => {
-      setIsXRayScanning(true);
-      try {
-        const user = getAuth().currentUser;
-        if (!user) throw new Error("未检测到登录状态");
-
-        // 🌟 优雅、0延迟：直接拉取专属的云端字典集合
-        const dictRef = collection(db, 'artifacts', appId, 'users', user.uid, 'fof_dict');
-        const snapshot = await getDocs(dictRef);
-        
-        const dictData = {};
-        snapshot.forEach(doc => {
-            dictData[doc.id] = doc.data();
-        });
-        
-        // 这里的 liveXRayProfiles 变量名不用变，无缝对接下方 useMemo 中的 calculatePortfolioXRay 引擎
-        setLiveXRayProfiles(dictData); 
-      } catch (e) {
-        console.error("拉取云端穿透字典失败:", e);
-      } finally {
-        setIsXRayScanning(false);
-      }
-    };
-
-    fetchFofDictionary();
-  }, [isXRayEnabled]);
 
   const { aggregatedHoldings, warnings, trueEquityTotalValue, equityExposureRate } = useMemo(() => {
-    return calculatePortfolioXRay(
-      portfolioStats?.computedFundsWithMetrics || [], 
-      liveXRayProfiles, 
+    const result = calculatePortfolioXRay(
+      portfolioStats?.computedFundsWithMetrics || [],
       portfolioStats?.totalCurrentValue || 0
     );
-  }, [portfolioStats, liveXRayProfiles]);
+    return {
+      aggregatedHoldings: [], warnings: [],
+      trueEquityTotalValue: result.totalEquity || 0,
+      equityExposureRate: result.equityExposureRate || 0
+    };
+  }, [portfolioStats]);
 
   const handleClose = () => close();
 
@@ -136,31 +109,25 @@ useEffect(() => {
                  <div className="apple-card p-5 mb-8">
                     <div className="flex items-center justify-between mb-4">
                       <h4 className="font-bold text-slate-800 dark:text-slate-200 flex items-center">
-                        <Layers className="mr-2 text-indigo-500" size={18}/> 底层真实重仓 X-Ray
+                        <Layers className="mr-2 text-indigo-500" size={18}/> 底层真实重仓 资产透视
                       </h4>
                       {!isXRayEnabled ? (
                         <button 
                           onClick={() => setIsXRayEnabled(true)}
                           className="text-xs flex items-center bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-full font-bold transition-all active:scale-95 shadow-sm"
                         >
-                          <Play size={12} className="mr-1.5 fill-current"/> 开启深度穿透扫描
+                          <Play size={12} className="mr-1.5 fill-current"/> 开启资产透视
                         </button>
                       ) : (
                         <span className="text-xs text-indigo-600 bg-indigo-100 dark:bg-indigo-900/40 dark:text-indigo-400 px-2 py-1 rounded flex items-center">
-                          {isXRayScanning ? <RefreshCw size={12} className="mr-1.5 animate-spin"/> : <Check size={12} className="mr-1.5"/>}
-                          {isXRayScanning ? "正在扫描底层盲盒..." : "透视扫描已完成"}
+                          <Check size={12} className="mr-1.5"/>资产透视已就绪
                         </span>
                       )}
                     </div>
 
                     {isXRayEnabled && (
                       <div className="animate-in fade-in slide-in-from-top-2">
-                        {isXRayScanning ? (
-                          <div className="py-10 flex flex-col items-center justify-center text-slate-400">
-                            <Search size={32} className="animate-pulse mb-3" />
-                            <p className="text-xs">正在从云端读取资产透视字典...</p>
-                          </div>
-                        ) : aggregatedHoldings.length > 0 ? (
+                        {equityExposureRate > 0 ? (
                           <div className="space-y-4">
                             {/* 🌟 核心新增：FOF 权益暴露度仪表盘 */}
                             <div className="bg-gradient-to-br from-indigo-50 to-blue-50 dark:from-indigo-900/20 dark:to-blue-900/20 border border-indigo-100 dark:border-indigo-800/50 p-4 rounded-xl text-center shadow-sm relative overflow-hidden">

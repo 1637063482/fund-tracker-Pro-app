@@ -19,9 +19,13 @@ export const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually 
       ? { ...fund.redemptionFees }
       : fund.redemptionFees?.d0_7 !== undefined
         ? { breakpoints: [7, 30, 180, 365], rates: [fund.redemptionFees.d0_7 || '', fund.redemptionFees.d7_30 || '', fund.redemptionFees.d30_180 || '', fund.redemptionFees.d180_365 || '', fund.redemptionFees.d365_plus || ''] }
-        : { breakpoints: [7, 30, 180, 365], rates: ['', '', '', '', ''] }
+        : { breakpoints: [7, 30, 180, 365], rates: ['', '', '', '', ''] },
+    assetAllocation: fund.assetAllocation?.stock != null
+      ? { ...fund.assetAllocation }
+      : { stock: '', bond: '', cash: '', fund: '', other: '' }
   });
   const [showFeeEditor, setShowFeeEditor] = useState(false);
+  const [showAllocEditor, setShowAllocEditor] = useState(false);
 
   const DEFAULT_BREAKPOINTS = [7, 30, 180, 365];
   const bp = localFund.redemptionFees?.breakpoints || DEFAULT_BREAKPOINTS;
@@ -250,6 +254,46 @@ export const FundEditor = ({ fund, onSave, onCancel, fundNavs, fetchNavManually 
                   <span className="text-[11px] text-slate-400">%</span>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 五栏资产配置 — 可折叠，用户手动填写 */}
+      <div className="pt-2">
+        <button type="button" onClick={() => setShowAllocEditor(!showAllocEditor)} className="flex items-center gap-2 text-sm font-bold text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors">
+          <span className={`transition-transform ${showAllocEditor ? 'rotate-90' : ''}`}>▸</span>
+          资产配置占比（底层真实重仓 X-Ray 数据源）
+          {Object.values(localFund.assetAllocation || {}).some(v => v !== '' && v != null) && (
+            <span className="text-[10px] bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-1.5 py-0.5 rounded-full">已配置</span>
+          )}
+        </button>
+        {showAllocEditor && (
+          <div className="mt-3 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-[0.875rem] border border-slate-200/60 dark:border-slate-700/40 animate-in fade-in duration-200">
+            <p className="text-xs text-slate-500 mb-4">填写该基金的资产配置占比（%）。可从基金季报/半年报/年报中查询。五栏之和应为100%。</p>
+            <div className="grid grid-cols-5 gap-3">
+              {[
+                { key: 'stock', label: '股票', hint: '权益类' },
+                { key: 'bond', label: '债券', hint: '固收类' },
+                { key: 'cash', label: '现金', hint: '存款/逆回购' },
+                { key: 'fund', label: '基金', hint: '持有其他基金' },
+                { key: 'other', label: '其他', hint: '衍生品/另类' },
+              ].map(({ key, label, hint }) => (
+                <div key={key} className="flex flex-col items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">{label}</span>
+                  <span className="text-[9px] text-slate-400">{hint}</span>
+                  <div className="flex items-center gap-1">
+                    <input type="number" step="0.01" min="0" max="100"
+                      value={localFund.assetAllocation?.[key] ?? ''}
+                      onChange={(e) => setLocalFund(prev => ({
+                        ...prev,
+                        assetAllocation: { ...prev.assetAllocation, [key]: e.target.value === '' ? '' : parseFloat(e.target.value) }
+                      }))}
+                      placeholder="0" className="w-16 py-1.5 border border-slate-200 rounded-[0.5rem] dark:bg-slate-900 dark:border-slate-700 focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none text-xs font-mono font-bold text-center text-blue-600 dark:text-blue-400 bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                    <span className="text-[11px] text-slate-400">%</span>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
