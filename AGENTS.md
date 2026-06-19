@@ -75,18 +75,26 @@ fund-tracker-pro/
     │   ├── renderMarkdown.jsx         # Markdown → React 组件：自研块级解析器、表格、代码块、折叠思考、Print/PDF 内联样式渲染
     │   ├── feishuMarkdown.js          # 飞书卡片格式工具
     │   ├── ai.js                      # AI 模块重导出入口（向后兼容）
-    │   └── ai/                        # AI 引擎子模块（10 个文件）
+    │   └── ai/                        # AI 引擎子模块（33 个文件，7 个子目录）
     │       ├── index.js               #   统一导出聚合入口
-    │       ├── core.js                #   核心对话引擎：AI 请求封装、单基诊断、组合体检、多轮聊天（含 Gemini/OpenAI 双协议工具调用循环、Token 估算日志、推理过程提取）
-    │       ├── providers.js           #   AI 供应商解析：Gemini / DeepSeek / SiliconFlow / 自定义 OpenAI
-    │       ├── proxy.js               #   代理 URL 构建：CORS 前缀 + 基金代码转换
+    │       ├── core.js                #   核心对话引擎（委托给编排器）
+    │       ├── orchestrator.js        #   编排器：组合 Adapter+Pipeline+Context
+    │       ├── context-manager.js     #   上下文管理器：结构化备忘/待办注入
+    │       ├── context-router.js      #   意图路由：问候/轻量判断
+    │       ├── precompute.js          #   预计算：持仓表格/风控检测
+    │       ├── providers.js           #   AI 供应商解析
+    │       ├── proxy.js               #   代理 URL 构建
     │       ├── fifo.js                #   7 日内短线赎回惩罚费计算
-    │       ├── prompts.js             #   提示词模板（~4000 行）：System Prompt 五层架构、单基诊断、组合体检、最新状态注入 Wrapper
-    │       ├── market-data.js         #   行情数据抓取：分时路径、多周期 K 线、盘口数据
-    │       ├── tool-handlers.js       #   工具执行器：22 个 handler 的策略模式分派（含 QuickChart 图表生成）
-    │       ├── tools-definitions.js   #   工具注册表：所有 Function Calling 的 JSON Schema 定义
+    │       ├── market-data.js         #   行情数据抓取：分时路径、多周期K线、盘口
+    │       ├── tool-handlers.js       #   工具执行器：23 个 handler 的策略模式分派
+    │       ├── tools-definitions.js   #   工具注册表：23 个 Function Calling JSON Schema
     │       ├── search-engines.js      #   搜索适配器：Tavily / Exa / Serper 统一封装
-    │       └── financial-news.js      #   财经快讯聚合：新浪多栏目 + 搜索引擎并行拉取去重
+    │       ├── financial-news.js      #   财经快讯聚合：新浪多栏目 + 搜索引擎并行拉取去重
+    │       ├── adapters/              #   AI 厂商适配层 (base/openai/gemini)
+    │       ├── pipelines/             #   工具调用循环管道 (chat-pipeline.js)
+    │       ├── prompts/               #   System Prompt 体系 (system.js/wrapper.js)
+    │       ├── context/               #   历史降采样 (history.js)
+    │       └── tools/                 #   工具执行引擎 (registry/channel/handlers)
     │
     └── components/                    # React 组件
         ├── Auth/
@@ -151,15 +159,16 @@ fund-tracker-pro/
 
 ### 3.3 AI 模块规则
 
-1. **System Prompt 架构**：五层结构不可随意更改顺序。第一层防幻觉协议必须在最前面。利用 DeepSeek 上下文缓存特性，静态内容放 System Prompt，动态内容用 `buildLatestStateWrapper` 注入。
-2. **新增 Tool**：
+1. **System Prompt 架构**：四层结构（Core / SkillLibrary / ScoringSystem / InspectionRoutine），静态内容内联于 `prompts/system.js`。第一层防幻觉协议必须在最前面。利用 DeepSeek 上下文缓存特性，动态数据通过 State Wrapper 每轮注入。
+2. **新增 Tool**（当前共 23 个）：
    - 在 `tools-definitions.js` 中注册 JSON Schema
-   - 在 `tool-handlers.js` 中添加 handler 函数
-   - 在 `core.js` 的 `TOOL_LABELS` 中添加状态提示
-   - 在 `prompts.js` 的 System Prompt 工具列表中添加说明
-3. **禁止在 Prompt 中撒谎**：Prompt 中的工具能力描述必须与实际实现完全一致。新增工具后务必更新 Prompt 文档。
-4. **模型兼容**：新增功能需兼容 Gemini（functionDeclarations）和 OpenAI（tools）两种协议。注意 Gemini 不支持 `additionalProperties`，enum 值必须为字符串。
-5. **Token 估算**：`estimateTokens()` 用于开发调试，基于中文 1.8 chars/token 粗略估算。不要移除此日志。
+   - 在 `tools/handlers.js` 中添加 handler 函数
+   - 在 `pipelines/chat-pipeline.js` 的 TOOL_LABELS 中添加状态提示
+   - 在 `prompts/system.js` 的 SKILL_LIBRARY 工具列表中添加说明（含分类）
+3. **禁止在 Prompt 中撒谎**：Prompt 中的工具能力描述必须与实际实现完全一致。新增工具后务必同步更新 SKILL_LIBRARY 列表。
+4. **打分系统规则**：F1=F1a(上证赔率,20分)+F1b(双创校验,15分) 双指数并行。全局否决阈值 F1a<4（仅看上证系统性风险）。打分前置清单含步骤0(微观结构)+a-a5(日K/周K/双创)，禁止跳过。
+5. **模型兼容**：新增功能需兼容 Gemini（functionDeclarations）和 OpenAI（tools）两种协议。注意 Gemini 不支持 `additionalProperties`，enum 值必须为字符串。
+6. **Token 估算**：`estimateTokens()` 用于开发调试，基于中文 1.8 chars/token 粗略估算。不要移除此日志。
 
 ### 3.4 数据拉取规则
 

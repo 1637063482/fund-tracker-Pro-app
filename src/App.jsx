@@ -360,6 +360,15 @@ export default function App() {
 
   // [funds/settings Firestore listeners now managed by hooks]
 
+  // 当用户认证成功时标记数据库已连接（Firestore onSnapshot 监听器已随 hooks 启动）
+  useEffect(() => {
+    if (user && db) {
+      setIsDbConnected(true);
+    } else {
+      setIsDbConnected(false);
+    }
+  }, [user]);
+
   const fetchDanjuanProfile = async (code) => {
       if (!code) return null;
       const targetUrl = `https://danjuanfunds.com/djapi/fund/${code}`;
