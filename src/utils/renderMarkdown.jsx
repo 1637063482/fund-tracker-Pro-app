@@ -409,7 +409,9 @@ export function renderMarkdownForPrint(text) {
 // 主渲染函数 (React)
 // ========================
 // 可折叠的 AI 思考过程组件
-const CollapsibleThink = ({ html }) => {
+// React.memo 阻止无效重渲染：只要 html prop 不变（消息内容不变），组件就不会重渲染
+// 从而避免 dangerouslySetInnerHTML 的 DOM 被重建，thinking 阅读框滚动位置自然保持
+const CollapsibleThink = React.memo(({ html }) => {
   const [expanded, setExpanded] = useState(false);
   return (
     <div className="my-3 border border-amber-200/60 dark:border-amber-700/40 rounded-[0.875rem] overflow-hidden">
@@ -428,7 +430,7 @@ const CollapsibleThink = ({ html }) => {
       )}
     </div>
   );
-};
+});
 
 export function renderMarkdown(text) {
   if (!text || typeof text !== 'string') return null;

@@ -6,6 +6,123 @@
 
 ---
 
+## [1.9.0] — 2026-06-28
+
+### 新增 — 回测多指数验证、权重股集中度、国债收益率管道
+
+**核心理念**：打通"数据采集→决策树→回测"闭环，补齐宏观数据缺口。
+
+#### 多指数回测验证（`src/utils/quant/backtest.js`）
+- **`selectRelevantReturn`**：按F1b/F3因子主导性选择对应指数验证（不再只用上证），F1b主导→创业板、F3主导→多指数加权
+- **`getFactorDominance`** + `byFactorDominance`分组统计：展示各因子独立准确率
+- 同步更新 `computeSubAccuracy`/`metaVigilanceCheck`/`detectDegradation`/`compareWeights` 使用多指数
+
+#### Auto-tuner 诊断增强（`src/utils/quant/auto-tuner.js`）
+- **诊断输出**：`diagnostics.sampleSufficiency` 各因子样本充分性 + `overallConfidence`整体置信度
+- **动态阈值**：`MIN_SAMPLES_BY_FACTOR`（F1a=8/F4=15），替代固定MIN_SAMPLES=10
+- **buildFactorSamples多指数匹配**：F1b用创业板收益、F3用多指数加权
+
+#### 三指数并行数据采集
+- **`mergeMultiIndexKlines`**：合并 sh000001/sz399006/sz399001 K线为统一marketData
+- handlers.js两处替换为三指数并行拉取（auto-tune + backtest）
+
+#### CF Worker 新端点
+- `/api/bond-yields` — 中国国债收益率(2Y/5Y/10Y/30Y)，源：Investing.com抓取
+- `/api/macro-data` — M2增速 + 制造业PMI（东财API+搜索兜底）
+- `/api/market-concentration` — TOP50大市值加权 vs 等权（BK0712沪深300成分股）
+
+#### 国债收益率注入固收打分
+- **`classifyBondF1`** 新增6档收益率水位判定（<2.0%→12分、2.0-2.5%→22分、2.5-3.0%→32分、3.0-3.5%→40分、>3.5%→46分）
+- 替代原来`yield10Y>3.5`死代码分支，充分利用Worker注入的真实收益率数据
+
+#### 决策树架构优化
+- **F1a拓扑序重排**：极值优先（底背离/大底先于跌破均线常规判定），确保CIO矩阵正确触发"便宜未企稳禁接"路径
+- **F1b Pearson相关系数**：`correlationWithSH` 参数量化双创与上证相关性（r>0.85衰减×0.6，r<0.65增强×1.2）
+- **F3分红季豁免修复**：使用`canExempt`变量（含涨跌比>0.5条件），修复此前`isDividendSeason&&!isTrueCrash`遗漏涨跌比检查的bug
+- **F3 VR基线20日**：成交量基线从5日扩展到20日，VR自适应市场量能水位
+- **F3 VR阈值适配**：调整VR阈值匹配3万亿+新常态
+- **F1a顶背离消退出口**：新增`topDivergenceResolved`参数，背离消退后可绕过F1aCap=10限制
+- **F4滞胀分支**：新增金涨+铜跌+油涨→类滞胀信号(baseScore=4)
+- **纯债F1标签修正**："周K低位"→"高位回调"（分位100%时不应标"低位"）
+
+#### 数据基础设施
+- firestore成交量查询从`limit(6)`扩展到`limit(25)`，支撑20日VR基线计算
+- 新浪新闻macro分类修复：替换全球/国际为A股/债券，增加政策信号可达性
+
+### 测试
+- 新增 `src/test/quant-backtest.test.js`（37+6个测试）：
+  多指数验证选择、因子主导性判定、回测分组统计、Auto-tune诊断、buildFactorSamples多指数匹配、mergeMultiIndexKlines、parseBondYieldData、parseYieldText、parseMacroData
+- 修复 VR 拦截器测试（3个）+ CORS代理测试（1个）
+- 全部 120 个测试通过
+
+---
+
+## [1.8.0] — 2026-06-19
+
+### 新增 — 量化架构全面升级："脑体分离"
+
+**核心理念**：LLM 从"做数学计算"回归"读标签+翻译+裁决"。所有数值计算由 JS 决策树和量化模型完成。
+
+#### 量化打分引擎（`src/utils/quant/scoring-tree.js`，963 行）
+- **5 个 JS 决策树分类器**：`classifyF1a`(12档)、`classifyF1b`(6档)、`classifyF2`(6档)、`classifyF4`(6档)、`calcVRAndIntercept`(4拦截器+11档)，全部含兜底
+- **输出标签而非连续分数**（防坑3）：`{category, baseScore, scoreRange}` 结构，LLM 在 `scoreRange` 内 ±1 微调
+- **`calcMACDFromBars`**：从 K线数组计算 MACD + 顶/底背离检测
+- **`formatScoringReport`**：结构化打分→Markdown 压缩单行，LLM 零解析成本
+
+#### 量化校准层（`src/utils/quant/bl-calibration.js`，220 行）
+- **`calibrateConfidence`**（防坑2）：Ω 置信度三重校准——Sigmoid→[0.1,0.89]→÷√N→clamp[0.05,0.90]
+- **`parseConstitutionToPrior`**：GLOBAL_CONSTITUTION 备忘录→B-L 先验权重 w_prior（6 种风险偏好）
+- **`buildBLViews`**：AI 打分+CIO 判定→B-L 观点向量 (P, Q, Ω)
+- **`calcCurrentWeights`**：持仓数据→当前大类资产权重
+
+#### 概率风险模型
+- **VaR/CVaR**（`get_fund_risk_metrics` handler 自动附带）：参数法(95%/99%) + 历史模拟法 + CVaR 尾部条件期望，含金额转换+🟢🟡🔴状态判定
+- **O-U 均值回归半衰期**（handler 自动附带 + 独立工具 `compute_ou_half_life`）：OLS 估计 → θ/μ/σ → 半衰期天数 → 偏离σ数 → 动态网格步长建议
+- **Markov 机制转移**（K线 handler 自动附带 + 独立工具 `run_markov_regime`）：Hamilton 滤波+EM → 状态概率(震荡/趋势) + 转移矩阵 + 预期持续天数 + 稳态概率
+- **蒙特卡洛模拟**（独立工具 `run_monte_carlo` + 浏览器端 `monte-carlo-browser.js`）：Cholesky 分解 → 5000 条路径 → 终值分布 + VaR + 回撤概率分布
+- **EWMA 协方差矩阵**（独立工具 `compute_covariance` + CF Worker 端点）：λ=0.94 + Ledoit-Wolf 收缩 (条件数>1e12) + 边际风险贡献
+
+#### B-L 组合优化（独立工具 `run_portfolio_optimization` + CF Worker 端点）
+- 输入持仓+AI 打分+宪法先验 → 协方差矩阵 → B-L 后验 → 最优权重 + 精确调仓建议（%+金额）
+- 无 Views 时返回宪法均衡权重；含约束（单基上限/权益上限/现金下限）
+
+#### CF Worker 量化端点（`my-cors-proxy.js`，新增 6 个端点）
+- `POST /api/quant/covariance` — EWMA 协方差矩阵
+- `POST /api/quant/black-litterman` — B-L 后验优化（含纯 JS 矩阵求逆 SVD）
+- `POST /api/quant/ou-half-life` — O-U 均值回归半衰期
+- `POST /api/quant/markov-regime` — Markov 机制转移（Hamilton 滤波+EM）
+- `POST /api/quant/monte-carlo` — 蒙特卡洛模拟（Cholesky+PRNG+Box-Muller）
+- 4 个纯 JS 矩阵工具函数（`_matrixMultiply`/`_matrixTranspose`/`_matrixInverse`/`_checkConditionNumber`），零外部依赖
+
+#### 新增 LLM 工具（28 个，从 23 个扩展）
+- J 类·组合优化：`run_portfolio_optimization`
+- K 类·量化模型工具箱：`compute_covariance` / `compute_ou_half_life` / `run_markov_regime` / `run_monte_carlo`
+
+#### NLP 情绪分析
+- `get_financial_news(topic=macro)` 从"不参与打分"升级为 F4 定性调整项（鹰鸽指数 -5~+5，±2分）
+
+### 变更 — System Prompt 深度压缩与重构
+- **Scoring 层压缩 -89%**：F1-F4 档位描述（~3,750 tokens）→ 5 行 JS 引擎读取指南（~400 tokens）
+- **技能库扩展**：A-I 9 类 → A-K 10 类，K 类含调用时机指引（LLM 自主判断何时调模型）
+- **巡检路由升级**：0-5 步 → 0-7 步（+Markov 状态判定 + O-U 动态网格 + 协方差集中度 + B-L 优化 + 蒙特卡洛压力测试）
+- **VaR 风控日报**注入 CIO 矩阵前置
+- **量化预判聚合指引**：评分输出必用压缩格式 `F1:XX/35(F1a:XX/20标签+F1b:XX/15标签)...`
+
+### 修复
+- 修复 `classifyF1a`/`classifyF1b`/`classifyF2` 集成时 `macdInfo`/`rsiInfo`/`bbInfo` 块作用域导致的 `ReferenceError`
+- 修复 `bl-calibration.js` `parseConstitutionToPrior` 对 `undefined` 输入的空安全检查
+- 修复 `my-cors-proxy.js` B-L 空 Views 时 `_matrixTranspose(P)` 崩溃（新增 K=0 早期返回）
+- 修复 F2/F4 Prompt 声称"JS 已预计算"但实际未集成——改为准确的"供参考"描述
+- 清理 `pathMinima` 等未使用变量
+
+### 测试
+- 新增 `src/test/quant-endpoints.test.js`（11 个量化端点单元测试）：
+  VaR 参数法/历史法/CVaR、EWMA 协方差对称性/权重衰减、O-U 均值回归 vs 随机游走判别、
+  Markov 概率和/状态分化、Cholesky L×L' 还原/零方差处理
+- 全部 29 个测试通过（18 原有 + 11 新增）
+
+---
+
 ## [1.7.1] — 2026-06-18
 
 ### 修复

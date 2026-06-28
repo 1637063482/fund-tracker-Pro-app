@@ -31,8 +31,8 @@ service cloud.firestore {
         allow delete: if isOwner(userId);
       }
 
-      // ---------- 2. 设置数据 (settings) 集合 — 放宽约束，避免 setDoc merge 时误拦截 ----------
-      match /settings/general {
+      // ---------- 2. 设置数据 (settings) 集合 — 覆盖所有子文档 ----------
+      match /settings/{docId} {
         allow read, create, update, delete: if isOwner(userId);
       }
 
@@ -65,6 +65,16 @@ service cloud.firestore {
 
       // ---------- 7. 🌟 打分快照 (scoring_snapshots) 集合的授权 ----------
       match /scoring_snapshots/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // ---------- 8. 决策审计日志 (decision_log) 集合的授权 ----------
+      match /decision_log/{logId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // ---------- 9. 模型配置 (model_configs) 集合 — 自适应引擎读写 ----------
+      match /model_configs/{configId} {
         allow read, write: if isOwner(userId);
       }
 

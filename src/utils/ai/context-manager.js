@@ -307,10 +307,32 @@ export class ContextManager {
     return `名称(截8字)│代码  │    份额│   市值│  盈亏率│ XIRR│ 占比│类型      │权益│债券│标记\n${this.cache.portfolioTable}⚠️ 快照不可反推净值/日收益。份额为系统记录值，有微小舍入误差。`;
   }
 
-  // ── 风控标记 ──
+  // ── 风控标记 + 回测Ω ──
   _buildAlerts() {
-    if (!this.cache) return '';
-    const alerts = this.cache.alerts || [];
-    return alerts.length > 0 ? `▸ 【风控标记】\n${alerts.join('\n')}\n` : '';
+    const lines = [];
+    // 回测 Ω（从 settings 中读取，随 run_backtest 写入）
+    const omegaAcc = this.settings?.omegaAccuracy;
+    if (omegaAcc != null && omegaAcc > 0) {
+      const omegaRec = this.settings?.omegaRecommended ?? (0.1 + 0.8 / (1 + Math.exp(-(omegaAcc - 0.5) * 5)));
+      const omegaSamples = this.settings?.omegaSamples ?? '?';
+      const grade = omegaAcc > 0.65 ? '🟢' : omegaAcc > 0.55 ? '🟡' : omegaAcc > 0.50 ? '⚠️' : '🔴';
+      lines.push(`▸ 🎯 AI预测准确率: ${(omegaAcc*100).toFixed(0)}%(${omegaSamples}样本) Ω=${omegaRec.toFixed(2)} ${grade}`);
+      lines.push(`  调用 run_portfolio_optimization 时使用此Ω值。调 run_backtest 刷新。`);
+    }
+    // 自适应权重（auto-tuner 产出）
+    const tunedScores = this.settings?.tunedMaxScores;
+    if (tunedScores && Object.keys(tunedScores).length > 0) {
+      lines.push(`▸ ⚙️ 自适应因子权重(近30日): F1a=${tunedScores.F1a||20} F1b=${tunedScores.F1b||15} F2=${tunedScores.F2||25} F3=${tunedScores.F3||25} F4=${tunedScores.F4||15}`);
+    }
+    // Meta-Vigilance 预测效力警告（store_scoring_snapshot 静默检测写入）
+    const mvWarning = this.settings?.metaVigilanceWarning;
+    if (mvWarning) {
+      lines.push(`▸ 🚨 Meta-Vigilance: ${mvWarning}`);
+    }
+    if (this.cache) {
+      const alerts = this.cache.alerts || [];
+      if (alerts.length > 0) lines.push(`▸ 【风控标记】\n${alerts.join('\n')}`);
+    }
+    return lines.length > 0 ? lines.join('\n') + '\n' : '';
   }
 }

@@ -4,3 +4,5 @@ export {
   analyzePortfolioWithAI,
   chatWithPortfolioAI
 } from './ai/core';
+
+export { stripThinkingBlock } from './ai/context/history';

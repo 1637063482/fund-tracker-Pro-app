@@ -1,6 +1,6 @@
-# Fund Tracker Pro <sup>v1.7.1</sup>
+# Fund Tracker Pro <sup>v1.8.0</sup>
 
-个人基金资产管理 + AI 量化投资 Copilot 系统。AI 引擎由 DeepSeek V4 Pro 驱动，具备 23 个专属工具、五层 System Prompt、双核打分卡、双层自检回顾、结构化备忘录/待办注入。
+个人基金资产管理 + AI 量化投资 Copilot 系统。AI 引擎由 DeepSeek V4 Pro 驱动，具备 28 个专属工具（含 10 个量化模型）、五层 System Prompt（Scoring 层压缩 89%）、JS 决策树打分引擎、"脑体分离"架构。
 
 ## 核心能力
 
@@ -19,11 +19,14 @@
 - **自动刷新**：交易时段内每 5 秒轮询，休市/节假日智能拦截，不浪费请求
 - **法定节假日识别**：自动从 jsDelivr CDN 同步中国法定假日数据，周末 + 节假日双重过滤
 
-### AI 量化投资 Copilot
+### AI 量化投资 Copilot（v1.8 "脑体分离"架构）
 
 聊天框内嵌的 AI 投资助手，支持三大模型（Gemini / DeepSeek / 硅基流动），具备：
 
-**23 个专属工具调用能力（九大类）**：
+**🧠 LLM（脑）职责**：读标签 + 翻译人话 + 冲突裁决 + NLP 情绪分析
+**⚙️ JS/Worker（体）职责**：决策树分类 + 矩阵运算 + 概率模型 + 优化求解
+
+**28 个专属工具调用能力（十大类 A-K）**：
 - A. 净值行情 (5)：单基 / 批量 / 历史序列 / 多基横向对比（含相关性矩阵+综合评级）/ 多周期OHLC K线
 - B. 资讯搜索 (4)：新浪财经多栏目快讯聚合 / Tavily 搜索 / Serper Google 搜索 / Exa 深度研报
 - C. 实体操作 (3)：记账 / 待办管理 / 战略备忘录写入
@@ -33,6 +36,8 @@
 - G. 风险指标 (1)：年化收益/波动率/Sharpe/MDD+恢复天数/超额+跟踪误差+信息比率IR
 - H. 微观结构 (1)：银行间流动性GC001/GC007+期指基差升贴水+综合定性信号
 - I. 打分快照 (2)：历史打分读取(动量修正+滞回锁定唯一数据源) / 本轮快照保存(权益分/固收分/量价环境/CIO判定/P&L)
+- J. 组合优化 (1)：`run_portfolio_optimization` — B-L模型：输入持仓+AI打分→协方差矩阵+宪法先验+Ω校准→最优权重+精确调仓建议
+- K. 量化模型工具箱 (4, ⭐LLM自主判断调用时机)：`compute_covariance`(EWMA协方差+边际风险贡献) / `compute_ou_half_life`(O-U半衰期,动态网格步长) / `run_markov_regime`(Markov机制转移,市场状态概率) / `run_monte_carlo`(蒙特卡洛模拟,未来N种路径+VaR+回撤概率)
 
 **持仓穿透增强**：双源（蛋卷基金+东方财富）自动降级，东方财富 API 自带申万行业分类（无需 AI 猜测），输出调仓方向/幅度（📈增持/📉减持/🆕新增），业绩基准解析为权益仓位锚点。FOF 字典卡片支持用户手动填入五栏（股票/债券/基金/现金/其他%），留空不覆盖已有数据。
 
@@ -104,6 +109,7 @@
 | 跨平台 | Capacitor 8 (Android) + PWA |
 | 后端服务 | Firebase Auth + Firestore |
 | AI 引擎 | DeepSeek V4 Pro (主力) / Gemini API / SiliconFlow |
+| 量化引擎 | 5 JS决策树 + VaR/CVaR + O-U + Markov + 蒙特卡洛 + B-L + EWMA协方差 |
 | 搜索 | Tavily / Exa / Serper (Google) |
 | 推送 | Cloudflare Worker + Ntfy / 飞书 / 钉钉 |
 | 图表 | QuickChart.io (Chart.js 渲染) + 自定义 DonutChart |
@@ -164,26 +170,29 @@ fund-tracker-pro/
     │   ├── holidayCalendar.js     # 节假日日历：判定 A 股非交易日（周末 + 法定假日）
     │   ├── renderMarkdown.jsx     # Markdown 渲染：AI 输出转 React 组件 + XSS 防护
     │   ├── ai.js                  # AI 模块重导出入口（向后兼容）
-    │   └── ai/                    # AI 引擎子模块（模块化架构，22+ 文件）
-    │       ├── index.js           #   统一导出聚合入口
-    │       ├── core.js            #   核心对话引擎（委托给编排器）
-    │       ├── orchestrator.js    #   编排器：组合 Adapter+Pipeline+Context
-    │       ├── context-manager.js #   上下文管理器：结构化备忘/待办注入
-    │       ├── context-router.js  #   意图路由：问候/轻量判断
-    │       ├── precompute.js      #   预计算：持仓表格/风控检测
-    │       ├── providers.js       #   AI 供应商解析
-    │       ├── proxy.js           #   代理 URL 构建
-    │       ├── fifo.js            #   FIFO 风控：短线赎回费
-    │       ├── market-data.js     #   行情抓取：分时/多周期K线/情绪
-    │       ├── tool-handlers.js   #   工具分发兼容层
-    │       ├── tools-definitions.js # 23 个工具 JSON Schema
-    │       ├── search-engines.js  #   搜索适配器
-    │       ├── financial-news.js  #   财经快讯聚合
-    │       ├── adapters/          #   AI 厂商适配层 (base/openai/gemini)
-    │       ├── pipelines/         #   工具调用循环管道
-    │       ├── prompts/           #   System Prompt 五层体系
-    │       ├── context/           #   历史降采样
-    │       └── tools/             #   工具执行引擎 (registry/channel/handlers)
+    │   ├── ai/                    # AI 引擎子模块（模块化架构）
+    │   │   ├── index.js           #   统一导出聚合入口
+    │   │   ├── core.js            #   核心对话引擎（委托给编排器）
+    │   │   ├── orchestrator.js    #   编排器：组合 Adapter+Pipeline+Context
+    │   │   ├── context-manager.js #   上下文管理器：结构化备忘/待办注入
+    │   │   ├── precompute.js      #   预计算：持仓表格/风控检测
+    │   │   ├── providers.js       #   AI 供应商解析
+    │   │   ├── proxy.js           #   代理 URL 构建
+    │   │   ├── fifo.js            #   FIFO 风控：短线赎回费
+    │   │   ├── market-data.js     #   行情抓取：分时/多周期K线/情绪+⭐F3预判
+    │   │   ├── tool-handlers.js   #   工具分发：28 个 handler (含VaR/O-U/Markov/B-L)
+    │   │   ├── tools-definitions.js # 28 个工具 JSON Schema (A-K 十大类)
+    │   │   ├── search-engines.js  #   搜索适配器
+    │   │   ├── financial-news.js  #   财经快讯聚合
+    │   │   ├── adapters/          #   AI 厂商适配层 (base/openai/gemini)
+    │   │   ├── pipelines/         #   工具调用循环管道
+    │   │   ├── prompts/           #   System Prompt 五层体系（v1.8 Scoring层-89%）
+    │   │   ├── context/           #   历史降采样
+    │   │   └── tools/             #   工具执行引擎 (registry/channel/handlers)
+    │   └── quant/                 # ⭐ 量化引擎模块（v1.8 新增）
+    │       ├── scoring-tree.js    #   5 决策树分类器(F1a/F1b/F2/F3/F4)+格式化+MACD
+    │       ├── bl-calibration.js  #   Ω 置信度校准+宪法先验解析+AI打分→B-L Views
+    │       └── monte-carlo-browser.js # 浏览器端蒙特卡洛(execute_javascript可用)
     │
     └── components/
         ├── Auth/

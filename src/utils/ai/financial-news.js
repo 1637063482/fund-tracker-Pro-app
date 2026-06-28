@@ -1,15 +1,61 @@
-// 财经快讯聚合模块：并行拉取新浪财经免费快讯 + 搜索引擎兜底，去重合并后供 AI 引用
+// 财经快讯聚合模块：新浪免费快讯 + RSSHub实时电报 + 搜索引擎兜底，去重合并后供 AI 引用
 import { buildProxyUrl } from './proxy';
 import { fetchTavilySearch, fetchSerperSearch } from './search-engines';
 import { debugLog } from '../debugLog';
+
+// RSSHub 源 — 免费、实时、结构化（通过 rss2json.com 代理转 JSON）
+const RSSHUB_SOURCES = {
+  macro: [
+    { route: 'gov/pbc/goutongjiaoliu', label: '央行沟通', icon: '🏦' },
+    { route: 'gov/csrc/news', label: '证监会', icon: '📜' },
+    { route: 'cls/telegraph', label: '财联社', icon: '⚡' },
+  ],
+  market: [
+    { route: 'cls/telegraph', label: '财联社电报', icon: '⚡' },
+    { route: 'wallstreetcn/latest', label: '华尔街见闻', icon: '📰' },
+    { route: 'jin10/latest', label: '金十数据', icon: '📊' },
+  ],
+  bond: [
+    { route: 'cls/telegraph', label: '财联社', icon: '⚡' },
+  ],
+  fund: [
+    { route: 'cls/telegraph', label: '财联社', icon: '⚡' },
+  ],
+};
+
+async function fetchRSSHubFeed(settings, route, limit = 8) {
+  try {
+    const rssUrl = `https://rsshub.app/${route}`;
+    const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}&api_key=free&count=${limit}`;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(apiUrl, { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.status !== 'ok' || !data.items) return [];
+    return data.items.slice(0, limit).map(item => ({
+      title: (item.title || '').replace(/<[^>]*>/g, '').trim(),
+      content: (item.description || '').replace(/<[^>]*>/g, '').trim().substring(0, 400),
+      time: item.pubDate || '',
+      ts: item.pubDate ? new Date(item.pubDate).getTime() : 0,
+      source: `RSSHub-${route.split('/')[0]}`,
+    }));
+  } catch (e) {
+    console.warn(`[RSSHub] ${route} 拉取失败:`, e.message);
+    return [];
+  }
+}
 
 // 新浪财经栏目：免费、无需认证、结构化 JSON
 const SINA_LID_MAP = {
   macro:  [
     { lid: 2509, label: '综合财经' },
     { lid: 2516, label: '要闻' },
-    { lid: 2511, label: '全球' },
+   { lid: 2511, label: '全球' },
     { lid: 2514, label: '国际' },
+    { lid: 2510, label: 'A股' },
+    { lid: 2512, label: '债券' },
   ],
   market: [
     { lid: 2510, label: 'A股' },
@@ -52,6 +98,7 @@ async function fetchSinaFeed(settings, lid, limit) {
     .map(item => ({
       title: (item.title || '').replace(/<[^>]+>/g, '').trim(),
       content: (item.intro || '').replace(/<[^>]+>/g, '').trim(),
+      url: item.url || '',
       time: item.ctime ? new Date(parseInt(item.ctime) * 1000).toISOString().replace('T', ' ').substring(0, 19) : '',
       ts: item.ctime ? parseInt(item.ctime) * 1000 : 0,
       source: '新浪',
@@ -142,33 +189,49 @@ async function fetchSearchNews(settings, topic) {
 }
 
 // ========================
-// 主入口：并行聚合
+// 主入口：Worker策略聚合优先 → 客户端兜底
+// LLM 通过 topic 隐含指定搜索策略, Worker 并行拉取+处理+去重
 // ========================
 export async function fetchFinancialNews(settings, topic = 'market', limit = 12) {
-  // 新浪 + 搜索 并行
-  const [sinaItems, searchItems] = await Promise.all([
-    fetchAllSina(settings, topic, limit),
-    fetchSearchNews(settings, topic),
-  ]);
+  // Worker 策略聚合（单次请求，Worker 做所有脏活）
+  const proxyUrl = (settings?.customProxyUrl || settings?.cfWorkerUrl || '').trim();
+  if (proxyUrl) {
+    try {
+      const base = proxyUrl.split('?')[0].replace(/\/+$/, '');
+      const headers = { 'Content-Type': 'application/json' };
+      if (settings.workerSecret) headers['Authorization'] = `Bearer ${settings.workerSecret}`;
+      const topicQuery = { macro: '央行 货币政策 宏观经济', market: 'A股 大盘 行情', bond: '债券市场 信用债', fund: '公募基金' };
+      const res = await fetch(`${base}/api/news`, {
+        method: 'POST', headers,
+        body: JSON.stringify({
+          query: topicQuery[topic] || topicQuery.market,
+          sources: [`rsshub:cls/telegraph`, `sina:${topic}`, 'tavily'],
+          limit
+        }),
+        signal: AbortSignal.timeout(12000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.items?.length > 0) {
+          debugLog(`[财经快讯] Worker策略聚合 ${data.items.length}条`);
+          return { source: data.source, items: data.items };
+        }
+      }
+    } catch (e) { console.warn('[财经快讯] Worker不可用,降级:', e.message); }
+  }
 
-  // 去重合并（标题相似度简单去重）
-  const seen = new Set();
-  for (const item of sinaItems) seen.add(item.title);
-  const allItems = [...sinaItems];
-
-  for (const item of searchItems) {
-    if (!seen.has(item.title) && allItems.length < limit + 4) {
-      seen.add(item.title);
-      allItems.push(item);
+  // 兜底: 客户端聚合
+  const rssSources = RSSHUB_SOURCES[topic] || RSSHUB_SOURCES.market;
+  const rssPromises = rssSources.map(s => fetchRSSHubFeed(settings, s.route, Math.ceil(limit / rssSources.length)));
+  const [sinaItems, ...rssResults] = await Promise.all([fetchAllSina(settings, topic, limit), ...rssPromises, fetchSearchNews(settings, topic)]);
+  const searchItems = rssResults.pop(); const rssItems = rssResults.flat();
+  const seen = new Set(); const allItems = [];
+  for (const src of [{ items: rssItems, prio: 1 }, { items: sinaItems, prio: 2 }, { items: searchItems, prio: 3 }]) {
+    for (const item of src.items) {
+      if (!seen.has(item.title) && allItems.length < limit + 4) { seen.add(item.title); allItems.push(item); }
     }
   }
-
   allItems.sort((a, b) => (b.time || '').localeCompare(a.time || ''));
-  const final = allItems.slice(0, limit);
-
-  if (final.length > 0) {
-    debugLog('[财经快讯] 聚合 ' + final.length + ' 条（新浪 ' + sinaItems.length + ' + 搜索 ' + searchItems.length + '）');
-  }
-
-  return { source: '多源聚合', items: final };
+  debugLog(`[财经快讯] 客户端聚合 ${allItems.slice(0, limit).length}条`);
+  return { source: '多源聚合(客户端)', items: allItems.slice(0, limit) };
 }

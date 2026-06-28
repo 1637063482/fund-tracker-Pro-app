@@ -23,33 +23,52 @@
 |---|---|---|
 | 基金记账 | 自动/手动双层记账、交易流水、清仓归档 | P0 |
 | 实时行情 | 五大核心指数监控、多数据源容灾、节假日拦截 | P0 |
-| AI Copilot | 23 工具调用、双核打分、三层记忆、多模型切换 | P0 |
+| AI Copilot | 28 工具调用、JS决策树打分引擎、三层记忆、多模型切换 | P0 |
+| 量化引擎 | 5决策树+VaR/CVaR+O-U半衰期+Markov+蒙特卡洛+B-L优化+协方差 | P0 |
 | 组合分析 | XIRR 计算、三大排行榜、FOF 穿透、财富目标复盘 | P1 |
-| 云端巡检 | CF Worker 定时触发、多通道推送、机器信标 | P1 |
+| 云端巡检 | CF Worker 定时触发、多通道推送、6个量化端点 | P1 |
 | 待办系统 | AI 自动生成交易计划、7 天赎回惩罚拦截 | P1 |
 | 跨平台 | PWA + Android APK (Capacitor) | P2 |
 
 ### 1.4 技术架构
 
 ```
-┌──────────────────────────────────────────────────┐
-│                   React 19 + Vite 8               │
-│                (Frontend SPA / PWA)                │
-├──────────────────────────────────────────────────┤
-│  UI Layer: Tailwind CSS 3 + Lucide React          │
-│  State: React Hooks + Firestore Realtime          │
-│  Auth: Firebase Auth (email/password)              │
-│  DB: Firestore (funds, settings, todos, chat)     │
-├──────────────────────────────────────────────────┤
-│  AI Engine: Gemini / DeepSeek / SiliconFlow        │
-│  Search: Tavily / Exa / Serper                     │
-│  Chart: QuickChart.io + Custom SVG Donut          │
-│  Sandbox: Web Worker JS execution                 │
-├──────────────────────────────────────────────────┤
-│  Mobile: Capacitor 8 (Android) + PWA              │
-│  Cloud: Cloudflare Worker (KV + Cron)              │
-│  Push: Ntfy / 飞书卡片 / 钉钉机器人               │
-└──────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│                   React 19 + Vite 8                   │
+│                (Frontend SPA / PWA)                    │
+├──────────────────────────────────────────────────────┤
+│  UI Layer: Tailwind CSS 3 + Lucide React              │
+│  State: React Hooks + Firestore Realtime              │
+│  Auth: Firebase Auth (email/password)                  │
+│  DB: Firestore (funds, settings, todos, chat)         │
+├──────────────────────────────────────────────────────┤
+│  量化引擎 (Browser):                                   │
+│  ├─ 5 决策树分类器 (F1a/F1b/F2/F3/F4)                  │
+│  ├─ VaR/CVaR + O-U 半衰期 (handler 自动附带)            │
+│  ├─ Markov 机制转移 + 蒙特卡洛 (独立工具)               │
+│  ├─ EWMA 协方差 + B-L 组合优化 (独立工具)               │
+│  └─ Ω 置信度校准 + 宪法先验解析                          │
+├──────────────────────────────────────────────────────┤
+│  AI Engine: Gemini / DeepSeek / SiliconFlow            │
+│  Search: Tavily / Exa / Serper                         │
+│  Chart: QuickChart.io + Custom SVG Donut              │
+├──────────────────────────────────────────────────────┤
+│  CF Worker (my-cors-proxy.js):                        │
+│  ├─ /api/market-microstructure (微观结构探测器)        │
+│  ├─ /api/quant/covariance (EWMA协方差)                 │
+│  ├─ /api/quant/black-litterman (B-L后验优化)           │
+│  ├─ /api/quant/ou-half-life (O-U半衰期)               │
+│  ├─ /api/quant/markov-regime (Markov机制转移)          │
+│  └─ /api/quant/monte-carlo (蒙特卡洛模拟)              │
+├──────────────────────────────────────────────────────┤
+│  Mobile: Capacitor 8 (Android) + PWA                  │
+│  Cloud: Cloudflare Worker (KV + Cron)                  │
+│  Push: Ntfy / 飞书卡片 / 钉钉机器人                   │
+└──────────────────────────────────────────────────────┘
+
+"脑体分离"架构：
+  🧠 LLM (脑): 读取标签 + 翻译人话 + 冲突裁决 + NLP情绪
+  ⚙️ JS/Worker (体): 决策树分类 + 矩阵运算 + 概率模型 + 优化求解
 ```
 
 ---
@@ -66,6 +85,21 @@
 - [x] 基金净值拉取（天天基金 JSONP）
 - [x] 暗黑模式
 - [x] PWA 支持
+
+### v1.8.0 — 量化架构全面升级："脑体分离"（已交付）— 2026-06-19
+
+- [x] **量化打分引擎**：5 个 JS 决策树分类器（`scoring-tree.js`），替代 LLM 语义匹配。输出标签 `{category, baseScore, scoreRange}`，LLM 在区间内 ±1 微调
+- [x] **概率风险模型**：VaR(95%/99%) + CVaR 参数法/历史法（`handler` 自动附带）；O-U 均值回归半衰期（`handler` 自动附带 + 独立工具）；Markov 机制转移（`handler` 自动附带 + 独立工具）；蒙特卡洛模拟（独立工具 + 浏览器端工具）；EWMA 协方差矩阵（独立工具 + CF Worker 端点）
+- [x] **B-L 组合优化**（独立工具 `run_portfolio_optimization` + CF Worker 端点）：AI 打分→观点向量→后验收益→最优权重→精确调仓建议
+- [x] **Ω 置信度校准**（`bl-calibration.js`）：Sigmoid 缩放 + 观点数量惩罚 + 硬约束，防止极端值
+- [x] **宪法先验解析**：GLOBAL_CONSTITUTION 备忘录→B-L 先验权重（6 种风险偏好映射）
+- [x] **CF Worker 6 个量化端点**（`/api/quant/*`）：协方差/B-L/O-U/Markov/蒙特卡洛，含纯 JS 矩阵求逆
+- [x] **LLM 工具从 23→28 个**：J 类组合优化 + K 类量化模型工具箱（4 个），全部含调用时机指引
+- [x] **System Prompt Scoring 层压缩 -89%**：~3,750→~400 tokens，F1-F4 档位描述→JS 引擎读取指南
+- [x] **巡检路由升级**：0-5 步→0-7 步（+Markov+O-U+协方差+B-L+蒙特卡洛）
+- [x] **NLP 情绪分析**：`get_financial_news`→鹰鸽指数+F4 ±2分调整
+- [x] **"脑体分离"架构确立**：LLM=读标签+翻译+裁决；JS/Worker=决策树+矩阵+概率模型
+- [x] 新增 `src/utils/quant/` 目录（3 个模块 ~1,285 行）；新增 11 个量化单元测试
 
 ### v1.1 — AI Copilot 核心（已交付）
 
@@ -274,6 +308,44 @@
 **理由**: 之前 4 处各自实现分类逻辑（precompute.js ×3 + prompts.js ×1），修改规则需要同步 4 处。
 **代价**: RULES 数组的顺序敏感（如"短债"必须在"债"之前匹配），添加新规则需注意优先级
 
+### ADR-014: 量化打分引擎"脑体分离" — JS 决策树 + LLM 微调
+
+**日期**: v1.8.0
+**决策**: F1-F4 打分从 LLM 在 Prompt 中语义匹配 60+ 条档位规则 → JS 决策树输出 `{category, baseScore, scoreRange}` 标签，LLM 仅在 `scoreRange` 内做 ±1 微调。
+**理由**:
+- LLM 对同一组 K 线数据可能打出不同分数（非确定性），无法复现
+- LLM 数学计算不可靠（Prompt 中多次出现"🚨严禁心算"）
+- JS 决策树是确定性的——同输入=同输出
+- LLM 保留 ±1 微调权，利用其对盘面微小异动的模糊理解能力（防坑3：软硬结合）
+**代价**: 5 个分类器维护成本（12+6+6+11+6 档位），但每个档位的 if-else 逻辑明确、可单元测试
+
+### ADR-015: B-L 先验权重来源于 GLOBAL_CONSTITUTION 备忘录
+
+**日期**: v1.8.0
+**决策**: B-L 模型的先验市场权重 w_mkt 不使用外部指数（如沪深300），而是从 `GLOBAL_CONSTITUTION` 备忘录的结构化字段中解析——"固收为主+适度增强" → `{bond:0.70, equity:0.20, cash:0.10}`。
+**理由**:
+- 传统 B-L 用沪深300市值权重对个人 FOF 组合无意义——用户不是在跑对标指数的基金
+- 宪法备忘录是用户明确声明的风险偏好，语义清晰、有约束力
+- "AI Views" 的语义变成"相对于我的基准应该超配/低配多少"，逻辑自洽
+**代价**: 依赖备忘录的结构化格式正确填写；年化目标推断兜底为保守估计
+
+### ADR-016: Ω 置信度三重校准 — 防 B-L 极端权重
+
+**日期**: v1.8.0
+**决策**: B-L 观点置信度 Ω 不能直接使用 Meta-Vigilance 准确率，必须过三层校准：(1) Sigmoid 映射到 [0.1, 0.89]；(2) 除以 √N_views 惩罚观点膨胀；(3) 硬约束 [0.05, 0.90]。
+**理由**: 准确率 0%→AI 观点被忽略、满仓均衡权重；准确率 100%→满仓梭哈单基。两者都不可接受。
+**代价**: Sigmoid 斜率(5)和范围 [0.1, 0.9] 是主观设定，可后续根据实盘数据调参
+
+### ADR-017: 量化模型双轨制 — 浏览器端 + CF Worker
+
+**日期**: v1.8.0
+**决策**: 每个量化模型同时有浏览器端 JS 实现（LLM 工具直接调用）和 CF Worker 端点（`/api/quant/*`）。浏览器端用于日常 LLM 交互，CF Worker 端用于重计算（蒙特卡洛 >5000 次）和外部 API 调用。
+**理由**:
+- 浏览器端可即时响应 LLM 工具调用，无需网络往返
+- CF Worker 可卸载重计算，且可被 `worker.js` 巡检脚本调用
+- 双轨避免单点故障——CF Worker 未部署时浏览器端仍可用
+**代价**: 逻辑在两端各自实现，需保持同步
+
 ---
 
 ## 四、数据库结构 (Firestore)
@@ -315,28 +387,32 @@ artifacts/
 
 ---
 
-## 五、AI System Prompt 架构（v1.5 重构）
+## 五、AI System Prompt 架构（v1.8 重构）
 
-### 三层动态加载模型
+### 全量合并模型（v1.6+ 架构，v1.8 深度压缩）
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  Core Prompt (~1,950 tok)                           │
-│  始终加载 | messages[0] | DeepSeek 100% 缓存命中    │
-│  · 防幻觉协议（净值唯一通道/T+1/资金交收）          │
-│  · 活体战略记忆（双层结构/动态验证/反讨好）         │
-│  · 系统变量 + 数据洁癖 + 历史引用规则 + 格式铁律    │
-├─────────────────────────────────────────────────────┤
-│  Skill Library (~2,000 tok)                         │
-│  意图路由器判定 | 静态 user message 注入            │
-│  · 23 工具 × 9 分类详细说明                         │
-│  · 跨工具调用铁律（防海选/防死循环/防同质化/穿透链）│
-├─────────────────────────────────────────────────────┤
-│  Scoring System (~3,750 tok)                        │
-│  雷达 ON → 始终加载 | 雷达 OFF → 始终不加载         │
-│  · 双核打分卡（权益5因子 F1a+F1b+F2+F3+F4 + 固收2因子）│
-│  · CIO 矩阵（表格化 A/B/C 三标签）                  │
-│  · 全局否决(F1a<4) + 滞回锁定 + 动量修正 + 巡检流程 │
+│  全量 System Prompt (~4,900 tok)                    │
+│  单一静态字符串 | messages[0] | 100% 缓存命中        │
+│                                                     │
+│  Layer 0: Core System (~1,950 tok)                  │
+│  · 防幻觉协议 + 活体战略记忆 + 格式铁律              │
+│  · 数据洁癖 + 跨日可靠性 + 雷达权威                  │
+│                                                     │
+│  Layer 1: Skill Library (~2,100 tok)                │
+│  · 28 工具 × 10 分类 (A-K)                          │
+│  · K 类·量化模型工具箱含自主调用时机指引              │
+│  · 跨工具调用铁律 + 打分前置清单                     │
+│                                                     │
+│  Layer 2: Scoring System (~400 tok, -89%)           │
+│  · 5 行 JS 引擎读取指南（替代 60+ 条档位描述）       │
+│  · CIO 矩阵 + 全局否决 + 滞回锁定 + 动量修正         │
+│  · VaR 风控日报 + NLP 情绪指引 + 量化预判聚合        │
+│                                                     │
+│  Layer 3: Inspection Routine (~350 tok)             │
+│  · 量化增强版 0-7 步（+Markov+O-U+B-L+蒙特卡洛）     │
+│  · 自检回顾(Meta-Vigilance)                         │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -348,23 +424,23 @@ artifacts/
    ├─ 跨日轮次: AI 摘要 + 用户问题全文
    └─ 雷达指令: 历史中的旧指令剥离
 
-2. buildRulebookMessages(intent)
-   ├─ needsScoring → 注入 Scoring rulebook
-   └─ needsSkillLibrary → 注入 Skill rulebook
+2. buildFullSystemPrompt() → 全量静态字符串
+   └─ Core + SkillLibrary + ScoringSystem + InspectionRoutine
 
 3. messages = [system(Core)] + [rulebooks] + [history] + [stateWrapper]
    └─ Core 和 rulebooks 均为纯静态字符串 → DeepSeek 缓存命中
 ```
 
-### Token 预算（v1.5）
+### Token 预算（v1.8 压缩后）
 
-| 模块 | Tokens | 缓存 |
-|------|--------|------|
-| Core | 1,947 | 🟢 永久 |
-| Skill Library + 典礼帧 | 2,054 | 🟡 场景 |
-| Scoring + 典礼帧 | 3,811 | 🟡 场景 |
-| Tools JSON | 6,307 | 🟢 永久 |
-| **FULL 模式可缓存** | **14,119** | **78%** |
+| 模块 | Tokens | 缓存 | 变动 |
+|------|--------|------|------|
+| Core | ~1,950 | 🟢 永久 | — |
+| Skill Library | ~2,100 | 🟢 永久 | +100 (新增J/K类) |
+| Scoring System | ~400 | 🟢 永久 | **-3,350 (-89%)** |
+| Inspection Routine | ~350 | 🟢 永久 | +50 (新增2步) |
+| Tools JSON | ~7,200 | 🟢 永久 | +900 (新增5工具) |
+| **System Prompt 总计** | **~4,900** | **100%** | **-2,700 (-36%)** |
 
 ---
 
@@ -384,6 +460,7 @@ VITE_FIREBASE_PROJECT_ID=xxx
 
 | 日期 | 版本 | 变更内容 | 作者 |
 |---|---|---|---|
+| 2026-06-19 | v1.8.0 | 量化架构全面升级：5决策树+VaR/CVaR+O-U+Markov+蒙特卡洛+B-L+协方差；28工具；Scoring层-89%；"脑体分离" | wangwang |
 | 2026-06-18 | v1.7.1 | 修复状态栏云端连接状态永久"连接中" bug；F1 打分架构重构(F1a+F1b)；双创数据常态化拉取 | wangwang |
 | 2026-06-10 | v1.7.0 | F3量比VR体系/隔夜外盘信号/F4全球调整/穿透修复/SysPrompt 47%压缩/结构化注入 | wangwang |
 | 2026-06-09 | v1.6.0 | System Prompt 深度压缩/备忘录结构化注入/待办结构化注入/工具精简/穿透修复包 | wangwang |

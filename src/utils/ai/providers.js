@@ -7,11 +7,13 @@ export const resolveProvider = (settings) => {
     const customs = settings.customAiProviders || [];
     const custom = customs.find(p => p.id === providerId);
     if (custom) {
+      const protocol = custom.protocol || 'openai';
       return {
-        provider: 'openai',
+        provider: protocol === 'anthropic' ? 'anthropic' : 'openai',
         apiKey: custom.key || '',
         targetModel: custom.model || '',
-        apiBase: custom.apiBase || ''
+        apiBase: custom.apiBase || '',
+        protocol
       };
     }
   }

@@ -21,4 +21,4 @@ export { getAdapter } from './adapters/index';
 export { ToolRegistry } from './tools/registry';
 export { ToolResultChannel } from './tools/channel';
 export { runChatPipeline } from './pipelines/chat-pipeline';
-export { downsampleHistory } from './context/history';
+export { downsampleHistory, extractSummaryFromMessage, stripThinkingBlock } from './context/history';

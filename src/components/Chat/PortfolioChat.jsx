@@ -116,66 +116,47 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   const [isScoringOpening, setIsScoringOpening] = useState(true);
   const [scoringTriggerRect, setScoringTriggerRect] = useState(null);
   const [isScoringLoading, setIsScoringLoading] = useState(false);   // 硬加载（无缓存时显示 spinner）
-  const [isScoringRefreshing, setIsScoringRefreshing] = useState(false); // 后台刷新中（有缓存时显示小指示器）
-  const scoringCacheRef = useRef({ data: null, fetchedAt: 0 });     // 内存缓存
+  const [isScoringRefreshing, setIsScoringRefreshing] = useState(false); // 后台刷新中（显示小指示器）
+  const scoringCacheRef = useRef({ data: null, fetchedAt: 0 });     // 内存缓存（供FLIP动效即时展示）
+  const scoringUnsubRef = useRef(null);                              // onSnapshot 取消订阅
 
-  // 带缓存的打分快照拉取（stale-while-revalidate）
-  const loadScoringHistory = useCallback(async ({ forceRefresh = false } = {}) => {
-    if (!user || !db) return;
-    const CACHE_TTL = 5 * 60 * 1000;       // 5分钟内视为新鲜
-    const STALE_TTL = 30 * 60 * 1000;      // 30分钟内可复用但后台刷新
-    const now = Date.now();
-    const cache = scoringCacheRef.current;
-    const cacheAge = now - cache.fetchedAt;
-    const hasCache = cache.data !== null;
+  // onSnapshot 后台监听：保持缓存新鲜，store_scoring_snapshot写入后自动更新
+  useEffect(() => {
+    if (!user || !db || !appId) return;
+    if (scoringUnsubRef.current) { scoringUnsubRef.current(); }
 
-    // 有缓存且新鲜 → 直接展示，不发请求
-    if (hasCache && cacheAge < CACHE_TTL && !forceRefresh) {
-      setScoringHistory(cache.data);
-      setIsScoringLoading(false);
-      setIsScoringRefreshing(false);
-      return;
-    }
+    const snapRef = collection(db, 'artifacts', appId, 'users', user.uid, 'scoring_snapshots');
+    const q = query(snapRef, orderBy('date', 'desc'), limit(30));
 
-    // 有缓存但过期 → 先展示缓存，后台静默刷新
-    if (hasCache && cacheAge < STALE_TTL && !forceRefresh) {
-      setScoringHistory(cache.data);
-      setIsScoringLoading(false);
-      setIsScoringRefreshing(true);
-      try {
-        const snapRef = collection(db, 'artifacts', appId, 'users', user.uid, 'scoring_snapshots');
-        const q = query(snapRef, orderBy('date', 'desc'), limit(30));
-        const snapshot = await getDocs(q);
-        const data = [];
-        snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
-        scoringCacheRef.current = { data, fetchedAt: Date.now() };
-        setScoringHistory(data);
-      } catch (err) {
-        console.error('后台刷新打分快照失败:', err);
-      } finally {
-        setIsScoringRefreshing(false);
-      }
-      return;
-    }
-
-    // 无缓存或缓存太旧 → 硬加载
-    setIsScoringLoading(true);
-    setIsScoringRefreshing(false);
-    try {
-      const snapRef = collection(db, 'artifacts', appId, 'users', user.uid, 'scoring_snapshots');
-      const q = query(snapRef, orderBy('date', 'desc'), limit(30));
-      const snapshot = await getDocs(q);
+    scoringUnsubRef.current = onSnapshot(q, (snapshot) => {
       const data = [];
       snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
       scoringCacheRef.current = { data, fetchedAt: Date.now() };
-      setScoringHistory(data);
-    } catch (err) {
-      console.error('拉取打分快照失败:', err);
-      setScoringHistory([]);
-    } finally {
       setIsScoringLoading(false);
+      // 如果面板已打开，同步更新UI
+      setScoringHistory(prev => prev !== null ? data : prev);
+    }, (err) => {
+      console.error('打分快照监听失败:', err);
+    });
+
+    return () => { if (scoringUnsubRef.current) { scoringUnsubRef.current(); scoringUnsubRef.current = null; } };
+  }, [user, db, appId]);
+
+  // 带即时缓存的打分快照拉取（缓存保证FLIP动效不被打断）
+  const openScoringPanel = useCallback(() => {
+    if (!user || !db) return;
+    const cache = scoringCacheRef.current;
+    if (cache.data !== null) {
+      // 有缓存 → 立即展示（FLIP动画期间内容不变）
+      setScoringHistory(cache.data);
+      setIsScoringLoading(false);
+      setIsScoringRefreshing(false);
+    } else {
+      // 无缓存 → 显示加载（首次打开，无动画冲突）
+      setIsScoringLoading(true);
+      setScoringHistory([]);
     }
-  }, [user]);
+  }, [user, db]);
 
   // FLIP calculation for desktop expand-from-button
   const chatFlip = useMemo(() => {
@@ -414,6 +395,24 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
         list.default = { title: '默认对话', createdAt: '', lastMessage: '' };
       }
       setConversations(list);
+      
+      // 🌟 新增：如果当前仍是 default，且存在其他非 default 对话，自动切换到最近的对话
+      setActiveConvId(prevActiveId => {
+        if (prevActiveId === 'default') {
+          const otherConvIds = Object.keys(list).filter(id => id !== 'default');
+          if (otherConvIds.length > 0) {
+            // 按 createdAt 降序排列，选择最新的对话
+            const newestConvId = otherConvIds.reduce((newest, id) => {
+              const newestTime = new Date(list[newest]?.createdAt || 0).getTime();
+              const currentTime = new Date(list[id]?.createdAt || 0).getTime();
+              return currentTime > newestTime ? id : newest;
+            });
+            debugLog(`🌟 自动切换到最近对话: [${newestConvId}] "${list[newestConvId]?.title}"`);
+            return newestConvId;
+          }
+        }
+        return prevActiveId;
+      });
     }, (err) => {
       console.error('❌ 加载对话列表失败，请检查 Firestore 规则是否包含 chat_convs:', err);
       // 即使云端加载失败，也确保 default 对话在本地可用
@@ -863,6 +862,24 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
               </div>
             </div>
             <div className="flex items-center space-x-1">
+              {/* Ω 回测准确率指示器 */}
+              <Tooltip content={
+                settings.omegaAccuracy != null && settings.omegaAccuracy > 0
+                  ? 'AI回测准确率 ' + (settings.omegaAccuracy*100).toFixed(0) + '% | ' + (settings.omegaSamples||'?') + '样本 | Ω=' + (settings.omegaRecommended||0.5).toFixed(2)
+                  : '尚未回测。对AI说"执行回测"来验证评分准确率'
+              }>
+                <span className={'text-[11px] font-mono font-bold px-2 py-1 rounded-full ' + (
+                  settings.omegaAccuracy != null && settings.omegaAccuracy > 0
+                    ? (settings.omegaAccuracy > 0.65 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                       settings.omegaAccuracy > 0.55 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                       'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400')
+                    : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500 cursor-help'
+                )}>
+                  {settings.omegaAccuracy != null && settings.omegaAccuracy > 0
+                    ? (settings.omegaAccuracy*100).toFixed(0) + '% Ω'
+                    : '-- Ω'}
+                </span>
+              </Tooltip>
              <Tooltip content="管理 AI 长期记忆">
                 <button onClick={(e) => { setMemoTriggerRect(e.currentTarget.getBoundingClientRect()); setIsMemoModalOpen(true); setIsMemoOpening(true); requestAnimationFrame(() => requestAnimationFrame(() => setIsMemoOpening(false))); }} className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-[0.625rem] transition-colors relative">
                   <Brain size={18} />
@@ -875,7 +892,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
               </Tooltip>
               {/* 打分历史按钮（手动拉取，无实时监听） */}
               <Tooltip key={`score-tip-${scoringHistory !== null}`} content="量化打分历史">
-                <button onClick={(e) => { setScoringTriggerRect(e.currentTarget.getBoundingClientRect()); setIsScoringOpening(true); requestAnimationFrame(() => requestAnimationFrame(() => setIsScoringOpening(false))); loadScoringHistory(); }} className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-[0.625rem] transition-colors relative">
+                <button onClick={(e) => { setScoringTriggerRect(e.currentTarget.getBoundingClientRect()); setIsScoringOpening(true); requestAnimationFrame(() => requestAnimationFrame(() => setIsScoringOpening(false))); openScoringPanel(); }} className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-[0.625rem] transition-colors relative">
                   <Activity size={18} />
                   {(isScoringLoading || isScoringRefreshing) && <span className="absolute inset-0 flex items-center justify-center"><RefreshCw size={12} className={`animate-spin ${isScoringRefreshing ? 'text-indigo-300' : 'text-indigo-500'}`} /></span>}
                 </button>
@@ -1461,8 +1478,9 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
                     {s.equity && (
                       <>
                         <div className="text-[10px] text-slate-400 mb-1 font-medium tracking-wide">📈 权益打分</div>
-                        <div className="grid grid-cols-3 gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 mb-1.5">
-                          <span>F1 宏观赔率: <b className="text-slate-700 dark:text-slate-300">{s.equity.F1}</b></span>
+                        <div className="grid grid-cols-2 gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 mb-1.5">
+                          <span>F1a 上证赔率: <b className="text-slate-700 dark:text-slate-300">{s.equity.F1a != null ? s.equity.F1a : s.equity.F1 != null ? Math.round(s.equity.F1 * 20/35) : '?'}</b></span>
+                          <span>F1b 双创校验: <b className="text-slate-700 dark:text-slate-300">{s.equity.F1b != null ? s.equity.F1b : s.equity.F1 != null ? Math.round(s.equity.F1 * 15/35) : '?'}</b></span>
                           <span>F2 微观反转: <b className="text-slate-700 dark:text-slate-300">{s.equity.F2}</b></span>
                           <span>F3 量能验证: <b className="text-slate-700 dark:text-slate-300">{s.equity.F3}</b></span>
                           <span>F4 跨资产: <b className="text-slate-700 dark:text-slate-300">{s.equity.F4}</b></span>
@@ -1476,6 +1494,13 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
                             {s.equity.f3Flags && <span className="ml-2 text-amber-500">🏷 {s.equity.f3Flags}</span>}
                           </div>
                         )}
+                        <div className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                          {s.northbound?.totalNet != null ? (
+                            <span>🌏 北向资金: 净{s.northbound.totalNet >= 0 ? '流入' : '流出'}{Math.abs(s.northbound.totalNet).toFixed(0)}亿（沪{s.northbound.shNet != null ? (s.northbound.shNet >= 0 ? '+' : '') + s.northbound.shNet.toFixed(0) : '?'}亿/深{s.northbound.szNet != null ? (s.northbound.szNet >= 0 ? '+' : '') + s.northbound.szNet.toFixed(0) : '?'}亿）</span>
+                          ) : (
+                            <span className="text-slate-300 dark:text-slate-600">🌏 北向资金: --</span>
+                          )}
+                        </div>
                       </>
                     )}
                     {s.bond && (
@@ -1500,7 +1525,23 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
                             固收:{{ BUY_STRATEGY: '买入/加仓', HOLD_STRATEGY: '持有/观望', WATCH_GRID: '战术网格', BLACK_LIST: '回避/减仓' }[s.verdict.bondAction] || '未判定'}
                           </span>
                         )}
-                        {s.verdict.hysteresisActive && <span className="text-amber-500 text-[10px]">🛡️ 滞回锁定</span>}
+                        {(() => {
+                          // 🔒 滞回只在得分跨越zone边界但±5去抖拦住时才有效
+                          // bond zone: <35WATCH / 35-55HOLD / 55-75BUY / >75BUY+
+                          // equity zone: 同理
+                          // 得分稳定在zone内部(距离边界≥10分)时不可能有滞回
+                          const eqScore = s.equity?.final ?? 100;
+                          const bdScore = s.bond?.final ?? 100;
+                          const validEq = s.verdict.equityHysteresis === true && eqScore >= 25 && eqScore <= 50;
+                          const validBd = s.verdict.bondHysteresis === true && bdScore >= 25 && bdScore <= 50;
+                          const hasOld = s.verdict.hysteresisActive && s.verdict.equityHysteresis === undefined;
+                          if (!validEq && !validBd && !hasOld) return null;
+                          return (
+                            <span className="text-amber-500 text-[10px]">
+                              🛡️ 滞回锁定:{validEq ? '权益' : ''}{validEq && validBd ? '/' : ''}{validBd ? '固收' : ''}{hasOld ? '(旧数据,未区分)' : ''}
+                            </span>
+                          );
+                        })()}
                       </div>
                     )}
                     {(s.totalValue || s.totalProfit != null) && (

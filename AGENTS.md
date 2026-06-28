@@ -15,6 +15,7 @@
 | UI | Tailwind CSS 3 + Lucide React |
 | 后端 | Firebase Auth + Firestore (BaaS) |
 | AI | Gemini / DeepSeek / SiliconFlow / 自定义 OpenAI 兼容 |
+| 量化引擎 | 5 决策树(F1a/F1b/F2/F3/F4) + VaR/CVaR + O-U + Markov + 蒙特卡洛 + B-L + EWMA |
 | 移动端 | Capacitor 8 (Android) |
 
 ---
@@ -74,8 +75,13 @@ fund-tracker-pro/
     │   ├── holidayCalendar.js         # 法定节假日判定：周末 + 从 jsDelivr CDN 同步的中国假日数据
     │   ├── renderMarkdown.jsx         # Markdown → React 组件：自研块级解析器、表格、代码块、折叠思考、Print/PDF 内联样式渲染
     │   ├── feishuMarkdown.js          # 飞书卡片格式工具
+    │   ├── fundClassifier.js          # 基金分类统一模块：RULES 数组驱动三函数
     │   ├── ai.js                      # AI 模块重导出入口（向后兼容）
-    │   └── ai/                        # AI 引擎子模块（33 个文件，7 个子目录）
+    │   ├── ai/                        # AI 引擎子模块
+    │   └── quant/                     # ⭐ 量化引擎子模块（v1.8 新增）
+    │       ├── scoring-tree.js        #   5 决策树分类器(F1a/F1b/F2/F3/F4)+格式化+MACD
+    │       ├── bl-calibration.js      #   Ω 置信度校准+宪法先验解析+AI打分→B-L Views
+    │       └── monte-carlo-browser.js #   浏览器端蒙特卡洛模拟(execute_javascript可用)
     │       ├── index.js               #   统一导出聚合入口
     │       ├── core.js                #   核心对话引擎（委托给编排器）
     │       ├── orchestrator.js        #   编排器：组合 Adapter+Pipeline+Context
@@ -159,8 +165,8 @@ fund-tracker-pro/
 
 ### 3.3 AI 模块规则
 
-1. **System Prompt 架构**：四层结构（Core / SkillLibrary / ScoringSystem / InspectionRoutine），静态内容内联于 `prompts/system.js`。第一层防幻觉协议必须在最前面。利用 DeepSeek 上下文缓存特性，动态数据通过 State Wrapper 每轮注入。
-2. **新增 Tool**（当前共 23 个）：
+1. **System Prompt 架构**：四层全量合并（Core / SkillLibrary / ScoringSystem / InspectionRoutine），静态内容内联于 `prompts/system.js`。第一层防幻觉协议必须在最前面。Scoring 层已压缩 89%（~3,750→~400 tokens），F1-F4 档位描述替换为 JS 引擎读取指南。
+2. **新增 Tool**（当前共 28 个，10 大类 A-K）：
    - 在 `tools-definitions.js` 中注册 JSON Schema
    - 在 `tools/handlers.js` 中添加 handler 函数
    - 在 `pipelines/chat-pipeline.js` 的 TOOL_LABELS 中添加状态提示

@@ -3,7 +3,11 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
 import { ErrorBoundary } from './components/UI/ErrorBoundary';
+import { initQuantLogger } from './utils/quant/quantLogger';
 import './index.css';
+
+// 初始化量化引擎控制台探针
+initQuantLogger();
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

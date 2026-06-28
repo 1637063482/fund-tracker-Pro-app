@@ -74,7 +74,7 @@ export const defineTools = (settings) => {
     type: "function",
     function: {
       name: "get_financial_news",
-      description: "⭐首选资讯工具。多源聚合：新浪财经4栏目+Tavily+Serper并行拉取，自动去重。仅用于新闻，禁查数字数据。",
+      description: "⭐首选资讯工具。三源聚合:RSSHub(央行/证监会/财联社/华尔街见闻)+新浪财经4栏目+Tavily/Serper,自动去重排序。实时快讯+标题摘要。仅用于新闻,禁查数字数据。",
       parameters: {
         type: "object",
         properties: { topic: { type: "string", enum: ["macro", "market", "bond", "fund"], description: "macro=宏观/market=A股/bond=债券/fund=基金" } },
@@ -129,6 +129,37 @@ export const defineTools = (settings) => {
       }
     });
   }
+
+  // ── B0. Worker自搜（LLM指定关键词→Worker搜索+提取全文→返回完整正文）──
+  tools.push({
+    type: "function",
+    function: {
+      name: "worker_web_search",
+      description: "⭐深度搜索:Worker根据你的关键词自主搜索财经网站+逐页提取完整正文(非snippet)→返回3000字全文。用于需要完整内容的深度搜索,比传统搜索返回更多信息。每次1-3个结果,耗时5-15秒。",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "搜索关键词(≤30字,精炼)" },
+          numResults: { type: "number", description: "返回结果数,默认3,最大5" }
+        }, required: ["query"]
+      }
+    }
+  });
+
+  // ── B2. 深度阅读（搜索结果URL → 完整正文）──
+  tools.push({
+    type: "function",
+    function: {
+      name: "fetch_article_content",
+      description: "⭐深度阅读：从搜索结果中挑选高质量URL→提取完整Markdown正文(去广告/去导航)。用于阅读政策全文/深度分析/研报。最多一次3篇。",
+      parameters: {
+        type: "object",
+        properties: {
+          urls: { type: "array", items: { type: "string" }, description: "1-3个URL，仅限财经媒体(cls.cn/wallstreetcn.com/jin10.com/stcn.com/caixin.com等)", maxItems: 3 }
+        }, required: ["urls"]
+      }
+    }
+  });
 
   // ── C. 实体操作 ──
   tools.push({
@@ -368,8 +399,11 @@ export const defineTools = (settings) => {
             type: "object",
             description: "权益打分(未计算不传)",
             properties: {
-              totalRaw: { type: "number" }, F1: { type: "number" }, F2: { type: "number" },
-              F3: { type: "number" }, F4: { type: "number" },
+              totalRaw: { type: "number" },
+              F1a: { type: "number", description: "F1a上证赔率得分(0-20)" },
+              F1b: { type: "number", description: "F1b双创校验得分(0-15)" },
+              F1: { type: "number", description: "F1总分=F1a+F1b(0-35), 旧格式兼容" },
+              F2: { type: "number" }, F3: { type: "number" }, F4: { type: "number" },
               momentum: { type: "number", description: "动量修正 -10/+10/0" },
               final: { type: "number", description: "clamp(totalRaw+momentum,0,100)" },
               turnoverYi: { type: "number", description: "当日两市成交额(亿),如27927" },
@@ -378,7 +412,7 @@ export const defineTools = (settings) => {
               volumeRatio: { type: "number", description: "量比VR(今日成交÷近5日均量),如2.3" },
               f3Flags: { type: "string", description: "F3档位说明,如'天量出货拦截'/'放量普涨'/'缩量阴跌'/'正常博弈'" }
             },
-            required: ["totalRaw", "F1", "F2", "F3", "F4", "momentum", "final"]
+            required: ["totalRaw", "F1a", "F1b", "F2", "F3", "F4", "momentum", "final"]
           },
           bond: {
             type: "object",
@@ -392,18 +426,137 @@ export const defineTools = (settings) => {
           totalValue: { type: "number", description: "当日全盘总市值(元),从状态注入中取" },
           totalProfit: { type: "number", description: "当日累计盈亏(元)" },
           overallXirr: { type: "number", description: "当日年化XIRR(小数,如0.08=8%)" },
+          northbound: {
+            type: "object",
+            description: "北向资金(🚨对话上下文中有【北向资金】块则必须保存,无则不用传)",
+            properties: {
+              shNet: { type: "number", description: "沪股通日净流入(亿)" },
+              szNet: { type: "number", description: "深股通日净流入(亿)" },
+              totalNet: { type: "number", description: "合计日净流入(亿)" }
+            }
+          },
           verdict: {
             type: "object",
             description: "CIO判定(用于滞回锁定)",
             properties: {
               equityAction: { type: "string", enum: ["BUY_STRATEGY", "HOLD_STRATEGY", "WATCH_GRID", "BLACK_LIST"] },
               bondAction: { type: "string", enum: ["BUY_STRATEGY", "HOLD_STRATEGY", "WATCH_GRID", "BLACK_LIST"] },
-              hysteresisActive: { type: "boolean" }
+              hysteresisActive: { type: "boolean", description: "整体滞回状态" },
+              equityHysteresis: { type: "boolean", description: "权益是否被滞回锁定(独立判定)" },
+              bondHysteresis: { type: "boolean", description: "固收是否被滞回锁定(独立判定)" }
             },
-            required: ["equityAction", "hysteresisActive"]
+            required: ["equityAction", "hysteresisActive", "equityHysteresis", "bondHysteresis"]
           }
         },
         required: ["date", "verdict"]
+      }
+    }
+  });
+
+  // ── J. 组合优化 ──
+  tools.push({
+    type: "function",
+    function: {
+      name: "run_portfolio_optimization",
+      description: "【打完分后调用】运行BL组合优化：输入持仓+基金指标→BL大类最优+基金分同类加权→精确调仓建议。含协方差(EWMA)+BL后验+约束优化+基金评分卡(F1收益动量+F2风险调整+F3基准相对+F4成本纪律)。",
+      parameters: {
+        type: "object",
+        properties: {
+          funds: { type: "array", items: {
+            type: "object", properties: {
+              fundCode: { type: "string" }, fundName: { type: "string" },
+              currentWeight: { type: "number", description: "当前占比(小数,如0.15=15%)" },
+              equityScore: { type: "number", description: "权益打分0-100" },
+              verdict: { type: "string", enum: ["BUY_STRATEGY","HOLD_STRATEGY","WATCH_GRID","BLACK_LIST"] },
+              sharpe: { type: "number", description: "Sharpe比率(可选,从get_fund_risk_metrics获取)" },
+              ir: { type: "number", description: "信息比率IR(可选)" },
+              annualReturn: { type: "number", description: "年化收益小数(可选)" },
+              mdd: { type: "number", description: "最大回撤小数如-0.15(可选)" },
+              upCapture: { type: "number", description: "上行捕获率%(可选)" },
+              downCapture: { type: "number", description: "下行捕获率%(可选)" },
+              ranking: { type: "string", description: "同类排名 top25/25-50/50-75/bottom25(可选)" },
+              feeRate: { type: "number", description: "年费率%(可选)" },
+              isShortTerm: { type: "boolean", description: "⚠️短标记(可选)" },
+              volatility: { type: "number", description: "年化波动率小数(可选)" }
+            }, required: ["fundCode","currentWeight"]
+          }},
+          constitution: { type: "string", description: "GLOBAL_CONSTITUTION 备忘录文本,用于提取先验权重" }
+        }, required: ["funds"]
+      }
+    }
+  });
+
+  // ── L. 回测验证 ──
+  tools.push({
+    type: "function",
+    function: {
+      name: "run_backtest",
+      description: "⭐评分回测：读取历史打分快照+市场数据→计算方向准确率/分档胜率/前向衰减/校准评估。用于检验评分系统的预测效力，输出可直接反哺Ω校准。",
+      parameters: {
+        type: "object",
+        properties: {
+          days: { type: "number", description: "回溯天数,默认60" }
+        }, required: []
+      }
+    }
+  });
+
+  // ── K. 量化模型工具箱 ──
+  tools.push({
+    type: "function",
+    function: {
+      name: "run_monte_carlo",
+      description: "蒙特卡洛模拟：基于历史日收益率+当前权重，生成N条未来路径，输出终值分布+VaR+回撤概率。用于回答'未来X天亏超Y%的概率'类问题。",
+      parameters: {
+        type: "object",
+        properties: {
+          fundCodes: { type: "array", items: { type: "string" }, description: "基金代码列表" },
+          weights: { type: "array", items: { type: "number" }, description: "对应权重(小数)" },
+          initialValue: { type: "number", description: "初始市值(元),默认从持仓取" },
+          horizonDays: { type: "number", description: "模拟天数,默认60" },
+          numSims: { type: "number", description: "模拟次数,默认3000,最大5000" }
+        }, required: ["fundCodes", "weights"]
+      }
+    }
+  });
+  tools.push({
+    type: "function",
+    function: {
+      name: "compute_covariance",
+      description: "计算基金组合的EWMA协方差矩阵(λ=0.94)。输出矩阵+条件数+各资产边际风险贡献。用于风险预算、B-L先验、集中度检测。",
+      parameters: {
+        type: "object",
+        properties: {
+          fundCodes: { type: "array", items: { type: "string" }, description: "基金代码列表,2-15只" },
+          lambda: { type: "number", description: "衰减因子,默认0.94" }
+        }, required: ["fundCodes"]
+      }
+    }
+  });
+  tools.push({
+    type: "function",
+    function: {
+      name: "compute_ou_half_life",
+      description: "O-U均值回归半衰期:对净值序列做OLS回归,输出长期均值/回归速度θ/半衰期天数/当前偏离σ数。用于网格交易节奏优化——半衰期长→拉大档位,短→收紧档位。",
+      parameters: {
+        type: "object",
+        properties: {
+          fundCode: { type: "string", description: "基金代码" }
+        }, required: ["fundCode"]
+      }
+    }
+  });
+  tools.push({
+    type: "function",
+    function: {
+      name: "run_markov_regime",
+      description: "Markov波动率制式转移:对日收益率序列做Hamilton滤波,输出低波制式/高波制式概率分布+转移矩阵。高波制式→F1a侧重MACD均线方向,低波制式→F1a侧重估值分位锚定。",
+      parameters: {
+        type: "object",
+        properties: {
+          code: { type: "string", description: "指数代码,默认sh000001(上证)" },
+          days: { type: "number", description: "回溯天数,默认120" }
+        }, required: []
       }
     }
   });
@@ -414,6 +567,20 @@ export const defineTools = (settings) => {
     function: {
       name: "get_market_microstructure",
       description: "【必调】获取A股深度微观结构信号(银行间流动性+期指基差+回购利率)，数据在后端做降维压缩，返回定性结论而非原始数据。用于F3量价验证的熔断判定：若返回'致命信号'则F3强制归零。",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: []
+      }
+    }
+  });
+
+  // 行业资金流向 — 东财行业板块的主力净流入/净流出排名
+  tools.push({
+    type: "function",
+    function: {
+      name: "get_sector_capital_flow",
+      description: "获取A股行业板块资金流向数据（东财行业分类），返回主力净流入/净流出TOP5行业及其金额、占比。用于判断当日资金主攻/主撤方向。",
       parameters: {
         type: "object",
         properties: {},

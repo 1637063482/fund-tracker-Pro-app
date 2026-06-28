@@ -3,6 +3,35 @@ import { doc, setDoc, getDocs, collection, query, where, updateDoc } from 'fireb
 import { db, appId } from '../../config/firebase';
 import { chatWithPortfolioAI } from '../../utils/ai';
 
+// 决策审计日志：记录 AI 建议 → 用户执行 → 供后续归因
+async function logDecision(action, user, portfolioStats, decisionContext = {}) {
+  if (!db || !user || action.toolType !== 'ledger') return;
+  try {
+    const ts = new Date().toISOString();
+    const logRef = doc(db, 'artifacts', appId, 'users', user.uid, 'decision_log', ts);
+    await setDoc(logRef, {
+      timestamp: ts,
+      fundCode: action.fundCode || '',
+      fundName: action.fundName || '',
+      actionType: action.actionType || 'buy',
+      amount: action.amount || 0,
+      date: action.date || ts.split('T')[0],
+      totalValue: portfolioStats?.totalCurrentValue || null,
+      overallXirr: portfolioStats?.overallXirr || null,
+      // 决策上下文 — 用于事后绩效归因
+      marketScore: decisionContext.marketScore || null,
+      marketVerdict: decisionContext.marketVerdict || null,
+      fundScore: decisionContext.fundScore || null,
+      decisionReason: (action.reason || action.condition || '').substring(0, 200),
+      // P&L 归因字段（30天后回溯填充）
+      pnl30d: null,
+      pnl30dChecked: false,
+      navAtDecision: decisionContext.navAtDecision || null,
+      createdAt: ts
+    }, { merge: true });
+  } catch (e) { /* 日志失败不影响主流程 */ }
+}
+
 // ---- 工具函数：更新消息列表中指定 action 的状态 ----
 function markActionStatus(messages, cardId, status) {
   return messages.map(m => {
@@ -230,13 +259,47 @@ export async function handleScoreRecord({ action, user }) {
   }, { merge: true });
 }
 
+// ---- 交易安全校验 ----
+function validateTradeSafety(action, ctx) {
+  const warnings = [];
+  const { portfolioStats, settings } = ctx;
+
+  // 1. 资金可用性：仅对买入做校验
+  if (action.actionType === 'buy' && action.amount > 0) {
+    const idleFunds = Number(portfolioStats?.idleFunds || settings?.idleFunds || 0);
+    if (action.amount > idleFunds && idleFunds > 0) {
+      warnings.push(`⚠️ 建议买入金额 ${action.amount.toLocaleString()}元 超出空闲资金 ${idleFunds.toLocaleString()}元`);
+    }
+  }
+
+  // 2. 单日交易上限
+  const dailyLimit = Number(settings?.dailyTradeLimit || 0);
+  if (dailyLimit > 0 && action.amount > dailyLimit) {
+    warnings.push(`⚠️ 单笔金额超出单日交易上限 ${dailyLimit.toLocaleString()}元`);
+  }
+
+  return warnings;
+}
+
 // ---- 分发器：根据 action.toolType 路由 ----
 export async function dispatchAction(action, formData, ctx) {
   const { setMessages, user } = ctx;
 
   if (action.toolType === 'data_confirmation') {
     await handleDataConfirmation({ action, formData, ...ctx });
-    return; // 已自行管理 loading 和 messages
+    return;
+  }
+
+  // 交易安全校验（ledger 类操作）
+  if (action.toolType === 'ledger' || !action.toolType) {
+    const warnings = validateTradeSafety(action, ctx);
+    if (warnings.length > 0) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `🚨 **交易安全提醒**\n${warnings.join('\n')}\n\n操作已执行，但请确认以上风险后再继续。`,
+        timestamp: new Date().toISOString()
+      }]);
+    }
   }
 
   // memo / fof_dict / todo / ledger / score_record：写入后统一标记完成
@@ -250,6 +313,11 @@ export async function dispatchAction(action, formData, ctx) {
     await handleTodoCRUD({ action, onAddTodo: ctx.onAddTodo, onUpdateTodo: ctx.onUpdateTodo, onDeleteTodo: ctx.onDeleteTodo });
   } else {
     await handleLedgerTransaction({ action, formData, user, settings: ctx.settings });
+  }
+
+  // 决策审计日志（仅 ledger 类操作）
+  if (action.actionType === 'buy' || action.actionType === 'sell') {
+    logDecision(action, user, ctx.portfolioStats);
   }
 
   // 统一标记 action 为 completed 并同步云端

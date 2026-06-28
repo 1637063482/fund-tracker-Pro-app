@@ -36,7 +36,7 @@ export const ProxySettingsModal = ({ settings, onSave, onClose, triggerRect }) =
   // 自定义 AI 提供商
   const [customProviders, setCustomProviders] = useState(settings.customAiProviders || []);
   const [showAddProvider, setShowAddProvider] = useState(false);
-  const [newProvider, setNewProvider] = useState({ name: '', model: '', key: '', apiBase: '' });
+  const [newProvider, setNewProvider] = useState({ name: '', model: '', key: '', apiBase: '', protocol: 'openai' });
 
   const handleClose = () => {
     animClose();
@@ -134,6 +134,10 @@ export const ProxySettingsModal = ({ settings, onSave, onClose, triggerRect }) =
                  {customProviders.find(p => p.id === aiProvider) && (
                    <>
                    <input type="password" value={customProviders.find(p => p.id === aiProvider)?.key || ''} onChange={e => setCustomProviders(prev => prev.map(p => p.id === aiProvider ? {...p, key: e.target.value} : p))} placeholder="输入 API Key" className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] text-sm focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none font-mono text-slate-800 dark:text-slate-200 shadow-inner" />
+                   <select value={customProviders.find(p => p.id === aiProvider)?.protocol || 'openai'} onChange={e => setCustomProviders(prev => prev.map(p => p.id === aiProvider ? {...p, protocol: e.target.value} : p))} className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] text-sm focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none font-mono text-slate-800 dark:text-slate-200 shadow-inner">
+                     <option value="openai">OpenAI 格式 (chat/completions)</option>
+                     <option value="anthropic">Anthropic 格式 (v1/messages)</option>
+                   </select>
                    <input type="text" value={customProviders.find(p => p.id === aiProvider)?.apiBase || ''} onChange={e => setCustomProviders(prev => prev.map(p => p.id === aiProvider ? {...p, apiBase: e.target.value} : p))} placeholder="API 端点 (如: https://api.openai.com/v1)" className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] text-sm focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none font-mono text-slate-800 dark:text-slate-200 shadow-inner mt-2" />
                    </>
                  )}
@@ -144,6 +148,12 @@ export const ProxySettingsModal = ({ settings, onSave, onClose, triggerRect }) =
                      <input type="text" value={newProvider.name} onChange={e => setNewProvider({...newProvider, name: e.target.value})} placeholder="提供商名称 (如: OpenAI)" className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] text-sm focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none" />
                      <input type="text" value={newProvider.model} onChange={e => setNewProvider({...newProvider, model: e.target.value})} placeholder="默认模型 (如: gpt-4o)" className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] text-sm focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none font-mono" />
                      <input type="password" value={newProvider.key} onChange={e => setNewProvider({...newProvider, key: e.target.value})} placeholder="API Key" className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] text-sm focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none font-mono" />
+                     <div className="flex gap-2">
+                       <select value={newProvider.protocol} onChange={e => setNewProvider({...newProvider, protocol: e.target.value})} className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] text-sm focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none font-mono text-slate-800 dark:text-slate-200">
+                         <option value="openai">OpenAI 格式 (chat/completions)</option>
+                         <option value="anthropic">Anthropic 格式 (v1/messages)</option>
+                       </select>
+                     </div>
                      <input type="text" value={newProvider.apiBase} onChange={e => setNewProvider({...newProvider, apiBase: e.target.value})} placeholder="API 端点 (如: https://api.openai.com/v1)" className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-[0.75rem] text-sm focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 outline-none font-mono" />
                      <div className="flex gap-2">
                        <button type="button" onClick={() => { if (newProvider.name.trim()) { const id = 'custom_' + Date.now(); setCustomProviders(prev => [...prev, {...newProvider, id}]); setAiProvider(id); setShowAddProvider(false); } }} disabled={!newProvider.name.trim()} className="px-3 py-1.5 text-xs font-bold bg-blue-500 hover:bg-blue-600 disabled:opacity-40 text-white rounded-[0.625rem] transition-colors">确认添加</button>
