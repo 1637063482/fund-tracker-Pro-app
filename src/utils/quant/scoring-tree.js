@@ -470,6 +470,17 @@ export function calcVRAndIntercept(ctx) {
     };
   }
 
+  // 放量分歧：指数涨但跌>涨（K型分化，权重拉指数但广度失血）
+  if (VR > 1.0 && downDominant && shChange > 0) {
+    return {
+      score: 12,
+      category: '放量分歧(指数涨但跌>涨,K型分化)',
+      reason: `VR=${VR.toFixed(1)} 上证+${(shChange*100).toFixed(1)}%但跌${downCount}>涨${upCount}，权重股拉抬指数`,
+      scoreRange: [10, 14],
+      VR, vrSource
+    };
+  }
+
   // 放量下行
   if (VR > 1.0 && downDominant) {
     return {
