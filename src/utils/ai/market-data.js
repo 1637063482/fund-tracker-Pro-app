@@ -474,7 +474,8 @@ export const fetchAdvancedMarketData = async (settings, depth = 'full', microstr
                 const today = new Date().toISOString().split('T')[0];
                 snapshot.forEach(doc => {
                   const d = doc.data();
-                  if (d.turnoverYi && d.date !== today) recentTurnovers.push(d.turnoverYi);
+                  const tv = d.turnoverYi || d.equity?.turnoverYi;
+                  if (tv && d.date !== today) recentTurnovers.push(tv);
                 });
                 recentTurnovers = recentTurnovers.slice(0, 20);
               }

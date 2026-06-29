@@ -287,23 +287,27 @@ export function parseBondYieldData(apiResponse) {
  * 失败返回 null（不影响主流程）
  */
 export const fetchBondYields = async (settings) => {
-  // 策略1: CF Worker / 自定义代理（服务端拉取，无 CORS 限制）
-  const workerUrl = (settings?.customProxyUrl || settings?.cfWorkerUrl || '').trim();
-  if (workerUrl) {
+  // 尝试多个 Worker URL 来源
+  const urls = [
+    settings?.customProxyUrl,
+    settings?.cfWorkerUrl,
+    // 兜底：已知部署的 Worker
+    'https://my-cors-proxy.wh1637063482.workers.dev'
+  ].filter(Boolean);
+
+  for (const workerUrl of urls) {
     try {
       const base = workerUrl.split('?')[0].replace(/\/+$/, '');
       const headers = {};
-      if (settings.workerSecret) headers['Authorization'] = `Bearer ${settings.workerSecret}`;
-      const res = await fetch(`${base}/api/bond-yields`, { headers, signal: AbortSignal.timeout(10000) });
+      if (settings?.workerSecret) headers['Authorization'] = `Bearer ${settings.workerSecret}`;
+      const res = await fetch(`${base}/api/bond-yields`, { headers, signal: AbortSignal.timeout(8000) });
       if (res.ok) {
         const json = await res.json();
         if (json.y10 != null) return json;
       }
-    } catch (e) { /* 降级 */ }
+    } catch (e) { /* 降级到下一个URL */ }
   }
 
-  // 策略2: 无搜索兜底（避免消耗对话轮次）
-  // 需先部署 Worker (npx wrangler deploy) 使策略1生效
   return null;
 }
 
@@ -433,12 +437,17 @@ async function searchMacroData(settings) {
  */
 export const fetchMacroData = async (settings) => {
   // 策略1: CF Worker（服务端，无客户端搜索消耗）
-  const workerUrl = (settings?.customProxyUrl || settings?.cfWorkerUrl || '').trim();
-  if (workerUrl) {
+  const urls = [
+    settings?.customProxyUrl,
+    settings?.cfWorkerUrl,
+    'https://my-cors-proxy.wh1637063482.workers.dev'
+  ].filter(Boolean);
+
+  for (const workerUrl of urls) {
     try {
       const base = workerUrl.split('?')[0].replace(/\/+$/, '');
       const headers = {};
-      if (settings.workerSecret) headers['Authorization'] = `Bearer ${settings.workerSecret}`;
+      if (settings?.workerSecret) headers['Authorization'] = `Bearer ${settings.workerSecret}`;
       const res = await fetch(`${base}/api/macro-data`, { headers, signal: AbortSignal.timeout(10000) });
       if (res.ok) {
         const json = await res.json();
@@ -466,15 +475,20 @@ export const fetchMacroData = async (settings) => {
  * 通过 Worker 获取，失败返回 null
  */
 export const fetchMarketConcentration = async (settings) => {
-  const workerUrl = (settings?.customProxyUrl || settings?.cfWorkerUrl || '').trim();
-  if (workerUrl) {
+  const urls = [
+    settings?.customProxyUrl,
+    settings?.cfWorkerUrl,
+    'https://my-cors-proxy.wh1637063482.workers.dev'
+  ].filter(Boolean);
+
+  for (const workerUrl of urls) {
     try {
       const base = workerUrl.split('?')[0].replace(/\/+$/, '');
       const headers = {};
-      if (settings.workerSecret) headers['Authorization'] = `Bearer ${settings.workerSecret}`;
+      if (settings?.workerSecret) headers['Authorization'] = `Bearer ${settings.workerSecret}`;
       const res = await fetch(`${base}/api/market-concentration`, { headers, signal: AbortSignal.timeout(10000) });
       if (res.ok) return await res.json();
-    } catch (e) { /* 降级 */ }
+    } catch (e) { /* 降级到下一个URL */ }
   }
   return null;
 };

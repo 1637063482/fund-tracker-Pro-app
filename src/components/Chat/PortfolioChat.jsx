@@ -51,7 +51,7 @@ const persistConversation = (convId, msgs, user, conversations) => {
   if (!user) return Promise.resolve();
   const ref = doc(db, 'artifacts', appId, 'users', user.uid, 'chat_convs', convId);
   const existing = conversations[convId]?.createdAt;
-  const payload = { messages: msgs };
+  const payload = { messages: msgs, updatedAt: new Date().toISOString() };
   if (!existing) {
     const lastUserMsg = [...msgs].reverse().find(m => m.role === 'user');
     payload.title = lastUserMsg ? lastUserMsg.content.substring(0, 30) + (lastUserMsg.content.length > 30 ? '...' : '') : '新对话';
@@ -88,6 +88,21 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
     setChatTriggerRect(e.currentTarget.getBoundingClientRect());
     setShowButton(false);
     setIsChatClosing(false);
+    // 打开面板时如果仍在 default 或当前对话已不存在，立即切换到最近对话（不依赖 onSnapshot 异步时序）
+    const curId = activeConvIdRef.current;
+    if (curId === 'default' || !conversationsRef.current[curId]) {
+      const entries = Object.entries(conversationsRef.current)
+        .filter(([id]) => id !== 'default')
+        .sort(([,a], [,b]) => {
+          const ta = new Date(a.updatedAt || a.createdAt || 0).getTime();
+          const tb = new Date(b.updatedAt || b.createdAt || 0).getTime();
+          return tb - ta;
+        });
+      if (entries.length > 0) {
+        activeConvIdRef.current = entries[0][0];
+        setActiveConvId(entries[0][0]);
+      }
+    }
     open();
   }, [open]);
 
@@ -335,6 +350,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
   const prevMsgLengthRef = useRef(messages.length);
   const prevScrollMsgLenRef = useRef(messages.length);
   const prevIsOpenRef = useRef(isOpen);
+  const prevConvIdRef = useRef(activeConvId); // 🌟 追踪对话切换，触发滚底
   const scrollTimerRef = useRef(null);
 
   const scrollToBottom = useCallback((behavior = 'smooth') => {
@@ -373,6 +389,16 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
     };
   }, [isLoading, isOpen, messages.length, scrollToBottom]);
 
+  // 🌟 场景 4：切换对话时滚动到底部（等消息加载后渲染完成）
+  useEffect(() => {
+    if (isOpen && activeConvId !== prevConvIdRef.current) {
+      prevConvIdRef.current = activeConvId;
+      const timer = setTimeout(() => scrollToBottom('smooth'), 400);
+      return () => clearTimeout(timer);
+    }
+    prevConvIdRef.current = activeConvId;
+  }, [activeConvId, isOpen, scrollToBottom]);
+
   // 从 chat_convs 集合直接加载对话列表（每个文档自带 title+createdAt）
   useEffect(() => {
     if (!user || !db) return;
@@ -386,33 +412,16 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
           list[docSnap.id] = {
             title: d.title || (lastUserMsg ? lastUserMsg.content.substring(0, 30) : '新对话'),
             createdAt: d.createdAt || '',
+            updatedAt: d.updatedAt || '', // 🌟 读取 updatedAt 用于排序
             lastMessage: d.title || ''
           };
         }
       });
       // 确保 default 始终存在
       if (!list.default) {
-        list.default = { title: '默认对话', createdAt: '', lastMessage: '' };
+        list.default = { title: '默认对话', createdAt: '', updatedAt: '', lastMessage: '' };
       }
       setConversations(list);
-      
-      // 🌟 新增：如果当前仍是 default，且存在其他非 default 对话，自动切换到最近的对话
-      setActiveConvId(prevActiveId => {
-        if (prevActiveId === 'default') {
-          const otherConvIds = Object.keys(list).filter(id => id !== 'default');
-          if (otherConvIds.length > 0) {
-            // 按 createdAt 降序排列，选择最新的对话
-            const newestConvId = otherConvIds.reduce((newest, id) => {
-              const newestTime = new Date(list[newest]?.createdAt || 0).getTime();
-              const currentTime = new Date(list[id]?.createdAt || 0).getTime();
-              return currentTime > newestTime ? id : newest;
-            });
-            debugLog(`🌟 自动切换到最近对话: [${newestConvId}] "${list[newestConvId]?.title}"`);
-            return newestConvId;
-          }
-        }
-        return prevActiveId;
-      });
     }, (err) => {
       console.error('❌ 加载对话列表失败，请检查 Firestore 规则是否包含 chat_convs:', err);
       // 即使云端加载失败，也确保 default 对话在本地可用
@@ -572,7 +581,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
     setConvLoading(requestConvId, true);
 
     // 保存用户消息
-    persistConversation(requestConvId, newMessages, user, conversations).catch(err => console.error('❌ 保存用户消息失败:', err));
+    persistConversation(requestConvId, newMessages, user, conversationsRef.current).catch(err => console.error('❌ 保存用户消息失败:', err));
 
     // 🌟 核心拦截层：如果有附件，先走 OCR/解析，不调用 AI
     if (attachment) {
@@ -608,7 +617,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
             setMessages(finalMessages);
             removeAttachment(); // 发送后清空附件
 
-            persistConversation(requestConvId, finalMessages, user, conversations).catch(err => console.warn('保存OCR回复失败:', err));
+            persistConversation(requestConvId, finalMessages, user, conversationsRef.current).catch(err => console.warn('保存OCR回复失败:', err));
         } catch (e) {
             console.error(`❌ 文件解析失败 [${requestConvId}]:`, e);
             if (activeConvIdRef.current === requestConvId) {
@@ -651,7 +660,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
           } else {
             replyMessages = [...newMessages, { role: 'assistant', content: typeof reply === 'string' ? reply : String(reply || ''), timestamp: new Date().toISOString() }];
           }
-          persistConversation(requestConvId, replyMessages, user, conversations).catch(err => console.error('❌ 归档AI回复失败:', err));
+          persistConversation(requestConvId, replyMessages, user, conversationsRef.current).catch(err => console.error('❌ 归档AI回复失败:', err));
         } catch (archiveErr) {
           console.error('❌ 归档AI回复时异常:', archiveErr);
         }
@@ -687,14 +696,14 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
       setMessages(finalMessages);
 
       // 保存 AI 回复到 Firestore
-      persistConversation(requestConvId, finalMessages, user, conversations).catch(err => console.error('❌ 保存AI回复失败:', err));
+      persistConversation(requestConvId, finalMessages, user, conversationsRef.current).catch(err => console.error('❌ 保存AI回复失败:', err));
     } catch (e) {
       console.error(`❌ AI 对话异常 [${requestConvId}]:`, e);
       // 🌟 始终在当前对话显示错误（仅当用户未切走时）
       if (activeConvIdRef.current === requestConvId) {
         const errorMessages = [...newMessages, { role: 'assistant', content: `❌ 抱歉，连接大脑失败：${e.message}`, timestamp: new Date().toISOString() }];
         setMessages(errorMessages);
-        persistConversation(requestConvId, errorMessages, user, conversations).catch(err => console.warn('保存错误消息失败:', err));
+        persistConversation(requestConvId, errorMessages, user, conversationsRef.current).catch(err => console.warn('保存错误消息失败:', err));
       }
     } finally {
       // 🌟 无论成功、失败、归档，始终清除该对话的 loading 状态
@@ -1241,8 +1250,10 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
                     Object.entries(conversations)
                       // 🌟 核心修复：用真实时间戳大小做比对进行降序，避免空字符串在 localeCompare 中出现不可预测的错乱排序！
                       .sort(([,a], [,b]) => {
-                          const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-                          const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                          const timeA = a.updatedAt || a.createdAt;
+                          const timeB = b.updatedAt || b.createdAt;
+                          const tA = timeA ? new Date(timeA).getTime() : 0;
+                          const tB = timeB ? new Date(timeB).getTime() : 0;
                           return tB - tA;
                       })
                       .map(([convId, meta]) => (
@@ -1270,7 +1281,7 @@ export const PortfolioChat = ({ portfolioStats, settings, marketData, user, onAd
                             ) : (
                               <span className={`font-medium text-sm truncate block ${convId === activeConvId ? 'text-blue-600 dark:text-blue-400' : 'text-slate-700 dark:text-slate-300'}`}>{meta.title || '新对话'}</span>
                             )}
-                            <div className="text-[11px] text-slate-400 mt-1">{meta.createdAt ? new Date(meta.createdAt).toLocaleString('zh-CN') : ''}</div>
+                            <div className="text-[11px] text-slate-400 mt-1">{(meta.updatedAt || meta.createdAt) ? new Date(meta.updatedAt || meta.createdAt).toLocaleString('zh-CN') : ''}</div>
                           </div>
                           {/* 编辑标题按钮 */}
                           <Tooltip content="编辑标题">
