@@ -1448,7 +1448,7 @@ export default {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Mozilla/5.0' },
         body: `locale=zh_CN&ycType=0&startDate=${ds}&endDate=${ds}`,
-        signal: AbortSignal.timeout(10000)
+        signal: AbortSignal.timeout(3000)
       });
       if (cbRes.ok) {
         const data = JSON.parse(await cbRes.text());
@@ -1484,7 +1484,7 @@ export default {
       const fetchPage = async (url) => {
         const res = await fetch(url, {
           headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-          signal: AbortSignal.timeout(10000)
+          signal: AbortSignal.timeout(5000)
         });
         return res.ok ? await res.text() : '';
       };

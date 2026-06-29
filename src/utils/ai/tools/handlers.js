@@ -1490,9 +1490,9 @@ const handleGetRecentScores = async (ctx) => {
   }
   try {
     const { db, userId, appId } = ctx.firestoreContext;
-    const sinceDate = new Date(); sinceDate.setDate(sinceDate.getDate() - days);
+    const sinceDate = new Date(); sinceDate.setDate(sinceDate.getDate() - Math.max(days, 30));
     const snapshotsRef = collection(db, 'artifacts', appId, 'users', userId, 'scoring_snapshots');
-    const q = query(snapshotsRef, where('date', '>=', sinceDate.toISOString().split('T')[0]), orderBy('date', 'desc'), limit(days));
+    const q = query(snapshotsRef, where('date', '>=', sinceDate.toISOString().split('T')[0]), orderBy('date', 'desc'), limit(10));
     const snapshot = await getDocs(q);
     if (snapshot.empty) return { output: `近 ${days} 天内无历史打分记录。动量修正=0，滞回锁定不触发。`, pendingActions: [] };
     let output = `【打分快照查询结果 — 近 ${days} 天历史】\n`;
