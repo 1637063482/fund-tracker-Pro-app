@@ -145,7 +145,8 @@ const _fetchNBWithFallback = async (secid, settings) => {
   fetchUrls.push(
     { url: `https://corsproxy.io/?${encodeURIComponent(baseUrl)}`, label: 'corsproxy' },
     { url: buildAllOriginsUrl(baseUrl), label: 'allorigins' },
-    { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(baseUrl)}`, label: 'codetabs' }
+    { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(baseUrl)}`, label: 'codetabs' },
+    { url: baseUrl, label: 'direct' }
   );
 
   for (const { url, label } of fetchUrls) {
@@ -159,8 +160,7 @@ const _fetchNBWithFallback = async (secid, settings) => {
         let data;
         if (label === 'custom') {
           try { data = await res.json(); } catch { continue; }
-        } else if (label === 'corsproxy') {
-          // corsproxy.io 直接返回 JSON，不包裹在 .contents 中
+        } else if (label === 'corsproxy' || label === 'direct') {
           try { data = await res.json(); } catch { continue; }
         } else {
           const raw = await res.text();
